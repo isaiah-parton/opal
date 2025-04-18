@@ -123,6 +123,11 @@ Layout :: struct {
 	variant:  Layout_Variant,
 }
 
+//
+// **Unified Layout Variant**
+//
+// The `nil` state means no layouting will be performed and children will be placed relative to their parent based on their `offset` and `size`.
+//
 Layout_Variant :: union {
 	Basic_Layout,
 	Flex_Layout,
@@ -321,85 +326,22 @@ end_element :: proc() {
 		ctx.current_element = nil
 	}
 
-	element.extent = clamp(element.extent, element.min_extent, element.max_extent)
-	element.span = clamp(element.span, element.min_span, element.max_span)
-
-	next_element := ctx.current_element
-
-	if next_element != nil {
-		next_element.used_extent += element.extent
-		next_element.used_span = max(next_element.used_span, element.span)
-	}
 }
 
-grow_element :: proc(element: ^Node) {
+propagate_metrics :: proc(node: ^Node) {
 
 }
 
-get_element_size :: proc(element: ^Node) -> (width, height: f32) {
-	if element.vertical {
+finalize_layout_node_sizes :: proc(layout: ^Layout, nodes: []^Node) {
 
-	}
 }
 
-grow_kids :: proc(element: ^Node) {
-	total_span := element.span - element.padding.before_span - element.padding.after_span
-	total_extent :=
-		element.extent -
-		element.padding.before_extent -
-		element.padding.after_extent -
-		element.kid_gap * f32(element.kid_count - 1)
+solve_final_node_placement :: proc(node: ^Node) {
 
-	if element.vertical {
-		total_extent, total_span = total_span, total_extent
-	}
-
-	kids_to_grow := element.growable_kid_count
-	target_extent := total_extent / kids_to_grow
-
-	for index in element.first_kid ..< element.first_kid + element.kid_count {
-		kid := &ctx.elements[index]
-		if kid.extent_will_grow {
-			kid.extent = target_extent
-		}
-		grow_kids(&kid)
-	}
-
-	// overflow := element.used_extent - total_extent
-	// if overflow > 0 && len(element.kids) > 0 {
-	// 	element.kids[0].extent -= overflow
-	// }
 }
 
-solve_root_position :: proc(element: ^Node) {
-	if element.axis == .Horizontal {
-		element.box.hi = element.box.lo + {element.extent, element.span}
-	} else {
-		element.box.hi = element.box.lo + {element.span, element.extent}
-	}
-	solve_kid_positions(element)
-}
+recursively_solve_final_node_placement :: proc(node: ^Node) {
 
-solve_kid_positions :: proc(element: ^Node) {
-	extent_offset := element.padding.before_extent
-	span_offset := element.padding.before_span
-	for index in element.first_kid ..< element.first_kid + element.kid_count {
-		kid := &ctx.elements[index]
-		kid.extent_offset = extent_offset
-		kid.span_offset = span_offset
-		kid.box = solve_kid_box(element, &kid)
-		solve_kid_positions(&kid)
-		extent_offset += kid.extent + element.kid_gap
-	}
-}
-
-solve_kid_box :: proc(parent, kid: ^Node) -> Box {
-	if parent.vertical {
-		position := parent.box.lo + {kid.span_offset, kid.extent_offset}
-		return Box{position, position + {kid.span, kid.extent}}
-	}
-	position := parent.box.lo + {kid.extent_offset, kid.span_offset}
-	return Box{position, position + {kid.extent, kid.span}}
 }
 
 @(deferred_none = __basic_element)
@@ -422,8 +364,8 @@ begin :: proc() {
 
 	clear(&ctx.id_stack)
 	clear(&ctx.stack)
-	clear(&ctx.leaves)
 	clear(&ctx.roots)
+	clear(&ctx.elements)
 
 	free_all(context.temp_allocator)
 
@@ -432,8 +374,6 @@ begin :: proc() {
 }
 
 end :: proc() {
-	for &root in ctx.roots do grow_kids(&root)
-	for &root in ctx.roots do solve_root_position(&root)
 	ctx.frame_duration = time.since(ctx.frame_start_time)
 }
 
