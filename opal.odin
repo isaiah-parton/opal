@@ -19,38 +19,22 @@ Padding_Config :: struct {
 	left, right, top, bottom: f32,
 }
 
-Padding :: struct {
-	before_extent, after_extent, before_span, after_span: f32,
-}
+//
+// **Padding**
+//
+// **Order:** `{left, top, right, bottom}`
+//
+Padding :: [4]f32
 
 Dimension_Config :: struct {
-	min:   f32,
-	max:   f32,
-	modes: Sizing_Modes,
-}
-
-FIXED :: proc(value: f32) -> Dimension_Config {
-	return Dimension_Config{min = value, max = value}
-}
-
-GROW :: proc(min: f32 = 0, max: f32 = math.F32_MAX) -> Dimension_Config {
-	return Dimension_Config{min = min, max = max, modes = {.Grow}}
-}
-
-FIT :: proc(min: f32 = 0, max: f32 = math.F32_MAX) -> Dimension_Config {
-	return Dimension_Config{min = min, max = max, modes = {.Fit}}
+	min:  f32,
+	max:  f32,
+	grow: bool,
 }
 
 PADDING_ALL :: proc(amount: f32) -> Padding_Config {
 	return Padding_Config{amount, amount, amount, amount}
 }
-
-Sizing_Mode :: enum {
-	Grow,
-	Fit,
-}
-
-Sizing_Modes :: bit_set[Sizing_Mode;u8]
 
 Dimensions :: struct {
 	width, height: f32,
@@ -65,73 +49,162 @@ Axis :: enum {
 	Vertical,
 }
 
-Element_Config :: struct {
-	size:           Size_Config,
-	child_gap:      f32,
-	span_alignment: f32,
-	axis:           Axis,
-	padding:        Padding_Config,
+Node_Config :: struct {
+	size:       Size_Config,
+	kid_gap:    f32,
+	span_align: f32,
+	vertical:   bool,
+	padding:    Padding_Config,
 }
 
-Element_Input_Flag :: enum {
+Node_Input_Flag :: enum {
 	Is_Focused,
 }
 
-Root_Element_Config :: struct {
-	using base: Element_Config,
+Root_Node_Config :: struct {
+	using base: Node_Config,
 	position:   Vector2,
 }
 
-Element :: struct {
-	using layout: Element_Layout,
-	children:     [dynamic]Element,
-	growables:    [dynamic]^Element,
-	shrinkables:  [dynamic]^Element,
-	padding:      Padding,
-	parent:       ^Element,
-	box:          Box,
-	id:           Id,
-	axis:         Axis,
-	hidden:       bool,
+//
+// **Basic Layout**
+//
+// One child node after the next with no size limit
+//
+Basic_Layout :: struct {
+	spacing:  f32,
+	vertical: bool,
 }
 
-Element_Layout :: struct {
-	// Span alignment
-	span_alignment: f32,
-	// Relative position on layout axis
-	extent_offset:  f32,
-	// Relative position on layout counter-axis
-	span_offset:    f32,
-	// Size on layout axis
-	extent:         f32,
-	min_extent:     f32,
-	max_extent:     f32,
-	used_extent:    f32,
-	// Size on layout counter-axis
-	span:           f32,
-	min_span:       f32,
-	max_span:       f32,
-	used_span:      f32,
-	// Gap between children along layout axis
-	child_gap:      f32,
-	// Sizing modes
-	extent_modes:   Sizing_Modes,
-	span_modes:     Sizing_Modes,
-	invert_axis:    bool,
+//
+// **Flex Layout**
+//
+// Has a size limit and can align and justify content.  Each child node can specify its own flex behavior.  Children are resized by the layout based on their sizing config since every node has a minimum and maximum size.
+//
+Flex_Layout :: struct {
+	spacing:  f32,
+	vertical: bool,
+	align:    f32,
+}
+
+//
+// **Wrap Layout**
+//
+// Lays out children like text, wrapping them at `max_span`, extending itself until `max_extent` is reached.
+//
+Wrap_Layout :: struct {
+	spacing:    f32,
+	max_extent: f32,
+	max_span:   f32,
+	align:      f32,
+}
+
+//
+// **Grid Layout**
+//
+// A simple grid layout that resolves its own column widths according to row content.  Children are added continuously, and will wrap every `column_count` nodes
+//
+// **Required fields**
+//
+// - `column_count`
+//
+Grid_Layout :: struct {
+	column_spacing:   f32,
+	row_spacing:      f32,
+	column_count:     i32,
+	row_count:        i32,
+	max_column_width: f32,
+}
+
+Layout :: struct {
+	min_size: [2]f32,
+	max_size: [2]f32,
+	padding:  Padding,
+	variant:  Layout_Variant,
+}
+
+Layout_Variant :: union {
+	Basic_Layout,
+	Flex_Layout,
+	Wrap_Layout,
+	Grid_Layout,
+}
+
+Node :: struct {
+	// If the parent is `nil` then the node will be in the `roots` array of the context
+	parent:        ^Node,
+
+	// Any nodes contained within and dependant on this node
+	kids:          [dynamic]^Node,
+
+	// The state required for placing child nodes
+	layout:        Layout,
+
+	// The node's own size settings for layout within its parent
+	sizing:        [2]Size_Config,
+
+	// A unique hashed identifier
+	id:            Id,
+
+	// The final bounding box of the node after the layout phase is complete
+	box:           Box,
+
+	// Input state for the current frame
+	// hovered:         bool,
+	// active:          bool,
+	// focused:         bool,
+
+	// If overflowing contents are clipped and hidden
+	hide_overflow: bool,
+
+	// If scrolling is enabled
+	// enable_scroll_x: bool,
+	// enable_scroll_y: bool,
+
+	// Z-index for visual sorting and input propagation
+	z_index:       u32,
+
+	// Data provided to user methods
+	user_data:     rawptr,
+
+	// If not `nil`, this will be called before `on_draw` every frame as long as animations are enabled
+	// on_animate:      proc(self: ^Node),
+
+	// Called instead of the default drawing procedure if not `nil`
+	on_draw:       proc(self: ^Node),
 }
 
 Context :: struct {
+	// Input state
 	mouse_position:   Vector2,
-	roots:            [dynamic]Element,
-	leaves:           [dynamic]^Element,
-	element_stack:    [dynamic]^Element,
+	hovered_node:     ^Node,
+	focused_node:     ^Node,
+
+	// Contiguous storage of all nodes in the UI
+	elements:         [dynamic]Node,
+
+	// All nodes wihout a parent are stored here
+	roots:            [dynamic]^Node,
+
+	// All currently active nodes being processed
+	stack:            [dynamic]^Node,
+
+	// The hash stack
 	id_stack:         [dynamic]Id,
-	current_element:  ^Element,
+
+	// The top-most element of the stack
+	current_element:  ^Node,
+
+	// Profiling state
 	frame_start_time: time.Time,
 	frame_duration:   time.Duration,
 }
 
 ctx: Context
+
+padding_from_parts :: proc(left, right, top, bottom: f32) -> Padding {
+	return {left, top, right, bottom}
+}
 
 FNV1A64_OFFSET_BASIS :: 0xcbf29ce484222325
 FNV1A64_PRIME :: 0x00000100000001B3
@@ -215,214 +288,127 @@ pop_id :: proc() {
 	pop(&ctx.id_stack)
 }
 
-begin_root_element :: proc(config: Root_Element_Config, loc := #caller_location) {
+begin_root_element :: proc(config: Root_Node_Config, loc := #caller_location) {
 	begin_element(config, loc)
 	ctx.current_element.box.lo = config.position
 }
 
-begin_element :: proc(config: Element_Config, loc := #caller_location) {
-	element := Element {
-		parent         = ctx.current_element,
-		id             = hash_loc(loc),
-		child_gap      = config.child_gap,
-		axis           = config.axis,
-		span_alignment = config.span_alignment,
-		children       = make([dynamic]Element, allocator = context.temp_allocator),
-		growables      = make([dynamic]^Element, allocator = context.temp_allocator),
-		shrinkables    = make([dynamic]^Element, allocator = context.temp_allocator),
+begin_element :: proc(config: Node_Config, loc := #caller_location) {
+	element := Node {
+		parent = ctx.current_element,
+		id     = hash_loc(loc),
 	}
+	reserve(&element.kids, 16)
 
-	if element.axis == .Horizontal {
-		element.padding = Padding {
-			before_extent = config.padding.left,
-			after_extent  = config.padding.right,
-			before_span   = config.padding.top,
-			after_span    = config.padding.bottom,
-		}
-	} else {
-		element.padding = Padding {
-			before_extent = config.padding.top,
-			after_extent  = config.padding.bottom,
-			before_span   = config.padding.left,
-			after_span    = config.padding.right,
-		}
-	}
-
-	layout_axis := element.axis if element.parent == nil else element.parent.axis
-
-	element.invert_axis = layout_axis == element.axis
-
-	if layout_axis == .Horizontal {
-		element.span_modes = config.size.height.modes
-		element.min_span = config.size.height.min
-		element.max_span = config.size.height.max
-
-		element.extent_modes = config.size.width.modes
-		element.min_extent = config.size.width.min
-		element.max_extent = config.size.width.max
-	} else {
-		element.span_modes = config.size.width.modes
-		element.min_span = config.size.width.min
-		element.max_span = config.size.width.max
-
-		element.extent_modes = config.size.height.modes
-		element.min_extent = config.size.height.min
-		element.max_extent = config.size.height.max
-	}
-
+	append(&ctx.elements, element)
+	ctx.current_element = &ctx.elements[len(ctx.elements) - 1]
 	if element.parent == nil {
-		append(&ctx.roots, element)
-		ctx.current_element = &ctx.roots[len(ctx.roots) - 1]
+		append(&ctx.roots, ctx.current_element)
 	} else {
-		append(&element.parent.children, element)
-		ctx.current_element = &element.parent.children[len(element.parent.children) - 1]
-
-		if (.Grow in element.extent_modes) {
-			append(&element.parent.growables, ctx.current_element)
-		}
+		append(&element.parent.kids, ctx.current_element)
 	}
+	append(&ctx.stack, ctx.current_element)
 
-	append(&ctx.element_stack, ctx.current_element)
 }
 
 end_element :: proc() {
 	element := ctx.current_element
 
-	if len(element.children) == 0 {
-		append(&ctx.leaves, element)
-	}
-
-	pop(&ctx.element_stack)
-	if len(ctx.element_stack) > 0 {
-		ctx.current_element = ctx.element_stack[len(ctx.element_stack) - 1]
+	pop(&ctx.stack)
+	if len(ctx.stack) > 0 {
+		ctx.current_element = ctx.stack[len(ctx.stack) - 1]
 	} else {
 		ctx.current_element = nil
-	}
-
-	if element.extent_modes & {.Fit} != {} {
-		if element.invert_axis {
-			element.extent = max(
-				element.extent,
-				element.used_extent +
-				element.padding.before_extent +
-				element.padding.after_extent +
-				element.child_gap * f32(len(element.children) - 1),
-			)
-		} else {
-			element.extent = max(
-				element.extent,
-				element.used_span + element.padding.before_span + element.padding.after_span,
-			)
-		}
-	}
-	if element.span_modes & {.Fit} != {} {
-		if element.invert_axis {
-			element.span = max(
-				element.span,
-				element.used_span + element.padding.before_span + element.padding.after_span,
-			)
-		} else {
-			element.span = max(
-				element.span,
-				element.used_extent +
-				element.padding.before_extent +
-				element.padding.after_extent +
-				element.child_gap * f32(len(element.children) - 1),
-			)
-		}
 	}
 
 	element.extent = clamp(element.extent, element.min_extent, element.max_extent)
 	element.span = clamp(element.span, element.min_span, element.max_span)
 
-	effective_span := element.span
-	if .Grow in element.span_modes {
-		effective_span = max(
-			element.used_span if element.invert_axis else element.used_extent,
-			effective_span,
-		)
-	}
-
 	next_element := ctx.current_element
 
 	if next_element != nil {
 		next_element.used_extent += element.extent
-		next_element.used_span = max(next_element.used_span, effective_span)
+		next_element.used_span = max(next_element.used_span, element.span)
 	}
 }
 
-grow_element_children :: proc(element: ^Element) {
-	total_extent := element.span - element.padding.before_span - element.padding.after_span
-	total_span :=
+grow_element :: proc(element: ^Node) {
+
+}
+
+get_element_size :: proc(element: ^Node) -> (width, height: f32) {
+	if element.vertical {
+
+	}
+}
+
+grow_kids :: proc(element: ^Node) {
+	total_span := element.span - element.padding.before_span - element.padding.after_span
+	total_extent :=
 		element.extent -
 		element.padding.before_extent -
 		element.padding.after_extent -
-		element.child_gap * f32(len(element.children) - 1)
+		element.kid_gap * f32(element.kid_count - 1)
 
-	if element.invert_axis {
+	if element.vertical {
 		total_extent, total_span = total_span, total_extent
 	}
 
-	remaining_extent := total_extent - element.used_extent
+	kids_to_grow := element.growable_kid_count
+	target_extent := total_extent / kids_to_grow
 
-	grow_extent_to := remaining_extent / f32(len(element.growables))
-	grow_span_to := total_span
-
-	for &child in element.children {
-		if .Grow in child.extent_modes {
-			child.extent += (grow_extent_to - child.extent)
-			child.extent = max(child.extent, 0)
+	for index in element.first_kid ..< element.first_kid + element.kid_count {
+		kid := &ctx.elements[index]
+		if kid.extent_will_grow {
+			kid.extent = target_extent
 		}
-		if .Grow in child.span_modes {
-			child.span = min(child.max_span, grow_span_to)
-		}
+		grow_kids(&kid)
 	}
 
-	overflow := element.used_extent - total_extent
-	if overflow > 0 && len(element.children) > 0 {
-		element.children[0].extent -= overflow
-	}
-
-	for &child in element.children do grow_element_children(&child)
+	// overflow := element.used_extent - total_extent
+	// if overflow > 0 && len(element.kids) > 0 {
+	// 	element.kids[0].extent -= overflow
+	// }
 }
 
-solve_root_position :: proc(element: ^Element) {
+solve_root_position :: proc(element: ^Node) {
 	if element.axis == .Horizontal {
 		element.box.hi = element.box.lo + {element.extent, element.span}
 	} else {
 		element.box.hi = element.box.lo + {element.span, element.extent}
 	}
-	solve_child_positions(element)
+	solve_kid_positions(element)
 }
 
-solve_child_positions :: proc(element: ^Element) {
+solve_kid_positions :: proc(element: ^Node) {
 	extent_offset := element.padding.before_extent
 	span_offset := element.padding.before_span
-	for &child in element.children {
-		child.extent_offset = extent_offset
-		child.span_offset = span_offset
-		child.box = solve_child_box(element, &child)
-		solve_child_positions(&child)
-		extent_offset += child.extent + element.child_gap
+	for index in element.first_kid ..< element.first_kid + element.kid_count {
+		kid := &ctx.elements[index]
+		kid.extent_offset = extent_offset
+		kid.span_offset = span_offset
+		kid.box = solve_kid_box(element, &kid)
+		solve_kid_positions(&kid)
+		extent_offset += kid.extent + element.kid_gap
 	}
 }
 
-solve_child_box :: proc(parent, child: ^Element) -> Box {
-	if parent.axis == .Horizontal {
-		position := parent.box.lo + {child.extent_offset, child.span_offset}
-		return Box{position, position + {child.extent, child.span}}
+solve_kid_box :: proc(parent, kid: ^Node) -> Box {
+	if parent.vertical {
+		position := parent.box.lo + {kid.span_offset, kid.extent_offset}
+		return Box{position, position + {kid.span, kid.extent}}
 	}
-	position := parent.box.lo + {child.span_offset, child.extent_offset}
-	return Box{position, position + {child.span, child.extent}}
+	position := parent.box.lo + {kid.extent_offset, kid.span_offset}
+	return Box{position, position + {kid.extent, kid.span}}
 }
 
 @(deferred_none = __basic_element)
-root_element :: proc(config: Root_Element_Config, loc := #caller_location) {
+root_element :: proc(config: Root_Node_Config, loc := #caller_location) {
 	begin_root_element(config, loc)
 }
 
 @(deferred_none = __basic_element)
-basic_element :: proc(config: Element_Config, loc := #caller_location) {
+basic_element :: proc(config: Node_Config, loc := #caller_location) {
 	begin_element(config, loc)
 }
 
@@ -435,7 +421,7 @@ begin :: proc() {
 	ctx.frame_start_time = time.now()
 
 	clear(&ctx.id_stack)
-	clear(&ctx.element_stack)
+	clear(&ctx.stack)
 	clear(&ctx.leaves)
 	clear(&ctx.roots)
 
@@ -446,12 +432,12 @@ begin :: proc() {
 }
 
 end :: proc() {
-	for &root in ctx.roots do grow_element_children(&root)
+	for &root in ctx.roots do grow_kids(&root)
 	for &root in ctx.roots do solve_root_position(&root)
 	ctx.frame_duration = time.since(ctx.frame_start_time)
 }
 
-print_element :: proc(element: ^Element, depth: int = 0) {
+print_element :: proc(element: ^Node, depth: int = 0) {
 	for i in 0 ..< depth {
 		fmt.print("| ")
 	}
@@ -462,8 +448,8 @@ print_element :: proc(element: ^Element, depth: int = 0) {
 		element.box.hi,
 		element.box.hi - element.box.lo,
 	)
-	for &child in element.children {
-		print_element(&child, depth + 1)
+	for &kid in element.kids {
+		print_element(&kid, depth + 1)
 	}
 }
 
@@ -471,18 +457,19 @@ COLORS := [?]kn.Color{kn.Purple, kn.HotPink, kn.SkyBlue}
 
 build_ui :: proc() {
 	menu_item_element :: proc(text: string, icon: rune) {
-		{basic_element(
-				{
-					size = {GROW(), FIT(20)},
-					padding = PADDING_ALL(4),
-					child_gap = 4,
-					axis = .Horizontal,
-				},
-			)
-			{basic_element({size = {GROW(), GROW()}, axis = .Horizontal})
-				{basic_element({size = {FIXED(10), GROW()}})}
+		{basic_element({size = {{grow = true}, {max = 40}}, padding = PADDING_ALL(4), kid_gap = 4})
+			{basic_element(
+					{
+						size = {{grow = true}, {grow = true}},
+						axis = .Horizontal,
+						padding = PADDING_ALL(4),
+					},
+				)
+				{basic_element(
+						{size = {{max = rand.float32_range(30, 100), grow = true}, {grow = true}}},
+					)}
 			}
-			{basic_element({size = {FIXED(30), FIXED(30)}})}
+			{basic_element({size = {{min, max = 30}, {min, max = 30}}})}
 		}
 	}
 
@@ -492,8 +479,8 @@ build_ui :: proc() {
 				position = 200,
 				size = {FIT(100, 300), FIT()},
 				padding = PADDING_ALL(4),
-				child_gap = 4,
-				axis = .Vertical,
+				kid_gap = 4,
+				vertical = true,
 			},
 		)
 		menu_item_element("New", '?')
@@ -527,11 +514,11 @@ main :: proc() {
 	defer kn.shutdown()
 
 
-	draw_element :: proc(element: ^Element, depth: int = 0) {
+	draw_element :: proc(element: ^Node, depth: int = 0) {
 		kn.set_paint(COLORS[depth % len(COLORS)])
 		kn.add_box(element.box, 3)
-		for &child in element.children {
-			draw_element(&child, depth + 1)
+		for &kid in element.kids {
+			draw_element(&kid, depth + 1)
 		}
 	}
 
