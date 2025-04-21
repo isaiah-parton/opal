@@ -3,8 +3,10 @@ package opal
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 import "core:math/rand"
 import "core:reflect"
+import "core:slice"
 import "core:time"
 import kn "local:katana"
 import "vendor:sdl2"
@@ -77,17 +79,6 @@ Basic_Layout :: struct {
 }
 
 //
-// **Flex Layout**
-//
-// Has a size limit and can align and justify content.  Each child node can specify its own flex behavior.  Children are resized by the layout based on their sizing config since every node has a minimum and maximum size.
-//
-Flex_Layout :: struct {
-	spacing:  f32,
-	vertical: bool,
-	align:    f32,
-}
-
-//
 // **Wrap Layout**
 //
 // Lays out children like text, wrapping them at `max_span`, extending itself until `max_extent` is reached.
@@ -130,53 +121,25 @@ Layout :: struct {
 //
 Layout_Variant :: union {
 	Basic_Layout,
-	Flex_Layout,
 	Wrap_Layout,
 	Grid_Layout,
 }
 
 Node :: struct {
-	// If the parent is `nil` then the node will be in the `roots` array of the context
-	parent:        ^Node,
-
-	// Any nodes contained within and dependant on this node
-	kids:          [dynamic]^Node,
-
-	// The state required for placing child nodes
-	layout:        Layout,
-
-	// The node's own size settings for layout within its parent
-	sizing:        [2]Size_Config,
-
-	// A unique hashed identifier
-	id:            Id,
-
-	// The final bounding box of the node after the layout phase is complete
-	box:           Box,
-
-	// Input state for the current frame
-	// hovered:         bool,
-	// active:          bool,
-	// focused:         bool,
-
-	// If overflowing contents are clipped and hidden
-	hide_overflow: bool,
-
-	// If scrolling is enabled
-	// enable_scroll_x: bool,
-	// enable_scroll_y: bool,
-
-	// Z-index for visual sorting and input propagation
-	z_index:       u32,
-
-	// Data provided to user methods
-	user_data:     rawptr,
-
-	// If not `nil`, this will be called before `on_draw` every frame as long as animations are enabled
-	// on_animate:      proc(self: ^Node),
-
-	// Called instead of the default drawing procedure if not `nil`
-	on_draw:       proc(self: ^Node),
+	box:                Box,
+	parent:             ^Node,
+	kids:               [dynamic]^Node,
+	position:           [2]f32,
+	max_size:           [2]f32,
+	size:               [2]f32,
+	content_align:      [2]f32,
+	content_min_size:   [2]f32,
+	used_space:         [2]f32,
+	padding:            [4]f32,
+	growable_kid_count: int,
+	spacing:            f32,
+	grow:               [2]bool,
+	vertical:           bool,
 }
 
 Context :: struct {
@@ -186,7 +149,7 @@ Context :: struct {
 	focused_node:     ^Node,
 
 	// Contiguous storage of all nodes in the UI
-	elements:         [dynamic]Node,
+	nodes:            [dynamic]Node,
 
 	// All nodes wihout a parent are stored here
 	roots:            [dynamic]^Node,
@@ -198,14 +161,21 @@ Context :: struct {
 	id_stack:         [dynamic]Id,
 
 	// The top-most element of the stack
-	current_element:  ^Node,
+	current_node:     ^Node,
 
 	// Profiling state
 	frame_start_time: time.Time,
 	frame_duration:   time.Duration,
 }
 
-ctx: Context
+destroy :: proc() {
+	delete(ctx.nodes)
+	delete(ctx.roots)
+	delete(ctx.stack)
+	delete(ctx.id_stack)
+}
+
+ctx: ^Context
 
 padding_from_parts :: proc(left, right, top, bottom: f32) -> Padding {
 	return {left, top, right, bottom}
@@ -293,158 +263,189 @@ pop_id :: proc() {
 	pop(&ctx.id_stack)
 }
 
-begin_root_element :: proc(config: Root_Node_Config, loc := #caller_location) {
-	begin_element(config, loc)
-	ctx.current_element.box.lo = config.position
-}
-
-begin_element :: proc(config: Node_Config, loc := #caller_location) {
-	element := Node {
-		parent = ctx.current_element,
-		id     = hash_loc(loc),
-	}
-	reserve(&element.kids, 16)
-
-	append(&ctx.elements, element)
-	ctx.current_element = &ctx.elements[len(ctx.elements) - 1]
-	if element.parent == nil {
-		append(&ctx.roots, ctx.current_element)
-	} else {
-		append(&element.parent.kids, ctx.current_element)
-	}
-	append(&ctx.stack, ctx.current_element)
-
-}
-
-end_element :: proc() {
-	element := ctx.current_element
-
-	pop(&ctx.stack)
-	if len(ctx.stack) > 0 {
-		ctx.current_element = ctx.stack[len(ctx.stack) - 1]
-	} else {
-		ctx.current_element = nil
-	}
-
-}
-
-propagate_metrics :: proc(node: ^Node) {
-
-}
-
-finalize_layout_node_sizes :: proc(layout: ^Layout, nodes: []^Node) {
-
-}
-
-solve_final_node_placement :: proc(node: ^Node) {
-
-}
-
-recursively_solve_final_node_placement :: proc(node: ^Node) {
-
-}
-
-@(deferred_none = __basic_element)
-root_element :: proc(config: Root_Node_Config, loc := #caller_location) {
-	begin_root_element(config, loc)
-}
-
-@(deferred_none = __basic_element)
-basic_element :: proc(config: Node_Config, loc := #caller_location) {
-	begin_element(config, loc)
-}
-
-@(private)
-__basic_element :: proc() {
-	end_element()
-}
-
 begin :: proc() {
 	ctx.frame_start_time = time.now()
+
+	reserve(&ctx.nodes, 128)
 
 	clear(&ctx.id_stack)
 	clear(&ctx.stack)
 	clear(&ctx.roots)
-	clear(&ctx.elements)
-
-	free_all(context.temp_allocator)
+	clear(&ctx.nodes)
 
 	push_id(Id(FNV1A32_OFFSET_BASIS))
-	ctx.current_element = nil
+	ctx.current_node = nil
 }
 
 end :: proc() {
 	ctx.frame_duration = time.since(ctx.frame_start_time)
+	for root in ctx.roots {
+		root.box = {root.position - root.size / 2, root.position + root.size / 2}
+		node_grow_kids_recursively(root)
+		node_solve_box_recursively(root)
+		node_draw_recursively(root)
+	}
 }
 
-print_element :: proc(element: ^Node, depth: int = 0) {
-	for i in 0 ..< depth {
-		fmt.print("| ")
+COLORS := [?]kn.Color{kn.SkyBlue, kn.LightGoldenrodYellow, kn.PaleGreen}
+
+push_node :: proc(node: ^Node) {
+	append(&ctx.stack, node)
+	ctx.current_node = ctx.stack[len(ctx.stack) - 1]
+}
+
+pop_node :: proc() {
+	pop(&ctx.stack)
+	if len(ctx.stack) <= 0 {
+		ctx.current_node = nil
+		return
 	}
-	fmt.printfln(
-		"(%i) [%.2f, %.2f] (%.2f)",
-		element.id,
-		element.box.lo,
-		element.box.hi,
-		element.box.hi - element.box.lo,
+	ctx.current_node = ctx.stack[len(ctx.stack) - 1]
+}
+
+begin_node :: proc(node: Node, loc := #caller_location) -> (self: ^Node) {
+	append(&ctx.nodes, node)
+	self = &ctx.nodes[len(ctx.nodes) - 1]
+	self.parent = ctx.current_node
+	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
+	push_node(self)
+	if self.parent == nil {
+		append(&ctx.roots, self)
+		return
+	}
+	append(&self.parent.kids, self)
+	if self.grow[int(self.parent.vertical)] {
+		self.parent.growable_kid_count += 1
+	}
+	return
+}
+
+end_node :: proc() {
+	self := ctx.current_node
+	if self == nil {
+		return
+	}
+	i := int(self.vertical)
+	self.content_min_size = self.used_space + self.padding.xy + self.padding.zw
+	self.content_min_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
+	self.size = linalg.max(self.size, self.content_min_size)
+	pop_node()
+	if ctx.current_node != nil {
+		node_on_child_end(ctx.current_node, self)
+	}
+}
+
+do_node :: proc(node: Node, loc := #caller_location) {
+	begin_node(node, loc)
+	end_node()
+}
+
+node_on_child_end :: proc(self: ^Node, child: ^Node) {
+	if self.vertical {
+		self.used_space.y += child.size.y
+		self.used_space.x = max(self.used_space.x, child.size.x)
+	} else {
+		self.used_space.x += child.size.x
+		self.used_space.y = max(self.used_space.y, child.size.y)
+	}
+}
+
+node_solve_box_recursively :: proc(self: ^Node) {
+	for node in self.kids {
+		node.box.lo = self.box.lo + node.position
+		node.box.hi = node.box.lo + node.size
+		node_solve_box_recursively(node)
+	}
+}
+
+node_grow_kids_recursively :: proc(self: ^Node) {
+	i := int(self.vertical)
+	j := 1 - i
+
+	remaining_space :=
+		self.size[i] -
+		self.used_space[i] -
+		self.padding[i] -
+		self.padding[i + 2] -
+		self.spacing * f32(len(self.kids) - 1)
+
+	growables := make(
+		[dynamic]^Node,
+		0,
+		self.growable_kid_count,
+		allocator = context.temp_allocator,
 	)
-	for &kid in element.kids {
-		print_element(&kid, depth + 1)
-	}
-}
 
-COLORS := [?]kn.Color{kn.Purple, kn.HotPink, kn.SkyBlue}
-
-build_ui :: proc() {
-	menu_item_element :: proc(text: string, icon: rune) {
-		{basic_element({size = {{grow = true}, {max = 40}}, padding = PADDING_ALL(4), kid_gap = 4})
-			{basic_element(
-					{
-						size = {{grow = true}, {grow = true}},
-						axis = .Horizontal,
-						padding = PADDING_ALL(4),
-					},
-				)
-				{basic_element(
-						{size = {{max = rand.float32_range(30, 100), grow = true}, {grow = true}}},
-					)}
-			}
-			{basic_element({size = {{min, max = 30}, {min, max = 30}}})}
+	for &node in self.kids {
+		if node.grow[i] {
+			append(&growables, node)
 		}
 	}
 
-	begin()
-	{root_element(
-			{
-				position = 200,
-				size = {FIT(100, 300), FIT()},
-				padding = PADDING_ALL(4),
-				kid_gap = 4,
-				vertical = true,
-			},
-		)
-		menu_item_element("New", '?')
-		menu_item_element("Open", '?')
-		menu_item_element("Save", '?')
-		menu_item_element("Quit", '?')
+	for remaining_space > 0 && len(growables) > 0 {
+		smallest := growables[0].size[i]
+		second_smallest := f32(math.F32_MAX)
+		size_to_add := remaining_space
+		for node in growables {
+			if node.size[i] < smallest {
+				second_smallest = smallest
+				smallest = node.size[i]
+			}
+			if node.size[i] > smallest {
+				second_smallest = min(second_smallest, node.size[i])
+			}
+		}
+
+		size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
+
+		for node, node_index in growables {
+			if node.size[i] == smallest {
+				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
+				if size_to_add <= 0 {
+					unordered_remove(&growables, node_index)
+					continue
+				}
+				node.size[i] += size_to_add
+				remaining_space -= size_to_add
+			}
+		}
 	}
-	end()
-	fmt.printfln("Built UI in %.3fms", time.duration_milliseconds(ctx.frame_duration))
+
+	offset_along_axis: f32 = self.padding[i]
+	for node in self.kids {
+		if node.grow[j] {
+			node.size[j] = max(node.size[j], self.size[j] - self.padding[j] - self.padding[j + 2])
+		}
+		node.size[j] = min(node.size[j], self.size[j] - self.padding[j] - self.padding[j + 2])
+		node.position[j] = self.padding[j]
+		node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
+		offset_along_axis += node.size[i] + self.spacing
+		node_grow_kids_recursively(node)
+	}
+}
+
+node_draw_recursively :: proc(self: ^Node, depth := 0) {
+	kn.add_box(self.box, 4, paint = COLORS[depth % len(COLORS)])
+	kn.push_scissor(kn.make_box(self.box))
+	kn.add_string(
+		fmt.tprintf("%.0fx%.0f", self.size.x, self.size.y),
+		12,
+		(self.box.lo + self.box.hi) / 2,
+		align = 0.5,
+		paint = kn.Black,
+	)
+	for node in self.kids {
+		node_draw_recursively(node, depth + 1)
+	}
+	kn.pop_scissor()
+	kn.add_box_lines(self.box, 1, 4, paint = kn.Black)
 }
 
 main :: proc() {
-	build_ui()
-
-	// for &root in ctx.roots do print_element(&root)
-
-	//------------------------------//
-	//- NOW DRAW THE STATIC LAYOUT -//
-	//------------------------------//
-
 	sdl2.Init({.VIDEO})
 	defer sdl2.Quit()
 
-	window := sdl2.CreateWindow("OPAL", 100, 100, 800, 600, {})
+	window := sdl2.CreateWindow("OPAL", 100, 100, 800, 600, {.RESIZABLE})
 	defer sdl2.DestroyWindow(window)
 
 	platform := kn.make_platform_sdl2glue(window)
@@ -453,13 +454,23 @@ main :: proc() {
 	kn.start_on_platform(platform)
 	defer kn.shutdown()
 
+	ctx = new(Context)
+	// defer destroy()
+	//
 
-	draw_element :: proc(element: ^Node, depth: int = 0) {
-		kn.set_paint(COLORS[depth % len(COLORS)])
-		kn.add_box(element.box, 3)
-		for &kid in element.kids {
-			draw_element(&kid, depth + 1)
-		}
+	menu_item :: proc(index: int = 0) {
+		begin_node(
+			{
+				size = {},
+				max_size = {math.F32_MAX, 20 + f32(index) * 20},
+				grow = {true, true},
+				padding = 4,
+				spacing = 4,
+			},
+		)
+		do_node({size = {50 + f32(index) * 20, 20}, max_size = math.F32_MAX, grow = {true, false}})
+		do_node({size = {20, 20}})
+		end_node()
 	}
 
 	loop: for {
@@ -471,18 +482,45 @@ main :: proc() {
 				break loop
 			case .KEYDOWN:
 				if event.key.keysym.scancode == .SPACE {
-					build_ui()
+					// build_ui()
+				}
+			case .MOUSEMOTION:
+				ctx.mouse_position = {f32(event.motion.x), f32(event.motion.y)}
+			case .WINDOWEVENT:
+				if event.window.event == .RESIZED {
+					kn.set_size(event.window.data1, event.window.data2)
 				}
 			}
 		}
 
 		kn.new_frame()
 
-		for &root in ctx.roots do draw_element(&root)
-		kn.set_paint(kn.Green)
-		kn.add_string(fmt.tprintf("FPS: %.0f", kn.get_fps()), 20, 0)
+		begin()
+		center := linalg.array_cast(kn.get_size(), f32) / 2
+		begin_node(
+			{
+				position = center,
+				size = linalg.max((ctx.mouse_position - center) * 2, 100),
+				padding = 4,
+				spacing = 4,
+				vertical = true,
+				content_align = {1 = 0.5},
+			},
+		)
+		menu_item(1)
+		menu_item(2)
+		menu_item(3)
+		end_node()
+		end()
 
+		// for &root in ctx.roots do draw_element(&root)
+		kn.set_paint(kn.Yellow)
+		kn.add_string(fmt.tprintf("FPS: %.0f", kn.get_fps()), 16, 0)
+
+		kn.set_clear_color(kn.DarkSlateGray)
 		kn.present()
+
+		free_all(context.temp_allocator)
 	}
 }
 
