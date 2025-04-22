@@ -1,0 +1,13 @@
+[
+  {
+    "label": "Run",
+    "command": "odin",
+    "args": [
+      "run",
+      ".",
+      "-debug"
+      // "-collection:local=c:/dev/odin/packages"
+    ],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]
