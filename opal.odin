@@ -13,133 +13,98 @@ import "core:slice"
 import "core:time"
 import "vendor:sdl3"
 
+// Generic unique identifiers
 Id :: u32
 
 Box :: kn.Box
 
 Vector2 :: [2]f32
 
-Padding_Config :: struct {
-	left, right, top, bottom: f32,
-}
-
 //
 // **Padding**
 //
-// **Order:** `{left, top, right, bottom}`
+// `{left, top, right, bottom}`
 //
 Padding :: [4]f32
 
-Dimension_Config :: struct {
-	min:  f32,
-	max:  f32,
-	grow: bool,
-}
-
-PADDING_ALL :: proc(amount: f32) -> Padding_Config {
-	return Padding_Config{amount, amount, amount, amount}
-}
-
-Dimensions :: struct {
-	width, height: f32,
-}
-
-Size_Config :: struct {
-	width, height: Dimension_Config,
-}
-
-Axis :: enum {
-	Horizontal,
-	Vertical,
-}
-
 Node_Config :: struct {
-	size:       Size_Config,
-	kid_gap:    f32,
-	span_align: f32,
-	vertical:   bool,
-	padding:    Padding_Config,
+	p:            [4]f32,
+	px:           f32,
+	py:           f32,
+	pl:           f32,
+	pt:           f32,
+	pr:           f32,
+	pb:           f32,
+	gap:          f32,
+	fit:          bool,
+	fit_x:        bool,
+	fit_y:        bool,
+	grow:         bool,
+	grow_x:       bool,
+	grow_y:       bool,
+	w:            f32,
+	h:            f32,
+	max_w:        f32,
+	max_h:        f32,
+	size:         [2]f32,
+	max_size:     [2]f32,
+	align_x:      f32,
+	align_y:      f32,
+	fill:         kn.Paint_Option,
+	stroke:       kn.Paint_Option,
+	stroke_width: f32,
+	radius:       f32,
 }
 
-Node_Input_Flag :: enum {
-	Is_Focused,
-}
-
-Root_Node_Config :: struct {
-	using base: Node_Config,
-	position:   Vector2,
-}
-
-//
-// **Basic Layout**
-//
-// One child node after the next with no size limit
-//
-Basic_Layout :: struct {
-	spacing:  f32,
-	vertical: bool,
-}
-
-//
-// **Wrap Layout**
-//
-// Lays out children like text, wrapping them at `max_span`, extending itself until `max_extent` is reached.
-//
-Wrap_Layout :: struct {
-	spacing:    f32,
-	max_extent: f32,
-	max_span:   f32,
-	align:      f32,
-}
-
-//
-// **Grid Layout**
-//
-// A simple grid layout that resolves its own column widths according to row content.  Children are added continuously, and will wrap every `column_count` nodes
-//
-// **Required fields**
-//
-// - `column_count`
-//
-Grid_Layout :: struct {
-	column_spacing:   f32,
-	row_spacing:      f32,
-	column_count:     i32,
-	row_count:        i32,
-	max_column_width: f32,
-}
-
-Layout :: struct {
-	min_size: [2]f32,
-	max_size: [2]f32,
-	padding:  Padding,
-	variant:  Layout_Variant,
+node_configure :: proc(self: ^Node, config: Node_Config) {
+	self.padding = {
+		max(config.p.x, config.px, config.pl),
+		max(config.p.y, config.px, config.pt),
+		max(config.p.z, config.py, config.pr),
+		max(config.p.w, config.py, config.pb),
+	}
+	self.spacing = config.gap
+	self.fit = {config.fit | config.fit_x, config.fit | config.fit_y}
+	self.grow = {config.grow | config.grow_x, config.grow | config.grow_y}
+	self.size = {max(config.size.x, config.w), max(config.size.y, config.h)}
+	self.max_size = {max(config.max_size.x, config.max_w), max(config.max_size.y, config.max_h)}
+	self.content_align = {config.align_x, config.align_y}
 }
 
 //
-// **Unified Layout Variant**
+// The ultimate UI element abstraction
 //
-// The `nil` state means no layouting will be performed and children will be placed relative to their parent based on their `offset` and `size`.
+// Opal UIs are built entirely out of these guys, they are stylable layouts, rectangles, text, icons and whatever else you make them through their user callbacks.
 //
-Layout_Variant :: union {
-	Basic_Layout,
-	Wrap_Layout,
-	Grid_Layout,
-}
-
 Node :: struct {
 	// Node tree references
 	parent:             ^Node,
 	kids:               [dynamic]^Node,
 
+	//
+	is_dead:            bool,
+
+	// Unique identifier
+	id:                 Id,
+
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                Box,
 
-	// Fields pertaining to the node's own layout within its parent
+	// The node's local position within its parent; or screen position if its a root
 	position:           [2]f32,
+
+	// The maximum size the node is allowed to grow to
 	max_size:           [2]f32,
+
+	// The node's actual size, this is subject to change until `end()` is called
+	// The initial value is effectively the node's minimum size
 	size:               [2]f32,
+
+	// If the node will be grown to fill available space
 	grow:               [2]bool,
+
+	// If the node will grow to acommodate its kids
+	fit:                [2]bool,
 
 	// Values for the node's children layout
 	content_align:      [2]f32,
@@ -148,6 +113,11 @@ Node :: struct {
 	spacing:            f32,
 	vertical:           bool,
 	growable_kid_count: int,
+
+	// Input state
+	is_hovered:         bool,
+	is_invisible:       bool,
+	has_hovered_child:  bool,
 
 	// Z index (higher values appear in front of lower ones)
 	z_index:            u32,
@@ -158,9 +128,16 @@ Node :: struct {
 	style:              Node_Style,
 
 	// Draw logic override
+	on_animate:         proc(self: ^Node),
 	on_draw:            proc(self: ^Node),
+
+	// User data
+	user_data:          rawptr,
 }
 
+//
+// This is abstracted out by gut feeling ✊😔
+//
 Node_Style :: struct {
 	radius:       [4]f32,
 	stroke_width: f32,
@@ -179,14 +156,20 @@ Context :: struct {
 	mouse_position:   Vector2,
 	hovered_node:     ^Node,
 	focused_node:     ^Node,
+	hovered_id:       Id,
+	focused_id:       Id,
+
+	// Map of node ids
+	nodes_by_id:      map[Id]^Node,
 
 	// Contiguous storage of all nodes in the UI
 	nodes:            [dynamic]Node,
 
-	// All nodes wihout a parent are stored here
+	// All nodes wihout a parent are stored here for layout solving
+	// They are the root nodes of their layout trees
 	roots:            [dynamic]^Node,
 
-	// All currently active nodes being processed
+	// The stack of nodes being declared
 	stack:            [dynamic]^Node,
 
 	// The hash stack
@@ -200,22 +183,23 @@ Context :: struct {
 	frame_duration:   time.Duration,
 }
 
+@(private)
 global_ctx: ^Context
 
-padding_from_parts :: proc(left, right, top, bottom: f32) -> Padding {
-	return {left, top, right, bottom}
-}
+//
+// Unique ID hashing for retaining node states
+//
 
-FNV1A64_OFFSET_BASIS :: 0xcbf29ce484222325
-FNV1A64_PRIME :: 0x00000100000001B3
+// FNV1A64_OFFSET_BASIS :: 0xcbf29ce484222325
+// FNV1A64_PRIME :: 0x00000100000001B3
 
-fnv64a :: proc(data: []byte, seed: u64) -> u64 {
-	h: u64 = seed
-	for b in data {
-		h = (h ~ u64(b)) * FNV1A64_PRIME
-	}
-	return h
-}
+// fnv64a :: proc(data: []byte, seed: u64) -> u64 {
+// 	h: u64 = seed
+// 	for b in data {
+// 		h = (h ~ u64(b)) * FNV1A64_PRIME
+// 	}
+// 	return h
+// }
 
 FNV1A32_OFFSET_BASIS :: 0x811c9dc5
 FNV1A32_PRIME :: 0x01000193
@@ -268,6 +252,10 @@ hash_loc :: proc(loc: runtime.Source_Code_Location) -> Id {
 	return hash
 }
 
+//
+// Nodes' IDs are hashed from their call location normally. Opal provides an ID stack so you can push a loop index to the stack and ensure that all your list items have a unique ID.
+//
+
 push_id_int :: proc(num: int) {
 	ctx := global_ctx
 	append(&ctx.id_stack, hash_int(num))
@@ -294,6 +282,10 @@ pop_id :: proc() {
 	pop(&ctx.id_stack)
 }
 
+//
+// Context procs
+//
+
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
 	reserve(&ctx.nodes, 512)
@@ -319,6 +311,10 @@ deinit :: proc() {
 	context_deinit(global_ctx)
 }
 
+//
+// Call these from your event loop to handle input events
+//
+
 handle_mouse_motion :: proc(x, y: f32) {
 	global_ctx.mouse_position = {x, y}
 }
@@ -331,6 +327,9 @@ handle_key_down :: proc() {
 
 }
 
+//
+// Clear the UI construction state for a new frame
+//
 begin :: proc() {
 	ctx := global_ctx
 	ctx.frame_start_time = time.now()
@@ -342,29 +341,56 @@ begin :: proc() {
 
 	push_id(Id(FNV1A32_OFFSET_BASIS))
 	ctx.current_node = nil
+	ctx.hovered_node = nil
+	ctx.focused_node = nil
 }
 
+//
+// Ends UI declaration and constructs the final layout, node boxes are only valid after this is called
+//
 end :: proc() {
 	ctx := global_ctx
 	ctx.frame_duration = time.since(ctx.frame_start_time)
 	for root in ctx.roots {
 		root.box = {root.position - root.size / 2, root.position + root.size / 2}
 
-		node_grow_kids_recursively(root)
+		node_finish_layout_recursively(root)
 		node_solve_box_recursively(root)
 
 		kn.set_draw_order(int(root.z_index))
 		node_draw_recursively(root)
 	}
+	for &node, node_index in ctx.nodes {
+		if node.is_dead {
+			delete_key(&ctx.nodes_by_id, node.id)
+			unordered_remove(&ctx.nodes, node_index)
+		} else {
+			node.is_dead = true
+		}
+	}
 	if ctx.hovered_node != nil {
-		kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.Green)
+		kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.Blue)
 	}
 	kn.set_draw_order(0)
+
+	if ctx.hovered_node != nil {
+		ctx.hovered_id = ctx.hovered_node.id
+	} else {
+		ctx.hovered_id = 0
+	}
+	if ctx.focused_node != nil {
+		ctx.focused_id = ctx.focused_node.id
+	} else {
+		ctx.focused_id = 0
+	}
+
 }
 
+//
 // Attempt to overwrite the currently hovered node respecting z-index
 //
 // The memory pointed to by `node` must live until the next frame
+//
 try_hover_node :: proc(node: ^Node) {
 	ctx := global_ctx
 	if ctx.hovered_node != nil && ctx.hovered_node.z_index > node.z_index {
@@ -390,7 +416,11 @@ pop_node :: proc() {
 }
 
 default_node_style :: proc() -> Node_Style {
-	return {fill_paint = kn.Black, stroke_paint = kn.White, stroke_width = 1}
+	return {
+		fill_paint = kn.rgba_from_hex("#f5b041") or_else kn.Black,
+		stroke_paint = kn.DimGray,
+		stroke_width = 1,
+	}
 }
 
 text_node_style :: proc() -> Node_Style {
@@ -399,26 +429,18 @@ text_node_style :: proc() -> Node_Style {
 
 node_init :: proc(self: ^Node) {
 	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
+}
+
+node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
+	ctx := global_ctx
+	self.is_dead = false
 	if self.text != {} {
 		self.text_layout = kn.make_text(self.text, 12)
 		self.size = linalg.max(self.size, self.text_layout.size)
 	}
-}
-
-add_node_as_child_of_current :: proc(node: Node) -> (result: ^Node) {
-	ctx := global_ctx
-	append(&ctx.nodes, node)
-	result = &ctx.nodes[len(ctx.nodes) - 1]
-	assert(result != nil)
-	result.parent = ctx.current_node
-	return
-}
-
-begin_node :: proc(node: Node, loc := #caller_location) -> (self: ^Node) {
-	ctx := global_ctx
-	self = add_node_as_child_of_current(node)
-	node_init(self)
-	push_node(self)
+	self.content_size = 0
+	self.has_hovered_child = false
+	self.is_hovered = ctx.hovered_id == self.id
 	if self.parent == nil {
 		append(&ctx.roots, self)
 		return
@@ -427,6 +449,34 @@ begin_node :: proc(node: Node, loc := #caller_location) -> (self: ^Node) {
 	if self.grow[int(self.parent.vertical)] {
 		self.parent.growable_kid_count += 1
 	}
+}
+
+//
+// Get an existing node by its id or create a new one
+//
+get_or_create_node :: proc(id: Id) -> ^Node {
+	ctx := global_ctx
+	node, ok := ctx.nodes_by_id[id]
+	if !ok {
+		append(&ctx.nodes, Node{id = id})
+		node = &ctx.nodes[len(ctx.nodes) - 1]
+		ctx.nodes_by_id[id] = node
+	}
+	if node == nil {
+		fmt.panicf(
+			"get_or_create_node(%i) would return an invalid pointer! This is UNACCEPTABLEEE!!!",
+			id,
+		)
+	}
+	node.parent = ctx.current_node
+	return node
+}
+
+begin_node :: proc(config: Node_Config, loc := #caller_location) -> (self: ^Node) {
+	self = get_or_create_node(hash_loc(loc))
+	node_init(self)
+	node_on_new_frame(self, config)
+	push_node(self)
 	return
 }
 
@@ -439,7 +489,10 @@ end_node :: proc() {
 	i := int(self.vertical)
 	self.content_size += self.padding.xy + self.padding.zw
 	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
-	self.size = linalg.max(self.size, self.content_size)
+	self.size = linalg.max(
+		self.size,
+		self.content_size * {f32(i32(self.fit.x)), f32(i32(self.fit.y))},
+	)
 	pop_node()
 	if ctx.current_node != nil {
 		node_on_child_end(ctx.current_node, self)
@@ -456,7 +509,7 @@ do_node :: proc(node: Node, loc := #caller_location) {
 //
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
-	// Propagate `content_size` up the tree in reverse breadth-first
+	// Propagate content size up the tree in reverse breadth-first
 	if self.vertical {
 		self.content_size.y += child.size.y
 		self.content_size.x = max(self.content_size.x, child.size.x)
@@ -464,6 +517,7 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 		self.content_size.x += child.size.x
 		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
+	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
 }
 
 node_solve_box_recursively :: proc(self: ^Node) {
@@ -474,8 +528,10 @@ node_solve_box_recursively :: proc(self: ^Node) {
 	}
 }
 
-node_grow_kids_recursively :: proc(self: ^Node) {
+node_finish_layout_recursively :: proc(self: ^Node) {
+	// Along axis
 	i := int(self.vertical)
+	// Across axis
 	j := 1 - i
 
 	remaining_space := self.size[i] - self.content_size[i]
@@ -536,18 +592,13 @@ node_grow_kids_recursively :: proc(self: ^Node) {
 			self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
 		node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
 		offset_along_axis += node.size[i] + self.spacing
-		node_grow_kids_recursively(node)
+
+		// Continue the recursion
+		node_finish_layout_recursively(node)
 	}
 }
 
-//
-// UI Debugging procedures an constants
-//
-
-COLORS := [?]kn.Color{kn.SkyBlue, kn.LightGoldenrodYellow, kn.PaleGreen}
-
-node_draw_recursively :: proc(self: ^Node, depth := 0) {
-
+node_receive_input :: proc(self: ^Node) {
 	ctx := global_ctx
 	if ctx.mouse_position.x >= self.box.lo.x &&
 	   ctx.mouse_position.x <= self.box.hi.x &&
@@ -555,7 +606,10 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	   ctx.mouse_position.y <= self.box.hi.y {
 		try_hover_node(self)
 	}
+}
 
+node_draw_recursively :: proc(self: ^Node, depth := 0) {
+	node_receive_input(self)
 	if self.on_draw != nil {
 		self.on_draw(self)
 	} else {
@@ -576,6 +630,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 	for node in self.kids {
 		node_draw_recursively(node, depth + 1)
+	}
+	if self.has_hovered_child {
+		kn.add_box_lines(self.box, 1, paint = kn.LightGreen)
 	}
 }
 
@@ -633,14 +690,14 @@ main :: proc() {
 				size = {},
 				max_size = {math.F32_MAX, 30},
 				grow = {true, true},
+				fit = true,
 				padding = 4,
-				spacing = 20,
 				content_align = {0, 0.5},
 				style = {fill_paint = kn.DarkSlateGray, radius = 4},
 			},
 		)
 		do_node({text = text, max_size = math.F32_MAX, style = text_node_style()})
-		do_node({max_size = math.F32_MAX, grow = true})
+		do_node({size = {10, 0}, max_size = math.F32_MAX, grow = true})
 		do_node({
 			size = {20, 20},
 			on_draw = proc(
@@ -661,15 +718,19 @@ main :: proc() {
 			case .MOUSE_MOTION:
 				handle_mouse_motion(event.motion.x, event.motion.y)
 			case .WINDOW_RESIZED:
-				kn.set_size(event.window.data1, event.window.data2)
+				width, height: i32
+				sdl3.GetWindowSize(window, &width, &height)
+				kn.set_size(width, height)
 			case .TEXT_INPUT:
 				handle_text_input(event.text.text)
 			}
 		}
 
+
 		kn.new_frame()
 
 		begin()
+
 		center := linalg.array_cast(kn.get_size(), f32) / 2
 		begin_node(
 			{
@@ -678,22 +739,41 @@ main :: proc() {
 				spacing = 4,
 				vertical = true,
 				content_align = {1 = 0.5},
+				fit = true,
 				style = {fill_paint = kn.DimGray, radius = 4},
 			},
 		)
-		for item in MENU_ITEMS {
+		for item, item_index in MENU_ITEMS {
+			push_id(item_index)
 			menu_item(item)
+			pop_id()
 		}
 		end_node()
+
+		begin_node(
+			{
+				position = {center.x, 100},
+				padding = 10,
+				spacing = 5,
+				fit = true,
+				style = default_node_style(),
+			},
+		)
+		do_node({size = 20, style = default_node_style()})
+		do_node({size = 20, style = default_node_style()})
+		do_node({size = 20, style = default_node_style()})
+		end_node()
+
 		end()
 
-		kn.set_paint(kn.Yellow)
+		kn.set_paint(kn.PaleTurquoise)
 		kn.add_string(fmt.tprintf("FPS: %.0f", kn.get_fps()), 16, 0)
 		kn.add_string(fmt.tprintf("%.0f", ctx.mouse_position), 16, {0, 16})
 
-		kn.set_clear_color(kn.DarkSlateGray)
+		kn.set_clear_color(kn.Black)
 		kn.present()
 
 		free_all(context.temp_allocator)
 	}
 }
+
