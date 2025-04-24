@@ -1,5 +1,12 @@
 package opal
 
+//
+// TODO:
+// 	[] Figure out how to let a node modify its own size
+// 		- Probably through callbacks
+//
+//
+
 import kn "../katana"
 import "../katana/sdl3glue"
 import "base:runtime"
@@ -11,6 +18,7 @@ import "core:mem"
 import "core:reflect"
 import "core:slice"
 import "core:time"
+import "tw"
 import "vendor:sdl3"
 
 // Generic unique identifiers
@@ -28,35 +36,48 @@ Vector2 :: [2]f32
 Padding :: [4]f32
 
 Node_Config :: struct {
-	p:            [4]f32,
-	px:           f32,
-	py:           f32,
-	pl:           f32,
-	pt:           f32,
-	pr:           f32,
-	pb:           f32,
-	gap:          f32,
-	fit:          bool,
-	fit_x:        bool,
-	fit_y:        bool,
-	grow:         bool,
-	grow_x:       bool,
-	grow_y:       bool,
-	w:            f32,
-	h:            f32,
-	max_w:        f32,
-	max_h:        f32,
-	size:         [2]f32,
-	max_size:     [2]f32,
-	align_x:      f32,
-	align_y:      f32,
-	fill:         kn.Paint_Option,
-	stroke:       kn.Paint_Option,
-	stroke_width: f32,
-	radius:       f32,
+	p:               [4]f32,
+	text:            string,
+	pos:             [2]f32,
+	size:            [2]f32,
+	max_size:        [2]f32,
+	rsize:           [2]f32,
+	bg:              kn.Paint_Option,
+	stroke:          kn.Paint_Option,
+	fg:              kn.Paint_Option,
+	font:            ^kn.Font,
+	on_draw:         proc(_: ^Node),
+	on_animate:      proc(_: ^Node),
+	px:              f32,
+	py:              f32,
+	pl:              f32,
+	pt:              f32,
+	pr:              f32,
+	pb:              f32,
+	gap:             f32,
+	w:               f32,
+	h:               f32,
+	max_w:           f32,
+	max_h:           f32,
+	self_align_x:    f32,
+	self_align_y:    f32,
+	content_align_x: f32,
+	content_align_y: f32,
+	stroke_width:    f32,
+	radius:          f32,
+	font_size:       f32,
+	fit:             bool,
+	fit_x:           bool,
+	fit_y:           bool,
+	grow:            bool,
+	grow_x:          bool,
+	grow_y:          bool,
+	vertical:        bool,
+	abs:             bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
+	self.is_absolute = config.abs
 	self.padding = {
 		max(config.p.x, config.px, config.pl),
 		max(config.p.y, config.px, config.pt),
@@ -68,7 +89,60 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.grow = {config.grow | config.grow_x, config.grow | config.grow_y}
 	self.size = {max(config.size.x, config.w), max(config.size.y, config.h)}
 	self.max_size = {max(config.max_size.x, config.max_w), max(config.max_size.y, config.max_h)}
-	self.content_align = {config.align_x, config.align_y}
+	self.content_align = {config.content_align_x, config.content_align_y}
+	self.align = {config.self_align_x, config.self_align_y}
+	self.position = config.pos
+	self.vertical = config.vertical
+	self.style.radius = config.radius
+	self.style.stroke_width = config.stroke_width
+	self.style.stroke_paint = config.stroke
+	self.style.background_paint = config.bg
+	self.style.foreground_paint = config.fg
+	self.style.font = config.font
+	self.style.font_size = config.font_size
+	self.text = config.text
+	self.on_draw = config.on_draw
+	self.on_animate = config.on_animate
+	self.relative_size = config.rsize
+}
+
+Node_Info :: struct {
+	style:         Node_Style,
+	// The node's local position within its parent; or screen position if its a root
+	position:      [2]f32,
+
+	// The maximum size the node is allowed to grow to
+	max_size:      [2]f32,
+
+	// The node's actual size, this is subject to change until `end()` is called
+	// The initial value is effectively the node's minimum size
+	size:          [2]f32,
+
+	// If the node will be grown to fill available space
+	grow:          [2]bool,
+
+	// If the node will grow to acommodate its kids
+	fit:           [2]bool,
+
+	// How the node is aligned on its origin if it is a root node
+	align:         [2]f32,
+
+	// Values for the node's children layout
+	content_align: [2]f32,
+	content_size:  [2]f32,
+	padding:       [4]f32,
+	spacing:       f32,
+	vertical:      bool,
+
+	// Z index (higher values appear in front of lower ones)
+	z_index:       u32,
+
+	// Draw logic override
+	on_animate:    proc(self: ^Node),
+	on_draw:       proc(self: ^Node),
+
+	// User data
+	user_data:     rawptr,
 }
 
 //
@@ -93,12 +167,21 @@ Node :: struct {
 	// The node's local position within its parent; or screen position if its a root
 	position:           [2]f32,
 
+	// Absolute nodes are translated from their parent's origin relative to its size before their fixed position is added
+	relative_position:  [2]f32,
+
 	// The maximum size the node is allowed to grow to
 	max_size:           [2]f32,
+
+	// This is for the node itself to add/subtract from its size on the next frame
+	added_size:         [2]f32,
 
 	// The node's actual size, this is subject to change until `end()` is called
 	// The initial value is effectively the node's minimum size
 	size:               [2]f32,
+
+	// Added size relative to the parent
+	relative_size:      [2]f32,
 
 	// If the node will be grown to fill available space
 	grow:               [2]bool,
@@ -106,17 +189,22 @@ Node :: struct {
 	// If the node will grow to acommodate its kids
 	fit:                [2]bool,
 
+	// How the node is aligned on its origin if it is a root node
+	align:              [2]f32,
+
 	// Values for the node's children layout
+	padding:            [4]f32,
 	content_align:      [2]f32,
 	content_size:       [2]f32,
-	padding:            [4]f32,
+	growable_kid_count: int,
 	spacing:            f32,
 	vertical:           bool,
-	growable_kid_count: int,
+	is_absolute:        bool,
 
-	// Input state
+	// Opal sacrifices one frame of responsiveness for faster frames. This value is a representation of the previous frame's input
 	is_hovered:         bool,
-	is_invisible:       bool,
+
+	// True if any nodes below this one in the tree are hovered
 	has_hovered_child:  bool,
 
 	// Z index (higher values appear in front of lower ones)
@@ -126,6 +214,7 @@ Node :: struct {
 	text:               string,
 	text_layout:        kn.Text,
 	style:              Node_Style,
+	transitions:        [3]f32,
 
 	// Draw logic override
 	on_animate:         proc(self: ^Node),
@@ -139,17 +228,33 @@ Node :: struct {
 // This is abstracted out by gut feeling ✊😔
 //
 Node_Style :: struct {
-	radius:       [4]f32,
-	stroke_width: f32,
-	stroke_join:  kn.Shape_Outline,
-	stroke_paint: kn.Paint_Option,
-	fill_paint:   kn.Paint_Option,
+	radius:           [4]f32,
+	transform_origin: [2]f32,
+	scale:            [2]f32,
+	translate:        [2]f32,
+	stroke_join:      kn.Shape_Outline,
+	stroke_paint:     kn.Paint_Option,
+	background_paint: kn.Paint_Option,
+	foreground_paint: kn.Paint_Option,
+	font:             ^kn.Font,
+	shadow_color:     kn.Color,
+	rotation:         f32,
+	stroke_width:     f32,
+	font_size:        f32,
+	shadow_size:      f32,
 }
 
 @(init)
 _print_struct_memory_configuration :: proc() {
 	fmt.println(size_of(Node), align_of(Node))
 }
+
+Cursor :: enum {
+	Normal,
+	Pointer,
+}
+
+On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
 
 Context :: struct {
 	// Input state
@@ -158,6 +263,9 @@ Context :: struct {
 	focused_node:     ^Node,
 	hovered_id:       Id,
 	focused_id:       Id,
+	on_set_cursor:    On_Set_Cursor_Proc,
+	cursor:           Cursor,
+	last_cursor:      Cursor,
 
 	// Map of node ids
 	nodes_by_id:      map[Id]^Node,
@@ -181,6 +289,9 @@ Context :: struct {
 	// Profiling state
 	frame_start_time: time.Time,
 	frame_duration:   time.Duration,
+
+	// Debug state
+	is_debugging:     bool,
 }
 
 @(private)
@@ -288,7 +399,7 @@ pop_id :: proc() {
 
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
-	reserve(&ctx.nodes, 512)
+	reserve(&ctx.nodes, 2048)
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
@@ -296,6 +407,11 @@ context_init :: proc(ctx: ^Context) {
 
 context_deinit :: proc(ctx: ^Context) {
 	assert(ctx != nil)
+}
+
+rate_per_second :: proc(rate: f32) -> f32 {
+	ctx := global_ctx
+	return f32(time.duration_seconds(ctx.frame_duration)) * rate
 }
 
 //
@@ -350,9 +466,17 @@ begin :: proc() {
 //
 end :: proc() {
 	ctx := global_ctx
-	ctx.frame_duration = time.since(ctx.frame_start_time)
+
+	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
+		if ctx.on_set_cursor(ctx.cursor) {
+			ctx.last_cursor = ctx.cursor
+		}
+	}
+	ctx.cursor = .Normal
+
 	for root in ctx.roots {
-		root.box = {root.position - root.size / 2, root.position + root.size / 2}
+		root.box.lo = root.position - root.size * root.align
+		root.box.hi = root.box.lo + root.size
 
 		node_finish_layout_recursively(root)
 		node_solve_box_recursively(root)
@@ -360,6 +484,7 @@ end :: proc() {
 		kn.set_draw_order(int(root.z_index))
 		node_draw_recursively(root)
 	}
+
 	for &node, node_index in ctx.nodes {
 		if node.is_dead {
 			delete_key(&ctx.nodes_by_id, node.id)
@@ -368,8 +493,11 @@ end :: proc() {
 			node.is_dead = true
 		}
 	}
-	if ctx.hovered_node != nil {
-		kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.Blue)
+
+	if ctx.is_debugging {
+		if ctx.hovered_node != nil {
+			kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.Blue)
+		}
 	}
 	kn.set_draw_order(0)
 
@@ -384,6 +512,7 @@ end :: proc() {
 		ctx.focused_id = 0
 	}
 
+	ctx.frame_duration = time.since(ctx.frame_start_time)
 }
 
 //
@@ -417,7 +546,8 @@ pop_node :: proc() {
 
 default_node_style :: proc() -> Node_Style {
 	return {
-		fill_paint = kn.rgba_from_hex("#f5b041") or_else kn.Black,
+		background_paint = kn.Black,
+		foreground_paint = kn.White,
 		stroke_paint = kn.DimGray,
 		stroke_width = 1,
 	}
@@ -433,12 +563,15 @@ node_init :: proc(self: ^Node) {
 
 node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	ctx := global_ctx
+	self.style.scale = 1
+	node_configure(self, config)
 	self.is_dead = false
-	if self.text != {} {
-		self.text_layout = kn.make_text(self.text, 12)
-		self.size = linalg.max(self.size, self.text_layout.size)
-	}
 	self.content_size = 0
+	if len(self.text) > 0 {
+		self.text_layout = kn.make_text(self.text, self.style.font_size)
+		self.content_size = linalg.max(self.content_size, self.text_layout.size)
+	}
+	self.size += self.added_size
 	self.has_hovered_child = false
 	self.is_hovered = ctx.hovered_id == self.id
 	if self.parent == nil {
@@ -499,8 +632,8 @@ end_node :: proc() {
 	}
 }
 
-do_node :: proc(node: Node, loc := #caller_location) {
-	begin_node(node, loc)
+do_node :: proc(config: Node_Config, loc := #caller_location) {
+	begin_node(config, loc)
 	end_node()
 }
 
@@ -544,7 +677,7 @@ node_finish_layout_recursively :: proc(self: ^Node) {
 	)
 
 	for &node in self.kids {
-		if node.grow[i] {
+		if !node.is_absolute && node.grow[i] {
 			append(&growables, node)
 		}
 	}
@@ -582,18 +715,21 @@ node_finish_layout_recursively :: proc(self: ^Node) {
 
 	offset_along_axis: f32 = self.padding[i]
 	for node in self.kids {
-		available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
+		if node.is_absolute {
+			node.position += self.size * node.relative_position
+			node.size += self.size * node.relative_size
+		} else {
+			available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
 
-		if node.grow[j] {
-			node.size[j] = max(node.size[j], available_span)
+			if node.grow[j] {
+				node.size[j] = max(node.size[j], available_span)
+			}
+
+			node.position[j] =
+				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
+			node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
+			offset_along_axis += node.size[i] + self.spacing
 		}
-
-		node.position[j] =
-			self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
-		node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
-		offset_along_axis += node.size[i] + self.spacing
-
-		// Continue the recursion
 		node_finish_layout_recursively(node)
 	}
 }
@@ -609,15 +745,44 @@ node_receive_input :: proc(self: ^Node) {
 }
 
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
+	ctx := global_ctx
 	node_receive_input(self)
+	if self.on_animate != nil {
+		self.on_animate(self)
+	}
+
+	is_transformed :=
+		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
+
+	if is_transformed {
+		transform_origin := self.box.lo + self.size * self.style.transform_origin
+		kn.push_matrix()
+		kn.translate(transform_origin)
+		kn.rotate(self.style.rotation)
+		kn.scale(self.style.scale)
+		kn.translate(-transform_origin + self.style.translate)
+	}
+
 	if self.on_draw != nil {
 		self.on_draw(self)
 	} else {
-		if self.style.fill_paint != nil {
-			kn.add_box(self.box, self.style.radius, paint = self.style.fill_paint)
+		if self.style.shadow_color != {} {
+			kn.add_box_shadow(
+				self.box,
+				self.style.radius[0],
+				self.style.shadow_size,
+				self.style.shadow_color,
+			)
 		}
-		if !kn.text_is_empty(&self.text_layout) {
-			kn.add_text(self.text_layout, self.box.lo, paint = kn.White)
+		if self.style.background_paint != nil {
+			kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
+		}
+		if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
+			kn.add_text(
+				self.text_layout,
+				(self.box.lo + self.box.hi) / 2 - self.text_layout.size / 2,
+				paint = self.style.foreground_paint,
+			)
 		}
 		if self.style.stroke_paint != nil {
 			kn.add_box_lines(
@@ -628,10 +793,16 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			)
 		}
 	}
+
+	if is_transformed {
+		kn.pop_matrix()
+	}
+
 	for node in self.kids {
 		node_draw_recursively(node, depth + 1)
 	}
-	if self.has_hovered_child {
+
+	if ctx.is_debugging && self.has_hovered_child {
 		kn.add_box_lines(self.box, 1, paint = kn.LightGreen)
 	}
 }
@@ -639,6 +810,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 //
 // The demo UI
 //
+
+cursors: [sdl3.SystemCursor]^sdl3.Cursor
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -674,6 +847,49 @@ main :: proc() {
 	init()
 	defer deinit()
 
+	ctx := global_ctx
+
+	for cursor in sdl3.SystemCursor {
+		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
+	}
+
+	ctx.on_set_cursor = proc(cursor: Cursor) -> bool {
+		switch cursor {
+		case .Normal:
+			return sdl3.SetCursor(cursors[.DEFAULT])
+		case .Pointer:
+			return sdl3.SetCursor(cursors[.POINTER])
+		}
+		return false
+	}
+
+	loop: for {
+		sdl3.Delay(10)
+		event: sdl3.Event
+		for sdl3.PollEvent(&event) {
+			#partial switch event.type {
+			case .QUIT:
+				break loop
+			case .KEY_DOWN:
+				if event.key.key == sdl3.K_F1 {
+					ctx.is_debugging = !ctx.is_debugging
+				}
+			case .MOUSE_MOTION:
+				handle_mouse_motion(event.motion.x, event.motion.y)
+			case .WINDOW_PIXEL_SIZE_CHANGED:
+				width, height: i32
+				sdl3.GetWindowSize(window, &width, &height)
+				kn.set_size(width, height)
+			case .TEXT_INPUT:
+				handle_text_input(event.text.text)
+			}
+		}
+
+		do_frame()
+	}
+}
+
+do_frame :: proc() {
 	MENU_ITEMS := []string {
 		"Go to definition",
 		"Go to declaration",
@@ -689,91 +905,138 @@ main :: proc() {
 			{
 				size = {},
 				max_size = {math.F32_MAX, 30},
-				grow = {true, true},
+				grow = true,
 				fit = true,
-				padding = 4,
-				content_align = {0, 0.5},
-				style = {fill_paint = kn.DarkSlateGray, radius = 4},
+				p = 4,
+				content_align_y = 0.5,
+				radius = 4,
+				bg = tw.GRAY_200,
 			},
 		)
-		do_node({text = text, max_size = math.F32_MAX, style = text_node_style()})
+		do_node(
+			{text = text, max_size = math.F32_MAX, fg = tw.GRAY_900, font_size = 12, fit = true},
+		)
 		do_node({size = {10, 0}, max_size = math.F32_MAX, grow = true})
 		do_node({
 			size = {20, 20},
+			bg = tw.GRAY_700,
 			on_draw = proc(
 				self: ^Node,
-			) {kn.add_circle((self.box.lo + self.box.hi) / 2, self.size.x / 2, paint = kn.White)},
+			) {kn.add_circle((self.box.lo + self.box.hi) / 2, self.size.x / 2, paint = self.style.background_paint)},
 		})
 		end_node()
 	}
 
-	loop: for {
-		ctx := global_ctx
-		sdl3.Delay(10)
-		event: sdl3.Event
-		for sdl3.PollEvent(&event) {
-			#partial switch event.type {
-			case .QUIT:
-				break loop
-			case .MOUSE_MOTION:
-				handle_mouse_motion(event.motion.x, event.motion.y)
-			case .WINDOW_RESIZED:
-				width, height: i32
-				sdl3.GetWindowSize(window, &width, &height)
-				kn.set_size(width, height)
-			case .TEXT_INPUT:
-				handle_text_input(event.text.text)
-			}
-		}
+	ctx := global_ctx
+	kn.new_frame()
 
+	begin()
 
-		kn.new_frame()
-
-		begin()
-
-		center := linalg.array_cast(kn.get_size(), f32) / 2
-		begin_node(
-			{
-				position = center,
-				padding = 4,
-				spacing = 4,
-				vertical = true,
-				content_align = {1 = 0.5},
-				fit = true,
-				style = {fill_paint = kn.DimGray, radius = 4},
-			},
-		)
-		for item, item_index in MENU_ITEMS {
-			push_id(item_index)
-			menu_item(item)
+	center := linalg.array_cast(kn.get_size(), f32) / 2
+	begin_node(
+		{
+			p = 4,
+			gap = 4,
+			vertical = true,
+			content_align_y = 0,
+			bg = kn.Color{0, 0, 0, 0},
+			radius = 4,
+			size = linalg.array_cast(kn.get_size(), f32),
+		},
+	)
+	for item, item_index in MENU_ITEMS {
+		push_id(item_index)
+		menu_item(item)
+		pop_id()
+	}
+	do_node(
+		{
+			text = "Tailwind Colors!!!",
+			p = abs(math.sin(kn.run_time()) * 4),
+			fg = tw.GRAY_900,
+			font_size = 14,
+			grow = true,
+			max_size = math.F32_MAX,
+		},
+	)
+	begin_node({p = 10, gap = 5, fit = true, grow = true, max_w = math.F32_MAX, max_h = 400})
+	for &color, color_index in tw.COLORS {
+		push_id(color_index)
+		begin_node({gap = 5, fit = true, grow = true, vertical = true, max_size = math.F32_MAX})
+		for shade, shade_index in color {
+			push_id(color_index * 12 + shade_index)
+			begin_node({
+				size = {30, 20},
+				max_size = math.F32_MAX,
+				grow = true,
+				on_animate = proc(self: ^Node) {
+					if self.has_hovered_child {
+						global_ctx.cursor = .Pointer
+						self.added_size.y = 20
+					}
+					self.added_size = 0
+				},
+			})
+			do_node({
+				rsize = 1,
+				abs = true,
+				on_animate = proc(self: ^Node) {
+					if self.transitions[0] > 0.001 {
+						self.style.radius = 4 + 4 * self.transitions[0]
+						self.style.shadow_color = kn.fade(kn.Black, self.transitions[0] * 0.5)
+						self.style.shadow_size = 3 * self.transitions[0]
+					}
+					self.transitions[0] +=
+						(f32(i32(self.parent.has_hovered_child)) - self.transitions[0]) *
+						rate_per_second(500)
+				},
+			})
+			do_node({
+				rsize = 1,
+				abs = true,
+				bg = shade,
+				stroke = kn.Black,
+				stroke_width = 1,
+				radius = 4,
+				on_animate = proc(self: ^Node) {
+					if self.transitions[0] > 0.001 {
+						self.style.radius = 4 + 4 * self.transitions[0]
+						self.style.transform_origin = {0, 1}
+						self.style.translate.y = -2 * self.transitions[0]
+						self.style.rotation = -0.1 * self.transitions[0]
+					}
+					self.transitions[0] +=
+						(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(500)
+				},
+			})
+			end_node()
 			pop_id()
 		}
 		end_node()
-
-		begin_node(
-			{
-				position = {center.x, 100},
-				padding = 10,
-				spacing = 5,
-				fit = true,
-				style = default_node_style(),
-			},
-		)
-		do_node({size = 20, style = default_node_style()})
-		do_node({size = 20, style = default_node_style()})
-		do_node({size = 20, style = default_node_style()})
-		end_node()
-
-		end()
-
-		kn.set_paint(kn.PaleTurquoise)
-		kn.add_string(fmt.tprintf("FPS: %.0f", kn.get_fps()), 16, 0)
-		kn.add_string(fmt.tprintf("%.0f", ctx.mouse_position), 16, {0, 16})
-
-		kn.set_clear_color(kn.Black)
-		kn.present()
-
-		free_all(context.temp_allocator)
+		pop_id()
 	}
+	end_node()
+	end_node()
+	end()
+
+	if ctx.is_debugging {
+		kn.set_paint(kn.Black)
+		text := kn.make_text(
+			fmt.tprintf(
+				"FPS: %.0f\n%.0f\n%v",
+				kn.get_fps(),
+				ctx.mouse_position,
+				ctx.frame_duration,
+			),
+			14,
+		)
+		kn.add_box({0, text.size}, paint = kn.fade(kn.Black, 1.0))
+		kn.add_text(text, 0, paint = kn.White)
+	}
+
+	kn.set_clear_color(kn.White)
+	kn.present()
+
+	free_all(context.temp_allocator)
 }
 
