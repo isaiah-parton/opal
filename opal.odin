@@ -106,6 +106,13 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.relative_size = config.rsize
 }
 
+node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
+	config := config
+	config.abs = true
+	config.rsize = 1
+	return config
+}
+
 Node_Info :: struct {
 	style:         Node_Style,
 	// The node's local position within its parent; or screen position if its a root
@@ -207,6 +214,10 @@ Node :: struct {
 	// True if any nodes below this one in the tree are hovered
 	has_hovered_child:  bool,
 
+	// Clicked
+	is_active:          bool,
+	has_active_child:   bool,
+
 	// Z index (higher values appear in front of lower ones)
 	z_index:            u32,
 
@@ -255,43 +266,56 @@ Cursor :: enum {
 }
 
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
+On_Set_Clipboard_Proc :: #type proc(data: string)
+On_Get_Clipboard_Proc :: #type proc() -> string
+
+Mouse_Button :: enum {
+	Left,
+	Middle,
+	Right,
+}
 
 Context :: struct {
 	// Input state
-	mouse_position:   Vector2,
-	hovered_node:     ^Node,
-	focused_node:     ^Node,
-	hovered_id:       Id,
-	focused_id:       Id,
-	on_set_cursor:    On_Set_Cursor_Proc,
-	cursor:           Cursor,
-	last_cursor:      Cursor,
+	mouse_position:    Vector2,
+	mouse_button_down: [Mouse_Button]bool,
+	hovered_node:      ^Node,
+	focused_node:      ^Node,
+	active_node:       ^Node,
+	hovered_id:        Id,
+	focused_id:        Id,
+	active_id:         Id,
+	on_set_cursor:     On_Set_Cursor_Proc,
+	on_set_clipboard:  On_Set_Clipboard_Proc,
+	on_get_clipboard:  On_Get_Clipboard_Proc,
+	cursor:            Cursor,
+	last_cursor:       Cursor,
 
 	// Map of node ids
-	nodes_by_id:      map[Id]^Node,
+	nodes_by_id:       map[Id]^Node,
 
 	// Contiguous storage of all nodes in the UI
-	nodes:            [dynamic]Node,
+	nodes:             [dynamic]Node,
 
 	// All nodes wihout a parent are stored here for layout solving
 	// They are the root nodes of their layout trees
-	roots:            [dynamic]^Node,
+	roots:             [dynamic]^Node,
 
 	// The stack of nodes being declared
-	stack:            [dynamic]^Node,
+	stack:             [dynamic]^Node,
 
 	// The hash stack
-	id_stack:         [dynamic]Id,
+	id_stack:          [dynamic]Id,
 
 	// The top-most element of the stack
-	current_node:     ^Node,
+	current_node:      ^Node,
 
 	// Profiling state
-	frame_start_time: time.Time,
-	frame_duration:   time.Duration,
+	frame_start_time:  time.Time,
+	frame_duration:    time.Duration,
 
 	// Debug state
-	is_debugging:     bool,
+	is_debugging:      bool,
 }
 
 @(private)
@@ -409,6 +433,17 @@ context_deinit :: proc(ctx: ^Context) {
 	assert(ctx != nil)
 }
 
+context_set_clipboard :: proc(ctx: ^Context, data: string) {
+	if ctx.on_set_clipboard == nil {
+		return
+	}
+	ctx.on_set_clipboard(data)
+}
+
+set_clipboard :: proc(data: string) {
+	context_set_clipboard(global_ctx, data)
+}
+
 rate_per_second :: proc(rate: f32) -> f32 {
 	ctx := global_ctx
 	return f32(time.duration_seconds(ctx.frame_duration)) * rate
@@ -443,11 +478,29 @@ handle_key_down :: proc() {
 
 }
 
+handle_mouse_down :: proc(button: Mouse_Button) {
+	ctx := global_ctx
+	ctx.mouse_button_down[button] = true
+}
+
+handle_mouse_up :: proc(button: Mouse_Button) {
+	ctx := global_ctx
+	ctx.mouse_button_down[button] = false
+}
+
+is_mouse_down :: proc(button: Mouse_Button) -> bool {
+	ctx := global_ctx
+	return ctx.mouse_button_down[button]
+}
+
 //
 // Clear the UI construction state for a new frame
 //
 begin :: proc() {
 	ctx := global_ctx
+	if ctx.frame_start_time != {} {
+		ctx.frame_duration = time.since(ctx.frame_start_time)
+	}
 	ctx.frame_start_time = time.now()
 
 	clear(&ctx.id_stack)
@@ -511,8 +564,6 @@ end :: proc() {
 	} else {
 		ctx.focused_id = 0
 	}
-
-	ctx.frame_duration = time.since(ctx.frame_start_time)
 }
 
 //
@@ -563,22 +614,34 @@ node_init :: proc(self: ^Node) {
 
 node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	ctx := global_ctx
+
 	self.style.scale = 1
+
 	node_configure(self, config)
+
 	self.is_dead = false
 	self.content_size = 0
+
+	self.is_hovered = ctx.hovered_id == self.id
+	self.has_hovered_child = false
+
+	self.is_active = false
+	self.has_active_child = false
+
 	if len(self.text) > 0 {
 		self.text_layout = kn.make_text(self.text, self.style.font_size)
 		self.content_size = linalg.max(self.content_size, self.text_layout.size)
 	}
+
 	self.size += self.added_size
-	self.has_hovered_child = false
-	self.is_hovered = ctx.hovered_id == self.id
+
 	if self.parent == nil {
 		append(&ctx.roots, self)
 		return
 	}
+
 	append(&self.parent.kids, self)
+
 	if self.grow[int(self.parent.vertical)] {
 		self.parent.growable_kid_count += 1
 	}
@@ -651,6 +714,7 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
 	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
+	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
 }
 
 node_solve_box_recursively :: proc(self: ^Node) {
@@ -742,6 +806,11 @@ node_receive_input :: proc(self: ^Node) {
 	   ctx.mouse_position.y <= self.box.hi.y {
 		try_hover_node(self)
 	}
+	if self.is_hovered {
+		if is_mouse_down(.Left) {
+			ctx.active_node = self
+		}
+	}
 }
 
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
@@ -766,32 +835,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	if self.on_draw != nil {
 		self.on_draw(self)
 	} else {
-		if self.style.shadow_color != {} {
-			kn.add_box_shadow(
-				self.box,
-				self.style.radius[0],
-				self.style.shadow_size,
-				self.style.shadow_color,
-			)
-		}
-		if self.style.background_paint != nil {
-			kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
-		}
-		if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
-			kn.add_text(
-				self.text_layout,
-				(self.box.lo + self.box.hi) / 2 - self.text_layout.size / 2,
-				paint = self.style.foreground_paint,
-			)
-		}
-		if self.style.stroke_paint != nil {
-			kn.add_box_lines(
-				self.box,
-				self.style.stroke_width,
-				self.style.radius,
-				paint = self.style.stroke_paint,
-			)
-		}
+		node_draw_default(self)
 	}
 
 	if is_transformed {
@@ -804,6 +848,35 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	if ctx.is_debugging && self.has_hovered_child {
 		kn.add_box_lines(self.box, 1, paint = kn.LightGreen)
+	}
+}
+
+node_draw_default :: proc(self: ^Node) {
+	if self.style.shadow_color != {} {
+		kn.add_box_shadow(
+			self.box,
+			self.style.radius[0],
+			self.style.shadow_size,
+			self.style.shadow_color,
+		)
+	}
+	if self.style.background_paint != nil {
+		kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
+	}
+	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
+		kn.add_text(
+			self.text_layout,
+			(self.box.lo + self.box.hi) / 2 - self.text_layout.size / 2,
+			paint = self.style.foreground_paint,
+		)
+	}
+	if self.style.stroke_paint != nil {
+		kn.add_box_lines(
+			self.box,
+			self.style.stroke_width,
+			self.style.radius,
+			paint = self.style.stroke_paint,
+		)
 	}
 }
 
@@ -874,6 +947,10 @@ main :: proc() {
 				if event.key.key == sdl3.K_F1 {
 					ctx.is_debugging = !ctx.is_debugging
 				}
+			case .MOUSE_BUTTON_DOWN:
+				handle_mouse_down(Mouse_Button(int(event.button.button) - 1))
+			case .MOUSE_BUTTON_UP:
+				handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
 			case .MOUSE_MOTION:
 				handle_mouse_motion(event.motion.x, event.motion.y)
 			case .WINDOW_PIXEL_SIZE_CHANGED:
@@ -972,43 +1049,41 @@ do_frame :: proc() {
 				on_animate = proc(self: ^Node) {
 					if self.has_hovered_child {
 						global_ctx.cursor = .Pointer
-						self.added_size.y = 20
 					}
-					self.added_size = 0
-				},
-			})
-			do_node({
-				rsize = 1,
-				abs = true,
-				on_animate = proc(self: ^Node) {
-					if self.transitions[0] > 0.001 {
-						self.style.radius = 4 + 4 * self.transitions[0]
-						self.style.shadow_color = kn.fade(kn.Black, self.transitions[0] * 0.5)
-						self.style.shadow_size = 3 * self.transitions[0]
-					}
+					self.added_size.y = 30 * self.transitions[0]
 					self.transitions[0] +=
-						(f32(i32(self.parent.has_hovered_child)) - self.transitions[0]) *
-						rate_per_second(500)
+						(f32(i32(self.has_active_child)) - self.transitions[0]) *
+						rate_per_second(8)
 				},
 			})
-			do_node({
-				rsize = 1,
-				abs = true,
-				bg = shade,
-				stroke = kn.Black,
-				stroke_width = 1,
-				radius = 4,
-				on_animate = proc(self: ^Node) {
-					if self.transitions[0] > 0.001 {
-						self.style.radius = 4 + 4 * self.transitions[0]
-						self.style.transform_origin = {0, 1}
-						self.style.translate.y = -2 * self.transitions[0]
-						self.style.rotation = -0.1 * self.transitions[0]
-					}
-					self.transitions[0] +=
-						(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(500)
-				},
-			})
+			do_node(node_config_clone_of_parent({
+					on_animate = proc(self: ^Node) {
+						if self.transitions[0] > 0.001 {
+							self.style.radius = 4 + 4 * self.transitions[0]
+							self.style.shadow_color = kn.fade(kn.Black, self.transitions[0] * 0.5)
+							self.style.shadow_size = 3 * self.transitions[0]
+						}
+						self.transitions[0] +=
+							(f32(i32(self.parent.has_hovered_child)) - self.transitions[0]) *
+							rate_per_second(8)
+					},
+				}))
+			do_node(node_config_clone_of_parent({
+					bg = shade,
+					stroke = kn.Black,
+					stroke_width = 1,
+					radius = 4,
+					on_animate = proc(self: ^Node) {
+						if self.transitions[0] > 0.001 {
+							self.style.radius = 4 + 4 * self.transitions[0]
+							self.style.transform_origin = {0, 1}
+							self.style.translate.y = -2 * self.transitions[0]
+							self.style.rotation = -0.1 * self.transitions[0]
+						}
+						self.transitions[0] +=
+							(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(8)
+					},
+				}))
 			end_node()
 			pop_id()
 		}
