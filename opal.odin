@@ -2,7 +2,7 @@ package opal
 
 //
 // TODO:
-// 	[] Figure out how to let a node modify its own size
+// 	[x] Figure out how to let a node modify its own size
 // 		- Probably through callbacks
 //
 //
@@ -17,7 +17,9 @@ import "core:math/rand"
 import "core:mem"
 import "core:reflect"
 import "core:slice"
+import "core:strings"
 import "core:time"
+import "lucide"
 import "tw"
 import "vendor:sdl3"
 
@@ -217,6 +219,7 @@ Node :: struct {
 	// Clicked
 	is_active:          bool,
 	has_active_child:   bool,
+	clip_content:       bool,
 
 	// Z index (higher values appear in front of lower ones)
 	z_index:            u32,
@@ -253,6 +256,7 @@ Node_Style :: struct {
 	stroke_width:     f32,
 	font_size:        f32,
 	shadow_size:      f32,
+	transform_kids:   bool,
 }
 
 @(init)
@@ -585,6 +589,10 @@ end :: proc() {
 	ctx.mouse_button_was_down = ctx.mouse_button_down
 }
 
+set_cursor :: proc(cursor: Cursor) {
+	global_ctx.cursor = cursor
+}
+
 //
 // Attempt to overwrite the currently hovered node respecting z-index
 //
@@ -648,7 +656,8 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	self.has_active_child = false
 
 	if len(self.text) > 0 {
-		self.text_layout = kn.make_text(self.text, self.style.font_size)
+		font := kn.DEFAULT_FONT if self.style.font == nil else self.style.font^
+		self.text_layout = kn.make_text(self.text, self.style.font_size, font)
 		self.content_size = linalg.max(self.content_size, self.text_layout.size)
 	}
 
@@ -851,10 +860,18 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.translate(-transform_origin + self.style.translate)
 	}
 
+	if self.clip_content {
+		kn.push_scissor(kn.make_box(self.box))
+	}
+
 	if self.on_draw != nil {
 		self.on_draw(self)
 	} else {
 		node_draw_default(self)
+	}
+
+	if self.clip_content {
+		kn.pop_scissor()
 	}
 
 	if is_transformed {
@@ -936,15 +953,19 @@ main :: proc() {
 	kn.start_on_platform(platform)
 	defer kn.shutdown()
 
+	lucide.load()
+
 	init()
 	defer deinit()
 
 	ctx := global_ctx
 
+	// Create system cursors
 	for cursor in sdl3.SystemCursor {
 		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
 	}
 
+	// Set cursor callback
 	ctx.on_set_cursor = proc(cursor: Cursor) -> bool {
 		switch cursor {
 		case .Normal:
@@ -985,19 +1006,40 @@ main :: proc() {
 	}
 }
 
-do_button :: proc(text: string) {
+string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> string {
+	b := strings.builder_make(allocator = allocator)
+	strings.write_rune(&b, char)
+	return strings.to_string(b)
+}
+
+do_button :: proc(label: union #no_nil {
+		string,
+		rune,
+	}, font: ^kn.Font = nil, font_size: f32 = 14, loc := #caller_location) {
 	do_node({
-		p = 3,
-		fit = true,
-		text = text,
-		font_size = 14,
-		fg = tw.SLATE_800,
-		on_animate = proc(self: ^Node) {
-			self.style.background_paint = kn.mix(self.transitions[0], tw.SLATE_300, tw.SLATE_400)
-			self.transitions[0] +=
-				(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(6)
-		},
-	})
+			p = 3,
+			fit = true,
+			text = label.(string) or_else string_from_rune(label.(rune)),
+			font_size = font_size,
+			fg = tw.SLATE_800,
+			font = font,
+			on_animate = proc(self: ^Node) {
+				self.style.background_paint = kn.mix(
+					self.transitions[0],
+					tw.SLATE_300,
+					tw.SLATE_400,
+				)
+				self.style.transform_origin = 0.5
+				self.style.scale = 1 - 0.05 * self.transitions[1]
+				self.transitions[1] +=
+					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
+				self.transitions[0] +=
+					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(7)
+				if self.is_hovered {
+					set_cursor(.Pointer)
+				}
+			},
+		}, loc = loc)
 }
 
 do_frame :: proc() {
@@ -1015,19 +1057,19 @@ do_frame :: proc() {
 	kn.new_frame()
 
 	begin()
-
 	center := linalg.array_cast(kn.get_size(), f32) / 2
 	begin_node(
 		{
 			p = 4,
-			gap = 4,
+			gap = 20,
 			vertical = true,
-			content_align_y = 0,
+			content_align_x = 0.5,
+			content_align_y = 0.5,
 			bg = kn.Color{0, 0, 0, 0},
-			radius = 4,
 			size = linalg.array_cast(kn.get_size(), f32),
 		},
 	)
+	do_button(lucide.TRENDING_DOWN, font = &lucide.font, font_size = 20)
 	do_button("Button")
 	end_node()
 	end()
@@ -1052,3 +1094,4 @@ do_frame :: proc() {
 
 	free_all(context.temp_allocator)
 }
+
