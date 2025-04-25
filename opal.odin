@@ -277,45 +277,46 @@ Mouse_Button :: enum {
 
 Context :: struct {
 	// Input state
-	mouse_position:    Vector2,
-	mouse_button_down: [Mouse_Button]bool,
-	hovered_node:      ^Node,
-	focused_node:      ^Node,
-	active_node:       ^Node,
-	hovered_id:        Id,
-	focused_id:        Id,
-	active_id:         Id,
-	on_set_cursor:     On_Set_Cursor_Proc,
-	on_set_clipboard:  On_Set_Clipboard_Proc,
-	on_get_clipboard:  On_Get_Clipboard_Proc,
-	cursor:            Cursor,
-	last_cursor:       Cursor,
+	mouse_position:        Vector2,
+	mouse_button_down:     [Mouse_Button]bool,
+	mouse_button_was_down: [Mouse_Button]bool,
+	hovered_node:          ^Node,
+	focused_node:          ^Node,
+	active_node:           ^Node,
+	hovered_id:            Id,
+	focused_id:            Id,
+	active_id:             Id,
+	on_set_cursor:         On_Set_Cursor_Proc,
+	on_set_clipboard:      On_Set_Clipboard_Proc,
+	on_get_clipboard:      On_Get_Clipboard_Proc,
+	cursor:                Cursor,
+	last_cursor:           Cursor,
 
 	// Map of node ids
-	nodes_by_id:       map[Id]^Node,
+	nodes_by_id:           map[Id]^Node,
 
 	// Contiguous storage of all nodes in the UI
-	nodes:             [dynamic]Node,
+	nodes:                 [dynamic]Node,
 
 	// All nodes wihout a parent are stored here for layout solving
 	// They are the root nodes of their layout trees
-	roots:             [dynamic]^Node,
+	roots:                 [dynamic]^Node,
 
 	// The stack of nodes being declared
-	stack:             [dynamic]^Node,
+	stack:                 [dynamic]^Node,
 
 	// The hash stack
-	id_stack:          [dynamic]Id,
+	id_stack:              [dynamic]Id,
 
 	// The top-most element of the stack
-	current_node:      ^Node,
+	current_node:          ^Node,
 
 	// Profiling state
-	frame_start_time:  time.Time,
-	frame_duration:    time.Duration,
+	frame_start_time:      time.Time,
+	frame_duration:        time.Duration,
 
 	// Debug state
-	is_debugging:      bool,
+	is_debugging:          bool,
 }
 
 @(private)
@@ -488,9 +489,19 @@ handle_mouse_up :: proc(button: Mouse_Button) {
 	ctx.mouse_button_down[button] = false
 }
 
-is_mouse_down :: proc(button: Mouse_Button) -> bool {
+mouse_down :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
 	return ctx.mouse_button_down[button]
+}
+
+mouse_pressed :: proc(button: Mouse_Button) -> bool {
+	ctx := global_ctx
+	return ctx.mouse_button_down[button] && !ctx.mouse_button_was_down[button]
+}
+
+mouse_released :: proc(button: Mouse_Button) -> bool {
+	ctx := global_ctx
+	return !ctx.mouse_button_down[button] && ctx.mouse_button_was_down[button]
 }
 
 //
@@ -512,6 +523,7 @@ begin :: proc() {
 	ctx.current_node = nil
 	ctx.hovered_node = nil
 	ctx.focused_node = nil
+	ctx.active_node = nil
 }
 
 //
@@ -564,6 +576,13 @@ end :: proc() {
 	} else {
 		ctx.focused_id = 0
 	}
+	if ctx.active_node != nil {
+		ctx.active_id = ctx.active_node.id
+	} else if mouse_released(.Left) {
+		ctx.active_id = 0
+	}
+
+	ctx.mouse_button_was_down = ctx.mouse_button_down
 }
 
 //
@@ -625,7 +644,7 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	self.is_hovered = ctx.hovered_id == self.id
 	self.has_hovered_child = false
 
-	self.is_active = false
+	self.is_active = ctx.active_id == self.id
 	self.has_active_child = false
 
 	if len(self.text) > 0 {
@@ -807,7 +826,7 @@ node_receive_input :: proc(self: ^Node) {
 		try_hover_node(self)
 	}
 	if self.is_hovered {
-		if is_mouse_down(.Left) {
+		if mouse_pressed(.Left) {
 			ctx.active_node = self
 		}
 	}
@@ -966,6 +985,21 @@ main :: proc() {
 	}
 }
 
+do_button :: proc(text: string) {
+	do_node({
+		p = 3,
+		fit = true,
+		text = text,
+		font_size = 14,
+		fg = tw.SLATE_800,
+		on_animate = proc(self: ^Node) {
+			self.style.background_paint = kn.mix(self.transitions[0], tw.SLATE_300, tw.SLATE_400)
+			self.transitions[0] +=
+				(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(6)
+		},
+	})
+}
+
 do_frame :: proc() {
 	MENU_ITEMS := []string {
 		"Go to definition",
@@ -975,33 +1009,6 @@ do_frame :: proc() {
 		"Create macro",
 		"Add/remove breakpoint",
 		"Set as cold",
-	}
-
-	menu_item :: proc(text: string) {
-		begin_node(
-			{
-				size = {},
-				max_size = {math.F32_MAX, 30},
-				grow = true,
-				fit = true,
-				p = 4,
-				content_align_y = 0.5,
-				radius = 4,
-				bg = tw.GRAY_200,
-			},
-		)
-		do_node(
-			{text = text, max_size = math.F32_MAX, fg = tw.GRAY_900, font_size = 12, fit = true},
-		)
-		do_node({size = {10, 0}, max_size = math.F32_MAX, grow = true})
-		do_node({
-			size = {20, 20},
-			bg = tw.GRAY_700,
-			on_draw = proc(
-				self: ^Node,
-			) {kn.add_circle((self.box.lo + self.box.hi) / 2, self.size.x / 2, paint = self.style.background_paint)},
-		})
-		end_node()
 	}
 
 	ctx := global_ctx
@@ -1021,76 +1028,7 @@ do_frame :: proc() {
 			size = linalg.array_cast(kn.get_size(), f32),
 		},
 	)
-	for item, item_index in MENU_ITEMS {
-		push_id(item_index)
-		menu_item(item)
-		pop_id()
-	}
-	do_node(
-		{
-			text = "Tailwind Colors!!!",
-			p = abs(math.sin(kn.run_time()) * 4),
-			fg = tw.GRAY_900,
-			font_size = 14,
-			grow = true,
-			max_size = math.F32_MAX,
-		},
-	)
-	begin_node({p = 10, gap = 5, fit = true, grow = true, max_w = math.F32_MAX, max_h = 400})
-	for &color, color_index in tw.COLORS {
-		push_id(color_index)
-		begin_node({gap = 5, fit = true, grow = true, vertical = true, max_size = math.F32_MAX})
-		for shade, shade_index in color {
-			push_id(color_index * 12 + shade_index)
-			begin_node({
-				size = {30, 20},
-				max_size = math.F32_MAX,
-				grow = true,
-				on_animate = proc(self: ^Node) {
-					if self.has_hovered_child {
-						global_ctx.cursor = .Pointer
-					}
-					self.added_size.y = 30 * self.transitions[0]
-					self.transitions[0] +=
-						(f32(i32(self.has_active_child)) - self.transitions[0]) *
-						rate_per_second(8)
-				},
-			})
-			do_node(node_config_clone_of_parent({
-					on_animate = proc(self: ^Node) {
-						if self.transitions[0] > 0.001 {
-							self.style.radius = 4 + 4 * self.transitions[0]
-							self.style.shadow_color = kn.fade(kn.Black, self.transitions[0] * 0.5)
-							self.style.shadow_size = 3 * self.transitions[0]
-						}
-						self.transitions[0] +=
-							(f32(i32(self.parent.has_hovered_child)) - self.transitions[0]) *
-							rate_per_second(8)
-					},
-				}))
-			do_node(node_config_clone_of_parent({
-					bg = shade,
-					stroke = kn.Black,
-					stroke_width = 1,
-					radius = 4,
-					on_animate = proc(self: ^Node) {
-						if self.transitions[0] > 0.001 {
-							self.style.radius = 4 + 4 * self.transitions[0]
-							self.style.transform_origin = {0, 1}
-							self.style.translate.y = -2 * self.transitions[0]
-							self.style.rotation = -0.1 * self.transitions[0]
-						}
-						self.transitions[0] +=
-							(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(8)
-					},
-				}))
-			end_node()
-			pop_id()
-		}
-		end_node()
-		pop_id()
-	}
-	end_node()
+	do_button("Button")
 	end_node()
 	end()
 
@@ -1114,4 +1052,3 @@ do_frame :: proc() {
 
 	free_all(context.temp_allocator)
 }
-
