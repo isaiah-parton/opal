@@ -553,7 +553,8 @@ end :: proc() {
 		root.box.lo = root.position - root.size * root.align
 		root.box.hi = root.box.lo + root.size
 
-		node_finish_layout_recursively(root)
+		node_layout_kids_recursively(root, 0)
+		node_layout_kids_recursively(root, 1)
 		node_solve_box_recursively(root)
 
 		kn.set_draw_order(int(root.z_index))
@@ -761,15 +762,20 @@ node_solve_box_recursively :: proc(self: ^Node) {
 	}
 }
 
-node_wrap_text_recursively :: proc(self: ^Node) {
-
+node_wrap_text :: proc(self: ^Node) {
+	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
+		self.text_layout = kn.make_text(
+			self.text,
+			self.style.font_size,
+			self.style.font^,
+			wrap = .Words,
+			max_size = self.size,
+		)
+	}
 }
 
-node_finish_layout_recursively :: proc(self: ^Node) {
-	// Along axis
+node_layout_kids_along_axis :: proc(self: ^Node) {
 	i := int(self.vertical)
-	// Across axis
-	j := 1 - i
 
 	remaining_space := self.size[i] - self.content_size[i]
 
@@ -816,12 +822,17 @@ node_finish_layout_recursively :: proc(self: ^Node) {
 			}
 		}
 	}
+}
+
+node_layout_kids_recursively :: proc(self: ^Node, axis: int) {
+	i := axis
+
 
 	offset_along_axis: f32 = self.padding[i]
 	for node in self.kids {
 		if node.is_absolute {
-			node.position += self.size * node.relative_position
-			node.size += self.size * node.relative_size
+			node.position[i] += self.size[i] * node.relative_position[i]
+			node.size[i] += self.size[i] * node.relative_size[i]
 		} else {
 			available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
 
@@ -829,12 +840,14 @@ node_finish_layout_recursively :: proc(self: ^Node) {
 				node.size[j] = max(node.size[j], available_span)
 			}
 
-			node.position[j] =
-				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
 			node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
+
 			offset_along_axis += node.size[i] + self.spacing
 		}
-		node_finish_layout_recursively(node)
+		// Now that the size is known, wrap text and check for overflow
+		node_wrap_text(node)
+		// Now run this all again for each child node
+		node_layout_kids_recursively(node, axis)
 	}
 }
 
@@ -912,15 +925,6 @@ node_draw_default :: proc(self: ^Node) {
 		kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
 	}
 	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
-		if self.text_layout.size.x > self.size.x && self.enable_wrapping {
-			self.text_layout = kn.make_text(
-				self.text,
-				self.style.font_size,
-				self.style.font^,
-				wrap = .Words,
-				max_size = self.size,
-			)
-		}
 		kn.add_text(
 			self.text_layout,
 			self.box.lo + self.padding.xy,
