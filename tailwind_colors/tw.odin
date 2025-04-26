@@ -1,4 +1,4 @@
-package tw
+package tailwind_colors
 
 Color :: [4]u8
 

@@ -18,9 +18,10 @@ import "core:mem"
 import "core:reflect"
 import "core:slice"
 import "core:strings"
+import "core:sys/windows"
 import "core:time"
 import "lucide"
-import "tw"
+import tw "tailwind_colors"
 import "vendor:sdl3"
 
 // Generic unique identifiers
@@ -76,6 +77,8 @@ Node_Config :: struct {
 	grow_y:          bool,
 	vertical:        bool,
 	abs:             bool,
+	wrap:            bool,
+	clip:            bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
@@ -106,6 +109,8 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.on_draw = config.on_draw
 	self.on_animate = config.on_animate
 	self.relative_size = config.rsize
+	self.enable_wrapping = config.wrap
+	self.clip_content = config.clip
 }
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
@@ -209,6 +214,7 @@ Node :: struct {
 	spacing:            f32,
 	vertical:           bool,
 	is_absolute:        bool,
+	enable_wrapping:    bool,
 
 	// Opal sacrifices one frame of responsiveness for faster frames. This value is a representation of the previous frame's input
 	is_hovered:         bool,
@@ -565,7 +571,7 @@ end :: proc() {
 
 	if ctx.is_debugging {
 		if ctx.hovered_node != nil {
-			kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.Blue)
+			kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.BLUE)
 		}
 	}
 	kn.set_draw_order(0)
@@ -624,55 +630,15 @@ pop_node :: proc() {
 
 default_node_style :: proc() -> Node_Style {
 	return {
-		background_paint = kn.Black,
-		foreground_paint = kn.White,
-		stroke_paint = kn.DimGray,
+		background_paint = kn.BLACK,
+		foreground_paint = kn.WHITE,
+		stroke_paint = kn.DIM_GRAY,
 		stroke_width = 1,
 	}
 }
 
 text_node_style :: proc() -> Node_Style {
 	return {stroke_width = 1}
-}
-
-node_init :: proc(self: ^Node) {
-	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
-}
-
-node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
-	ctx := global_ctx
-
-	self.style.scale = 1
-
-	node_configure(self, config)
-
-	self.is_dead = false
-	self.content_size = 0
-
-	self.is_hovered = ctx.hovered_id == self.id
-	self.has_hovered_child = false
-
-	self.is_active = ctx.active_id == self.id
-	self.has_active_child = false
-
-	if len(self.text) > 0 {
-		font := kn.DEFAULT_FONT if self.style.font == nil else self.style.font^
-		self.text_layout = kn.make_text(self.text, self.style.font_size, font)
-		self.content_size = linalg.max(self.content_size, self.text_layout.size)
-	}
-
-	self.size += self.added_size
-
-	if self.parent == nil {
-		append(&ctx.roots, self)
-		return
-	}
-
-	append(&self.parent.kids, self)
-
-	if self.grow[int(self.parent.vertical)] {
-		self.parent.growable_kid_count += 1
-	}
 }
 
 //
@@ -729,8 +695,50 @@ do_node :: proc(config: Node_Config, loc := #caller_location) {
 }
 
 //
-// Layout logic
+// Node logic
 //
+
+node_init :: proc(self: ^Node) {
+	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
+}
+
+node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
+	ctx := global_ctx
+
+	self.style.scale = 1
+
+	node_configure(self, config)
+
+	self.is_dead = false
+	self.content_size = 0
+
+	self.is_hovered = ctx.hovered_id == self.id
+	self.has_hovered_child = false
+
+	self.is_active = ctx.active_id == self.id
+	self.has_active_child = false
+
+	if len(self.text) > 0 {
+		if self.style.font == nil {
+			self.style.font = &kn.DEFAULT_FONT
+		}
+		self.text_layout = kn.make_text(self.text, self.style.font_size, self.style.font^)
+		self.content_size = linalg.max(self.content_size, self.text_layout.size)
+	}
+
+	self.size += self.added_size
+
+	if self.parent == nil {
+		append(&ctx.roots, self)
+		return
+	}
+
+	append(&self.parent.kids, self)
+
+	if self.grow[int(self.parent.vertical)] {
+		self.parent.growable_kid_count += 1
+	}
+}
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	// Propagate content size up the tree in reverse breadth-first
@@ -751,6 +759,10 @@ node_solve_box_recursively :: proc(self: ^Node) {
 		node.box.hi = node.box.lo + node.size
 		node_solve_box_recursively(node)
 	}
+}
+
+node_wrap_text_recursively :: proc(self: ^Node) {
+
 }
 
 node_finish_layout_recursively :: proc(self: ^Node) {
@@ -883,7 +895,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 
 	if ctx.is_debugging && self.has_hovered_child {
-		kn.add_box_lines(self.box, 1, paint = kn.LightGreen)
+		kn.add_box_lines(self.box, 1, paint = kn.LIGHT_GREEN)
 	}
 }
 
@@ -900,9 +912,18 @@ node_draw_default :: proc(self: ^Node) {
 		kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
 	}
 	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
+		if self.text_layout.size.x > self.size.x && self.enable_wrapping {
+			self.text_layout = kn.make_text(
+				self.text,
+				self.style.font_size,
+				self.style.font^,
+				wrap = .Words,
+				max_size = self.size,
+			)
+		}
 		kn.add_text(
 			self.text_layout,
-			(self.box.lo + self.box.hi) / 2 - self.text_layout.size / 2,
+			self.box.lo + self.padding.xy,
 			paint = self.style.foreground_paint,
 		)
 	}
@@ -921,6 +942,8 @@ node_draw_default :: proc(self: ^Node) {
 //
 
 cursors: [sdl3.SystemCursor]^sdl3.Cursor
+
+FILLER_TEXT :: "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem."
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -960,6 +983,13 @@ main :: proc() {
 
 	ctx := global_ctx
 
+	window_props := sdl3.GetWindowProperties(window)
+	window_hwnd := cast(windows.HWND)sdl3.GetPointerProperty(
+		window_props,
+		sdl3.PROP_WINDOW_WIN32_HWND_POINTER,
+		nil,
+	)
+
 	// Create system cursors
 	for cursor in sdl3.SystemCursor {
 		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
@@ -977,7 +1007,6 @@ main :: proc() {
 	}
 
 	loop: for {
-		sdl3.Delay(10)
 		event: sdl3.Event
 		for sdl3.PollEvent(&event) {
 			#partial switch event.type {
@@ -993,10 +1022,8 @@ main :: proc() {
 				handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
 			case .MOUSE_MOTION:
 				handle_mouse_motion(event.motion.x, event.motion.y)
-			case .WINDOW_PIXEL_SIZE_CHANGED:
-				width, height: i32
-				sdl3.GetWindowSize(window, &width, &height)
-				kn.set_size(width, height)
+			case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
+				kn.set_size(event.window.data1, event.window.data2)
 			case .TEXT_INPUT:
 				handle_text_input(event.text.text)
 			}
@@ -1043,16 +1070,6 @@ do_button :: proc(label: union #no_nil {
 }
 
 do_frame :: proc() {
-	MENU_ITEMS := []string {
-		"Go to definition",
-		"Go to declaration",
-		"Find references",
-		"Rename symbol",
-		"Create macro",
-		"Add/remove breakpoint",
-		"Set as cold",
-	}
-
 	ctx := global_ctx
 	kn.new_frame()
 
@@ -1069,13 +1086,32 @@ do_frame :: proc() {
 			size = linalg.array_cast(kn.get_size(), f32),
 		},
 	)
+	begin_node({gap = 10, grow_x = true, max_size = math.F32_MAX, h = 200, fit_y = true})
+	for i in 1 ..= 3 {
+		push_id(i)
+		do_node(
+			{
+				text = FILLER_TEXT,
+				grow = true,
+				max_size = math.F32_MAX,
+				font_size = 20,
+				fg = tw.GRAY_700,
+				bg = tw.STONE_300,
+				fit_y = true,
+				wrap = true,
+				clip = true,
+			},
+		)
+		pop_id()
+	}
+	end_node()
 	do_button(lucide.TRENDING_DOWN, font = &lucide.font, font_size = 20)
 	do_button("Button")
 	end_node()
 	end()
 
 	if ctx.is_debugging {
-		kn.set_paint(kn.Black)
+		kn.set_paint(kn.BLACK)
 		text := kn.make_text(
 			fmt.tprintf(
 				"FPS: %.0f\n%.0f\n%v",
@@ -1085,11 +1121,11 @@ do_frame :: proc() {
 			),
 			14,
 		)
-		kn.add_box({0, text.size}, paint = kn.fade(kn.Black, 1.0))
-		kn.add_text(text, 0, paint = kn.White)
+		kn.add_box({0, text.size}, paint = kn.fade(kn.BLACK, 1.0))
+		kn.add_text(text, 0, paint = kn.WHITE)
 	}
 
-	kn.set_clear_color(kn.White)
+	kn.set_clear_color(kn.WHITE)
 	kn.present()
 
 	free_all(context.temp_allocator)
