@@ -553,8 +553,9 @@ end :: proc() {
 		root.box.lo = root.position - root.size * root.align
 		root.box.hi = root.box.lo + root.size
 
-		node_layout_kids_recursively(root, 0)
-		node_layout_kids_recursively(root, 1)
+		node_solve_sizes_recursively(root, 0)
+		node_wrap_text_recursively(root)
+		node_solve_sizes_recursively(root, 1)
 		node_solve_box_recursively(root)
 
 		kn.set_draw_order(int(root.z_index))
@@ -762,19 +763,21 @@ node_solve_box_recursively :: proc(self: ^Node) {
 	}
 }
 
-node_wrap_text :: proc(self: ^Node) {
-	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
-		self.text_layout = kn.make_text(
-			self.text,
-			self.style.font_size,
-			self.style.font^,
-			wrap = .Words,
-			max_size = self.size,
-		)
+node_solve_sizes_across_axis :: proc(self: ^Node) {
+	j := 1 - int(self.vertical)
+	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
+	for node in self.kids {
+
+		if node.grow[j] {
+			node.size[j] = max(node.size[j], available_span)
+		}
+
+		node.position[j] =
+			self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
 	}
 }
 
-node_layout_kids_along_axis :: proc(self: ^Node) {
+node_solve_sizes_along_axis :: proc(self: ^Node) {
 	i := int(self.vertical)
 
 	remaining_space := self.size[i] - self.content_size[i]
@@ -822,32 +825,44 @@ node_layout_kids_along_axis :: proc(self: ^Node) {
 			}
 		}
 	}
-}
-
-node_layout_kids_recursively :: proc(self: ^Node, axis: int) {
-	i := axis
-
 
 	offset_along_axis: f32 = self.padding[i]
 	for node in self.kids {
 		if node.is_absolute {
-			node.position[i] += self.size[i] * node.relative_position[i]
-			node.size[i] += self.size[i] * node.relative_size[i]
+			node.position += self.size * node.relative_position
+			node.size += self.size * node.relative_size
 		} else {
-			available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
-
-			if node.grow[j] {
-				node.size[j] = max(node.size[j], available_span)
-			}
-
 			node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
-
 			offset_along_axis += node.size[i] + self.spacing
 		}
-		// Now that the size is known, wrap text and check for overflow
-		node_wrap_text(node)
-		// Now run this all again for each child node
-		node_layout_kids_recursively(node, axis)
+	}
+}
+
+node_solve_sizes_recursively :: proc(self: ^Node, axis: int) {
+	if int(self.vertical) == axis {
+		node_solve_sizes_along_axis(self)
+	} else {
+		node_solve_sizes_across_axis(self)
+	}
+	for node in self.kids {
+		node_solve_sizes_recursively(node, axis)
+	}
+}
+
+node_wrap_text_recursively :: proc(self: ^Node) {
+	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
+		assert(self.style.font != nil)
+		self.text_layout = kn.make_text(
+			self.text,
+			self.style.font_size,
+			self.style.font^,
+			wrap = .Words,
+			max_size = {self.size.x, math.F32_MAX},
+		)
+		self.size.y = max(self.size.y, self.text_layout.size.y)
+	}
+	for node in self.kids {
+		node_wrap_text_recursively(node)
 	}
 }
 
@@ -1017,7 +1032,7 @@ main :: proc() {
 			case .QUIT:
 				break loop
 			case .KEY_DOWN:
-				if event.key.key == sdl3.K_F1 {
+				if event.key.key == sdl3.K_F3 {
 					ctx.is_debugging = !ctx.is_debugging
 				}
 			case .MOUSE_BUTTON_DOWN:
@@ -1134,4 +1149,3 @@ do_frame :: proc() {
 
 	free_all(context.temp_allocator)
 }
-
