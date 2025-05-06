@@ -348,7 +348,7 @@ Context :: struct {
 	nodes_by_id:                map[Id]^Node,
 
 	// Contiguous storage of all nodes in the UI
-	nodes:                      [dynamic]Node,
+	nodes:                      [1024]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving
 	// They are the root nodes of their layout trees
@@ -594,7 +594,7 @@ pop_id :: proc() {
 
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
-	reserve(&ctx.nodes, 2048)
+	// reserve(&ctx.nodes, 2048)
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
@@ -605,7 +605,7 @@ context_init :: proc(ctx: ^Context) {
 
 context_deinit :: proc(ctx: ^Context) {
 	assert(ctx != nil)
-	delete(ctx.nodes)
+	// delete(ctx.nodes)
 	delete(ctx.roots)
 	delete(ctx.stack)
 	delete(ctx.id_stack)
@@ -791,12 +791,14 @@ end :: proc() {
 
 	// Clean up unused nodes
 	for &node, node_index in ctx.nodes {
+		node := node.? or_continue
 		if node.is_dead {
 			if node.on_drop != nil {
 				node.on_drop(&node)
 			}
+			node_destroy(&node)
 			delete_key(&ctx.nodes_by_id, node.id)
-			unordered_remove(&ctx.nodes, node_index)
+			// unordered_remove(&ctx.nodes, node_index)
 		} else {
 			node.is_dead = true
 		}
@@ -871,10 +873,19 @@ get_or_create_node :: proc(id: Id) -> ^Node {
 	ctx := global_ctx
 	node, ok := ctx.nodes_by_id[id]
 	if !ok {
-		append(&ctx.nodes, Node{id = id})
-		node = &ctx.nodes[len(ctx.nodes) - 1]
+		for &slot in ctx.nodes {
+			if slot == nil {
+				slot = Node {
+					id = id,
+				}
+				node = &slot.?
+				ok = true
+				break
+			}
+		}
+		// append(&ctx.nodes, Node{id = id})
+		// node = &ctx.nodes[len(ctx.nodes) - 1]
 		ctx.nodes_by_id[id] = node
-		ok = true
 	}
 	if node == nil {
 		fmt.panicf(
@@ -934,11 +945,16 @@ do_node :: proc(config: Node_Config, loc := #caller_location) -> ^Node {
 //
 
 node_init :: proc(self: ^Node) {
-	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
+	reserve(&self.kids, 16)
+	clear(&self.kids)
 }
 
 focus_node :: proc(id: Id) {
 	global_ctx.focused_id = id
+}
+
+node_destroy :: proc(self: ^Node) {
+	delete(self.kids)
 }
 
 node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
@@ -947,9 +963,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	self.style.scale = 1
 
 	self.z_index = 0
-	if self.parent != nil {
-		self.z_index += self.parent.z_index + 1
-	}
 
 	// Configure the node
 	node_configure(self, config)
@@ -1225,6 +1238,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Draw children
 	for node in self.kids {
+		node.z_index += self.z_index
 		node_draw_recursively(node, depth + 1)
 	}
 

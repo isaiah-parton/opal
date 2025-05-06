@@ -40,36 +40,42 @@ do_button :: proc(label: union #no_nil {
 		}, loc = loc)
 }
 
-do_menu_item :: proc(label: union #no_nil {
-		string,
-		rune,
-	}, font: ^kn.Font = nil, font_size: f32 = 12, loc := #caller_location) {
+do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	using opal
-	if true do return
-	do_node({
-			p = 3,
-			radius = 3,
+	push_id(hash(loc))
+
+	begin_node({
+		p = 3,
+		pr = 12,
+		radius = 3,
+		fit = true,
+		gap = 10,
+		max_size = math.F32_MAX,
+		grow_x = true,
+		content_align_y = 0.5,
+		on_animate = proc(self: ^Node) {
+			self.style.background_paint = kn.fade(tw.SLATE_600, 0.3 + self.transitions[0] * 0.3)
+			self.transitions[1] +=
+				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
+			self.transitions[0] +=
+				(f32(i32(self.is_hovered || self.has_hovered_child)) - self.transitions[0]) *
+				rate_per_second(14)
+			if self.is_hovered || self.has_hovered_child {
+				set_cursor(.Pointer)
+			}
+		},
+	})
+	do_node(
+		{
+			text = string_from_rune(icon),
+			font = &lucide.font,
+			font_size = 14,
 			fit = true,
-			text = label.(string) or_else string_from_rune(label.(rune)),
-			font_size = font_size,
 			fg = tw.SLATE_300,
-			font = font,
-			max_size = math.F32_MAX,
-			grow_x = true,
-			on_animate = proc(self: ^Node) {
-				self.style.background_paint = kn.fade(
-					tw.SLATE_600,
-					0.3 + self.transitions[0] * 0.3,
-				)
-				self.transitions[1] +=
-					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
-				self.transitions[0] +=
-					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
-				if self.is_hovered {
-					set_cursor(.Pointer)
-				}
-			},
-		}, loc = loc)
+		},
+	)
+	do_node({text = label, font_size = 12, fit = true, fg = tw.SLATE_300})
+	end_node()
 }
 
 @(deferred_out = __do_menu)
@@ -111,16 +117,11 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				abs = true,
 				relative_pos = {0, 1},
 				pos = {0, 4},
-				fit_y = true,
-				w = 100,
-				wrap = true,
+				fit = true,
 				p = 3,
 				gap = 3,
 				radius = 5,
 				bg = tw.SLATE_800,
-				text = "There ought to be some items here",
-				fg = tw.SLATE_200,
-				font_size = 12,
 				vertical = true,
 			},
 		)
@@ -246,27 +247,27 @@ main :: proc() {
 			)
 			{
 				if do_menu("File") {
-					do_menu_item("New")
-					do_menu_item("Open")
-					do_menu_item("Save")
-					do_menu_item("Save As")
+					do_menu_item("New", lucide.PLUS)
+					do_menu_item("Open", lucide.FOLDER_OPEN)
+					do_menu_item("Save", lucide.SAVE)
+					do_menu_item("Save As", lucide.SAVE)
 				}
 				if do_menu("Edit") {
-					do_menu_item("Undo")
-					do_menu_item("Redo")
+					do_menu_item("Undo", lucide.UNDO)
+					do_menu_item("Redo", lucide.REDO)
 				}
 				if do_menu("Select") {
-					do_menu_item("All")
-					do_menu_item("Invert")
+					do_menu_item("All", lucide.TEXT_SELECT)
+					do_menu_item("Invert", lucide.LASSO_SELECT)
 				}
 				if do_menu("Object") {
-					do_menu_item("Create")
-					do_menu_item("Delete")
+					do_menu_item("Create", lucide.PLUS)
+					do_menu_item("Delete", lucide.TRASH)
 				}
 				do_node({grow = true, max_size = math.F32_MAX})
 				if do_menu("Help") {
-					do_menu_item("Manual")
-					do_menu_item("Forum")
+					do_menu_item("Manual", lucide.BOOK)
+					do_menu_item("Forum", lucide.MESSAGE_CIRCLE)
 				}
 			}
 			end_node()
@@ -277,9 +278,9 @@ main :: proc() {
 			{
 				begin_node({max_size = math.F32_MAX, grow = true, p = 20})
 				{
-					do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
-					do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
-					do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
+					// do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
+					// do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
+					// do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
 				}
 				end_node()
 
