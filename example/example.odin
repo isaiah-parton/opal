@@ -23,9 +23,8 @@ do_button :: proc(label: union #no_nil {
 			font_size = font_size,
 			fg = tw.SLATE_300,
 			font = font,
+			max_size = math.F32_MAX,
 			on_animate = proc(self: ^Node) {
-				self.style.stroke_paint = kn.fade(tw.FUCHSIA_400, f32(i32(self.is_focused)))
-				self.style.stroke_width = 2
 				self.style.background_paint = kn.fade(
 					tw.SLATE_600,
 					0.3 + self.transitions[0] * 0.3,
@@ -36,17 +35,114 @@ do_button :: proc(label: union #no_nil {
 					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
 				if self.is_hovered {
 					set_cursor(.Pointer)
-					if self.parent != nil && self.parent.has_focused_child {
-						focus_node(self.id)
-					}
 				}
 			},
 		}, loc = loc)
 }
 
+do_menu_item :: proc(label: union #no_nil {
+		string,
+		rune,
+	}, font: ^kn.Font = nil, font_size: f32 = 12, loc := #caller_location) {
+	using opal
+	if true do return
+	do_node({
+			p = 3,
+			radius = 3,
+			fit = true,
+			text = label.(string) or_else string_from_rune(label.(rune)),
+			font_size = font_size,
+			fg = tw.SLATE_300,
+			font = font,
+			max_size = math.F32_MAX,
+			grow_x = true,
+			on_animate = proc(self: ^Node) {
+				self.style.background_paint = kn.fade(
+					tw.SLATE_600,
+					0.3 + self.transitions[0] * 0.3,
+				)
+				self.transitions[1] +=
+					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
+				self.transitions[0] +=
+					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
+				if self.is_hovered {
+					set_cursor(.Pointer)
+				}
+			},
+		}, loc = loc)
+}
+
+@(deferred_out = __do_menu)
+do_menu :: proc(label: string, loc := #caller_location) -> bool {
+	using opal
+	push_id(hash(loc))
+	node := begin_node({
+		p = 3,
+		radius = 3,
+		fit = true,
+		text = label,
+		font_size = 12,
+		fg = tw.SLATE_300,
+		on_animate = proc(self: ^Node) {
+			self.style.stroke_paint = kn.fade(tw.INDIGO_600, f32(i32(self.is_focused)))
+			self.style.stroke_width = 2
+			self.style.background_paint = kn.fade(tw.SLATE_600, 0.3 + self.transitions[0] * 0.3)
+			self.transitions[1] +=
+				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
+			self.transitions[0] +=
+				(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
+			if self.is_hovered {
+				set_cursor(.Pointer)
+				if self.parent != nil && self.parent.has_focused_child {
+					focus_node(self.id)
+				}
+			}
+		},
+	})
+
+	assert(node != nil)
+
+	is_open := node.is_focused || node.has_focused_child
+
+	if is_open {
+		begin_node(
+			{
+				z = 999,
+				abs = true,
+				relative_pos = {0, 1},
+				pos = {0, 4},
+				fit_y = true,
+				w = 100,
+				wrap = true,
+				p = 3,
+				gap = 3,
+				radius = 5,
+				bg = tw.SLATE_800,
+				text = "There ought to be some items here",
+				fg = tw.SLATE_200,
+				font_size = 12,
+				vertical = true,
+			},
+		)
+	}
+
+	pop_id()
+
+	return is_open
+}
+
+@(private)
+__do_menu :: proc(is_open: bool) {
+	using opal
+	if is_open {
+		end_node()
+	}
+	end_node()
+}
+
 cursors: [sdl3.SystemCursor]^sdl3.Cursor
 
-FILLER_TEXT :: "Algo de texto que puedes selecionar sí gusta."
+FILLER_TEXT :: "Algo de texto que puedes seleccionar si gusta."
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -136,70 +232,101 @@ main :: proc() {
 
 		begin()
 		begin_node({size = kn.get_size(), bg = tw.NEUTRAL_950, vertical = true})
-
-		begin_node(
+		{
+			begin_node(
+				{
+					h = 20,
+					fit_y = true,
+					max_w = math.F32_MAX,
+					grow_x = true,
+					p = 3,
+					gap = 3,
+					bg = tw.NEUTRAL_900,
+				},
+			)
 			{
-				h = 20,
-				fit_y = true,
-				max_w = math.F32_MAX,
-				grow_x = true,
-				p = 2,
-				gap = 4,
-				bg = tw.NEUTRAL_900,
-			},
-		)
-		do_button("File")
-		do_button("Edit")
-		do_button("Select")
-		do_button("Object")
-		do_node({grow = true, max_size = math.F32_MAX})
-		do_button("Help")
-		end_node()
+				if do_menu("File") {
+					do_menu_item("New")
+					do_menu_item("Open")
+					do_menu_item("Save")
+					do_menu_item("Save As")
+				}
+				if do_menu("Edit") {
+					do_menu_item("Undo")
+					do_menu_item("Redo")
+				}
+				if do_menu("Select") {
+					do_menu_item("All")
+					do_menu_item("Invert")
+				}
+				if do_menu("Object") {
+					do_menu_item("Create")
+					do_menu_item("Delete")
+				}
+				do_node({grow = true, max_size = math.F32_MAX})
+				if do_menu("Help") {
+					do_menu_item("Manual")
+					do_menu_item("Forum")
+				}
+			}
+			end_node()
 
-		do_node({h = 1, grow_x = true, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
-		begin_node({max_size = math.F32_MAX, grow = true})
+			do_node({h = 1, grow_x = true, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
 
-		begin_node({max_size = math.F32_MAX, grow = true, p = 20})
-		do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
-		do_button(lucide.ARCHIVE, font = &lucide.font, font_size = 20)
-		do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
-		end_node()
-
-		do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
-
-		begin_node(
+			begin_node({max_size = math.F32_MAX, grow = true})
 			{
-				w = 200,
-				grow_y = true,
-				max_h = math.F32_MAX,
-				vertical = true,
-				gap = 2,
-				p = 2,
-				bg = tw.NEUTRAL_900,
-			},
-		)
-		do_node(
-			{size = 100, bg = Image_Paint{index = image, size = 1}, radius = 50, pos = {100, -50}},
-		)
-		do_node(
-			{
-				text = FILLER_TEXT,
-				fit_y = true,
-				grow_x = true,
-				max_w = math.F32_MAX,
-				font_size = 12,
-				fg = tw.SLATE_200,
-				wrap = true,
-				selectable = true,
-				py = 10,
-			},
-		)
-		do_button("Botón A")
-		do_button("Botón B")
-		end_node()
+				begin_node({max_size = math.F32_MAX, grow = true, p = 20})
+				{
+					do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
+					do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
+					do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
+				}
+				end_node()
 
-		end_node()
+				do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
 
+				begin_node(
+					{
+						w = 200,
+						grow_y = true,
+						max_h = math.F32_MAX,
+						vertical = true,
+						gap = 2,
+						p = 2,
+						bg = tw.NEUTRAL_900,
+						content_align_x = 0.5,
+						content_align_y = 0.5,
+					},
+				)
+				{
+					do_node(
+						{
+							size = 100,
+							bg = Image_Paint{index = image, size = 1},
+							radius = 50,
+							pos = {100, -50},
+						},
+					)
+					do_node(
+						{
+							text = FILLER_TEXT,
+							fit_y = true,
+							grow_x = true,
+							max_w = math.F32_MAX,
+							font_size = 12,
+							fg = tw.SLATE_200,
+							wrap = true,
+							selectable = true,
+							py = 10,
+						},
+					)
+					do_button("Botón A")
+					do_button("Botón B")
+				}
+				end_node()
+			}
+			end_node()
+		}
 		end_node()
 		end()
 
@@ -207,11 +334,12 @@ main :: proc() {
 			kn.set_paint(kn.BLACK)
 			text := kn.make_text(
 				fmt.tprintf(
-					"FPS: %.0f\n%.0f\n%v\nhovered: %i",
+					"FPS: %.0f\n%.0f\n%v\nhovered: %i\n%i nodes",
 					kn.get_fps(),
 					ctx.mouse_position,
 					ctx.frame_duration,
 					ctx.hovered_id,
+					len(ctx.nodes),
 				),
 				12,
 			)

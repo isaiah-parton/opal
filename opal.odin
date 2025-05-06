@@ -69,6 +69,7 @@ Node_Config :: struct {
 	p:               [4]f32,
 	text:            string,
 	pos:             [2]f32,
+	relative_pos:    [2]f32,
 	size:            [2]f32,
 	max_size:        [2]f32,
 	relative_size:   [2]f32,
@@ -82,6 +83,7 @@ Node_Config :: struct {
 	on_drop:         proc(_: ^Node),
 	on_add:          proc(_: ^Node),
 	data:            rawptr,
+	z:               u32,
 	px:              f32,
 	py:              f32,
 	pl:              f32,
@@ -112,6 +114,7 @@ Node_Config :: struct {
 	clip:            bool,
 	selectable:      bool,
 	editable:        bool,
+	root:            bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
@@ -122,6 +125,7 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 		max(config.p.z, config.px, config.pr),
 		max(config.p.w, config.py, config.pb),
 	}
+	self.relative_position = config.relative_pos
 	self.spacing = config.gap
 	self.fit = {config.fit | config.fit_x, config.fit | config.fit_y}
 	self.grow = {config.grow | config.grow_x, config.grow | config.grow_y}
@@ -148,6 +152,7 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.clip_content = config.clip
 	self.enable_selection = config.selectable
 	self.enable_edit = config.editable
+	self.z_index = config.z
 }
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
@@ -169,6 +174,9 @@ Node :: struct {
 
 	//
 	is_dead:            bool,
+
+	// Last frame on which this node was added
+	frame:              int,
 
 	// Unique identifier
 	id:                 Id,
@@ -231,6 +239,7 @@ Node :: struct {
 	was_active:         bool,
 	is_active:          bool,
 	has_active_child:   bool,
+	was_focused:        bool,
 	is_focused:         bool,
 	has_focused_child:  bool,
 
@@ -330,6 +339,7 @@ Context :: struct {
 	last_cursor:                Cursor,
 	selection_background_color: kn.Color,
 	selection_foreground_color: kn.Color,
+	frame:                      int,
 
 	// User images
 	images:                     [dynamic]Maybe(User_Image),
@@ -710,7 +720,6 @@ begin :: proc() {
 	clear(&ctx.id_stack)
 	clear(&ctx.stack)
 	clear(&ctx.roots)
-	clear(&ctx.nodes)
 
 	push_id(Id(FNV1A32_OFFSET_BASIS))
 	ctx.current_node = nil
@@ -722,6 +731,8 @@ begin :: proc() {
 	   ctx.mouse_position != ctx.last_mouse_position {
 		draw_frames(2)
 	}
+
+	ctx.frame += 1
 }
 
 //
@@ -746,21 +757,7 @@ end :: proc() {
 		node_solve_box_recursively(root)
 
 		if ctx.queued_frames > 0 {
-			kn.set_draw_order(int(root.z_index))
 			node_draw_recursively(root)
-		}
-	}
-
-	// Clean up unused nodes
-	for &node, node_index in ctx.nodes {
-		if node.is_dead {
-			if node.on_drop != nil {
-				node.on_drop(&node)
-			}
-			delete_key(&ctx.nodes_by_id, node.id)
-			unordered_remove(&ctx.nodes, node_index)
-		} else {
-			node.is_dead = true
 		}
 	}
 
@@ -790,6 +787,19 @@ end :: proc() {
 		ctx.active_id = ctx.active_node.id
 	} else if mouse_released(.Left) {
 		ctx.active_id = 0
+	}
+
+	// Clean up unused nodes
+	for &node, node_index in ctx.nodes {
+		if node.is_dead {
+			if node.on_drop != nil {
+				node.on_drop(&node)
+			}
+			delete_key(&ctx.nodes_by_id, node.id)
+			unordered_remove(&ctx.nodes, node_index)
+		} else {
+			node.is_dead = true
+		}
 	}
 
 	ctx.mouse_button_was_down = ctx.mouse_button_down
@@ -828,7 +838,7 @@ try_hover_node :: proc(node: ^Node) {
 push_node :: proc(node: ^Node) {
 	ctx := global_ctx
 	append(&ctx.stack, node)
-	ctx.current_node = ctx.stack[len(ctx.stack) - 1]
+	ctx.current_node = node
 }
 
 pop_node :: proc() {
@@ -864,14 +874,25 @@ get_or_create_node :: proc(id: Id) -> ^Node {
 		append(&ctx.nodes, Node{id = id})
 		node = &ctx.nodes[len(ctx.nodes) - 1]
 		ctx.nodes_by_id[id] = node
+		ok = true
 	}
 	if node == nil {
 		fmt.panicf(
-			"get_or_create_node(%i) would return an invalid pointer! This is UNACCEPTABLEEE!!!",
+			"get_or_create_node(%i) would return an nil pointer! This is UNACCEPTABLEEE!!!",
 			id,
 		)
 	}
+	if node.frame == ctx.frame {
+		fmt.printfln("Node %i was called twice in one frame!", node.id)
+		return nil
+	}
+	node.frame = ctx.frame
 	node.parent = ctx.current_node
+	if node.parent != nil {
+		if node.parent.id == node.id {
+			fmt.panicf("Node %i contains itself", node.id)
+		}
+	}
 	return node
 }
 
@@ -902,9 +923,10 @@ end_node :: proc() {
 	}
 }
 
-do_node :: proc(config: Node_Config, loc := #caller_location) {
-	begin_node(config, loc)
+do_node :: proc(config: Node_Config, loc := #caller_location) -> ^Node {
+	self := begin_node(config, loc)
 	end_node()
+	return self
 }
 
 //
@@ -924,8 +946,17 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 
 	self.style.scale = 1
 
+	self.z_index = 0
+	if self.parent != nil {
+		self.z_index += self.parent.z_index + 1
+	}
+
 	// Configure the node
 	node_configure(self, config)
+
+	if config.root {
+		self.parent = nil
+	}
 
 	// Keep alive this frame
 	self.is_dead = false
@@ -942,6 +973,7 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	self.is_active = ctx.active_id == self.id
 	self.has_active_child = false
 
+	self.was_focused = self.is_focused
 	self.is_focused = ctx.focused_id == self.id
 	self.has_focused_child = false
 
@@ -973,6 +1005,8 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		return
 	}
 
+	assert(self != self.parent)
+
 	// Child logic
 	append(&self.parent.kids, self)
 
@@ -982,7 +1016,13 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 }
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
+	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
+	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
+	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
 	// Propagate content size up the tree in reverse breadth-first
+	if child.is_absolute {
+		return
+	}
 	if self.vertical {
 		self.content_size.y += child.size.y
 		self.content_size.x = max(self.content_size.x, child.size.x)
@@ -990,9 +1030,6 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 		self.content_size.x += child.size.x
 		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
-	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
-	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
-	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
 }
 
 node_solve_box_recursively :: proc(self: ^Node) {
@@ -1072,10 +1109,11 @@ node_solve_sizes :: proc(self: ^Node) {
 	}
 }
 
-node_solve_sizes_recursively :: proc(self: ^Node) {
+node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) {
+	assert(depth < 100)
 	node_solve_sizes(self)
 	for node in self.kids {
-		node_solve_sizes_recursively(node)
+		node_solve_sizes_recursively(node, depth + 1)
 	}
 }
 
@@ -1085,7 +1123,9 @@ node_receive_input :: proc(self: ^Node) {
 	   ctx.mouse_position.x <= self.box.hi.x &&
 	   ctx.mouse_position.y >= self.box.lo.y &&
 	   ctx.mouse_position.y <= self.box.hi.y {
-		try_hover_node(self)
+		if !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
+			ctx.hovered_node = self
+		}
 	}
 	if self.is_hovered {
 		if mouse_pressed(.Left) {
@@ -1169,6 +1209,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	if self.clip_content {
 		kn.push_scissor(kn.make_box(self.box))
 	}
+
+	kn.set_draw_order(int(self.z_index))
 
 	// Draw self
 	if self.on_draw != nil {
