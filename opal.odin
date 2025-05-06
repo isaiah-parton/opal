@@ -20,7 +20,9 @@ import "core:slice"
 import "core:strings"
 import "core:sys/windows"
 import "core:time"
+import "core:unicode"
 import "tedit"
+import stbi "vendor:stb/image"
 
 // Generic unique identifiers
 Id :: u32
@@ -28,6 +30,11 @@ Id :: u32
 Box :: kn.Box
 
 Vector2 :: [2]f32
+
+RelativeVector2 :: struct {
+	exact:    [2]f32,
+	relative: [2]f32,
+}
 
 //
 // **Padding**
@@ -42,6 +49,22 @@ Clip :: enum u8 {
 	Full,
 }
 
+Cursor :: enum {
+	Normal,
+	Pointer,
+	Text,
+}
+
+On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
+On_Set_Clipboard_Proc :: #type proc(data: string)
+On_Get_Clipboard_Proc :: #type proc() -> string
+
+Mouse_Button :: enum {
+	Left,
+	Middle,
+	Right,
+}
+
 Node_Config :: struct {
 	p:               [4]f32,
 	text:            string,
@@ -49,7 +72,7 @@ Node_Config :: struct {
 	size:            [2]f32,
 	max_size:        [2]f32,
 	relative_size:   [2]f32,
-	bg:              kn.Paint_Option,
+	bg:              Paint_Variant,
 	stroke:          kn.Paint_Option,
 	fg:              kn.Paint_Option,
 	font:            ^kn.Font,
@@ -187,9 +210,6 @@ Node :: struct {
 	// This is known after box is calculated
 	text_origin:        [2]f32,
 
-	// Text selection indices
-	selection:          [2]int,
-
 	// Values for the node's children layout
 	padding:            [4]f32,
 	content_align:      [2]f32,
@@ -212,6 +232,13 @@ Node :: struct {
 	is_active:          bool,
 	has_active_child:   bool,
 	is_focused:         bool,
+	has_focused_child:  bool,
+
+	// Times the node was clicked
+	click_count:        u8,
+
+	// Time of last mouse down event over this node
+	last_click_time:    time.Time,
 
 	// If overflowing content is clipped
 	clip_content:       bool,
@@ -231,6 +258,8 @@ Node :: struct {
 	text_layout:        kn.Selectable_Text,
 	last_text_size:     [2]f32,
 	style:              Node_Style,
+	select_anchor:      int,
+	editor:             tedit.Editor,
 	transitions:        [3]f32,
 	on_create:          proc(self: ^Node),
 	on_drop:            proc(self: ^Node),
@@ -239,6 +268,17 @@ Node :: struct {
 	on_add:             proc(self: ^Node),
 	data:               rawptr,
 	retained_data:      rawptr,
+}
+
+Image_Paint :: struct {
+	index:  int,
+	offset: [2]f32,
+	size:   [2]f32,
+}
+
+Paint_Variant :: union #no_nil {
+	kn.Color,
+	Image_Paint,
 }
 
 //
@@ -251,7 +291,7 @@ Node_Style :: struct {
 	translate:        [2]f32,
 	stroke_join:      kn.Shape_Outline,
 	stroke_paint:     kn.Paint_Option,
-	background_paint: kn.Paint_Option,
+	background_paint: Paint_Variant,
 	foreground_paint: kn.Paint_Option,
 	font:             ^kn.Font,
 	shadow_color:     kn.Color,
@@ -262,82 +302,125 @@ Node_Style :: struct {
 	transform_kids:   bool,
 }
 
-@(init)
-_print_struct_memory_configuration :: proc() {
-	fmt.println(size_of(Node), align_of(Node))
-}
-
-Cursor :: enum {
-	Normal,
-	Pointer,
-	Text,
-}
-
-On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
-On_Set_Clipboard_Proc :: #type proc(data: string)
-On_Get_Clipboard_Proc :: #type proc() -> string
-
-Mouse_Button :: enum {
-	Left,
-	Middle,
-	Right,
+User_Image :: struct {
+	source: Maybe(Box),
+	data:   rawptr,
+	width:  i32,
+	height: i32,
 }
 
 Context :: struct {
 	// Input state
-	mouse_position:        Vector2,
-	last_mouse_position:   Vector2,
-	mouse_button_down:     [Mouse_Button]bool,
-	mouse_button_was_down: [Mouse_Button]bool,
-	key_down:              [256]bool,
-	key_was_down:          [256]bool,
-	hovered_node:          ^Node,
-	focused_node:          ^Node,
-	active_node:           ^Node,
-	hovered_id:            Id,
-	focused_id:            Id,
-	active_id:             Id,
-	on_set_cursor:         On_Set_Cursor_Proc,
-	on_set_clipboard:      On_Set_Clipboard_Proc,
-	on_get_clipboard:      On_Get_Clipboard_Proc,
-	cursor:                Cursor,
-	last_cursor:           Cursor,
+	mouse_position:             Vector2,
+	last_mouse_position:        Vector2,
+	mouse_button_down:          [Mouse_Button]bool,
+	mouse_button_was_down:      [Mouse_Button]bool,
+	key_down:                   [256]bool,
+	key_was_down:               [256]bool,
+	hovered_node:               ^Node,
+	focused_node:               ^Node,
+	active_node:                ^Node,
+	hovered_id:                 Id,
+	focused_id:                 Id,
+	active_id:                  Id,
+	on_set_cursor:              On_Set_Cursor_Proc,
+	on_set_clipboard:           On_Set_Clipboard_Proc,
+	on_get_clipboard:           On_Get_Clipboard_Proc,
+	cursor:                     Cursor,
+	last_cursor:                Cursor,
+	selection_background_color: kn.Color,
+	selection_foreground_color: kn.Color,
+
+	// User images
+	images:                     [dynamic]Maybe(User_Image),
 
 	// Map of node ids
-	nodes_by_id:           map[Id]^Node,
+	nodes_by_id:                map[Id]^Node,
 
 	// Contiguous storage of all nodes in the UI
-	nodes:                 [dynamic]Node,
+	nodes:                      [dynamic]Node,
 
 	// All nodes wihout a parent are stored here for layout solving
 	// They are the root nodes of their layout trees
-	roots:                 [dynamic]^Node,
+	roots:                      [dynamic]^Node,
 
 	// The stack of nodes being declared
-	stack:                 [dynamic]^Node,
+	stack:                      [dynamic]^Node,
 
 	// The hash stack
-	id_stack:              [dynamic]Id,
+	id_stack:                   [dynamic]Id,
 
 	// The top-most element of the stack
-	current_node:          ^Node,
+	current_node:               ^Node,
 
 	// Profiling state
-	frame_start_time:      time.Time,
-	frame_duration:        time.Duration,
+	frame_start_time:           time.Time,
+	frame_duration:             time.Duration,
 
 	// How many frames are queued for drawing
-	queued_frames:         int,
+	queued_frames:              int,
 
 	// If the graphics backend should redraw the UI
-	requires_redraw:       bool,
+	requires_redraw:            bool,
 
 	// Debug state
-	is_debugging:          bool,
+	is_debugging:               bool,
 }
 
 // @(private)
 global_ctx: ^Context
+
+//
+// Image helpers
+//
+
+load_image :: proc(file: string) -> (index: int, ok: bool) {
+	ctx := global_ctx
+
+	image: User_Image
+
+	image.data = stbi.load(
+		strings.clone_to_cstring(file, context.temp_allocator),
+		&image.width,
+		&image.height,
+		nil,
+		4,
+	)
+	if image.data == nil {
+		return
+	}
+
+	ok = true
+
+	for &slot, slot_index in ctx.images {
+		if slot == nil {
+			slot = image
+			index = slot_index
+			return
+		}
+	}
+
+	index = len(ctx.images)
+	append(&ctx.images, image)
+
+	return
+}
+
+use_image :: proc(index: int) -> (source: Box, ok: bool) {
+	ctx := global_ctx
+	if index < 0 || index >= len(ctx.images) {
+		return {}, false
+	}
+	#no_bounds_check image := (&ctx.images[index].?) or_return
+	if image.source == nil {
+		image.source = kn.copy_image_to_atlas(image.data, int(image.width), int(image.height))
+	}
+	return image.source.?
+}
+
+//
+// Box helpers
+//
 
 box_width :: proc(box: Box) -> f32 {
 	return box.hi.x - box.lo.x
@@ -409,6 +492,10 @@ snapped_box :: proc(box: Box) -> Box {
 box_center :: proc(a: Box) -> [2]f32 {
 	return {(a.lo.x + a.hi.x) * 0.5, (a.lo.y + a.hi.y) * 0.5}
 }
+
+//
+// Hashing algorithm
+//
 
 FNV1A32_OFFSET_BASIS :: 0x811c9dc5
 FNV1A32_PRIME :: 0x01000193
@@ -502,10 +589,17 @@ context_init :: proc(ctx: ^Context) {
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
 	ctx.queued_frames = 2
+	ctx.selection_background_color = kn.GREEN
+	ctx.selection_foreground_color = kn.BLACK
 }
 
 context_deinit :: proc(ctx: ^Context) {
 	assert(ctx != nil)
+	delete(ctx.nodes)
+	delete(ctx.roots)
+	delete(ctx.stack)
+	delete(ctx.id_stack)
+	delete(ctx.nodes_by_id)
 }
 
 context_set_clipboard :: proc(ctx: ^Context, data: string) {
@@ -518,6 +612,10 @@ context_set_clipboard :: proc(ctx: ^Context, data: string) {
 set_clipboard :: proc(data: string) {
 	context_set_clipboard(global_ctx, data)
 }
+
+//
+// Animation helpers
+//
 
 rate_per_second :: proc(rate: f32) -> f32 {
 	ctx := global_ctx
@@ -535,10 +633,12 @@ init :: proc() {
 
 deinit :: proc() {
 	context_deinit(global_ctx)
+	free(global_ctx)
+	global_ctx = nil
 }
 
 //
-// Call these from your event loop to handle input events
+// Call these from your event loop to handle input
 //
 
 handle_mouse_motion :: proc(x, y: f32) {
@@ -563,6 +663,10 @@ handle_mouse_up :: proc(button: Mouse_Button) {
 	ctx.mouse_button_down[button] = false
 }
 
+//
+// Used to get current input state
+//
+
 mouse_down :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
 	return ctx.mouse_button_down[button]
@@ -577,7 +681,6 @@ mouse_released :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
 	return !ctx.mouse_button_down[button] && ctx.mouse_button_was_down[button]
 }
-
 
 key_down :: proc(key: int) -> bool {
 	ctx := global_ctx
@@ -634,6 +737,7 @@ end :: proc() {
 	}
 	ctx.cursor = .Normal
 
+	// Process and draw the UI
 	for root in ctx.roots {
 		root.box.lo = root.position - root.size * root.align
 		root.box.hi = root.box.lo + root.size
@@ -647,8 +751,12 @@ end :: proc() {
 		}
 	}
 
+	// Clean up unused nodes
 	for &node, node_index in ctx.nodes {
 		if node.is_dead {
+			if node.on_drop != nil {
+				node.on_drop(&node)
+			}
 			delete_key(&ctx.nodes_by_id, node.id)
 			unordered_remove(&ctx.nodes, node_index)
 		} else {
@@ -663,15 +771,20 @@ end :: proc() {
 	}
 	kn.set_draw_order(0)
 
+	//
+	// Set ID references for input events for the next frame
+	//
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
 	} else {
 		ctx.hovered_id = 0
 	}
-	if ctx.focused_node != nil {
-		ctx.focused_id = ctx.focused_node.id
-	} else {
-		ctx.focused_id = 0
+	if mouse_pressed(.Left) {
+		if ctx.hovered_node != nil {
+			ctx.focused_id = ctx.hovered_node.id
+		} else {
+			ctx.focused_id = 0
+		}
 	}
 	if ctx.active_node != nil {
 		ctx.active_id = ctx.active_node.id
@@ -682,6 +795,7 @@ end :: proc() {
 	ctx.mouse_button_was_down = ctx.mouse_button_down
 	ctx.last_mouse_position = ctx.mouse_position
 
+	// Update redraw state
 	ctx.requires_redraw = ctx.queued_frames > 0
 	ctx.queued_frames = max(0, ctx.queued_frames - 1)
 }
@@ -801,22 +915,37 @@ node_init :: proc(self: ^Node) {
 	self.kids = make([dynamic]^Node, 0, 16, allocator = context.temp_allocator)
 }
 
+focus_node :: proc(id: Id) {
+	global_ctx.focused_id = id
+}
+
 node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	ctx := global_ctx
 
 	self.style.scale = 1
 
+	// Configure the node
 	node_configure(self, config)
 
+	// Keep alive this frame
 	self.is_dead = false
+
+	// Reset accumulative values
 	self.content_size = 0
 
+	// Update input state
+	self.was_hovered = self.is_hovered
 	self.is_hovered = ctx.hovered_id == self.id
 	self.has_hovered_child = false
 
+	self.was_active = self.is_active
 	self.is_active = ctx.active_id == self.id
 	self.has_active_child = false
 
+	self.is_focused = ctx.focused_id == self.id
+	self.has_focused_child = false
+
+	// Create text layout
 	if len(self.text) > 0 {
 		if self.style.font == nil {
 			self.style.font = &kn.DEFAULT_FONT
@@ -831,13 +960,20 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		)
 	}
 
+	if self.on_add != nil {
+		self.on_add(self)
+	}
+
+	//
 	self.size += self.added_size
 
+	// Root
 	if self.parent == nil {
 		append(&ctx.roots, self)
 		return
 	}
 
+	// Child logic
 	append(&self.parent.kids, self)
 
 	if self.grow[int(self.parent.vertical)] {
@@ -856,6 +992,7 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	}
 	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
 	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
+	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
 }
 
 node_solve_box_recursively :: proc(self: ^Node) {
@@ -867,25 +1004,26 @@ node_solve_box_recursively :: proc(self: ^Node) {
 }
 
 node_solve_sizes :: proc(self: ^Node) {
+	// Axis indices
 	i := int(self.vertical)
 	j := 1 - i
-
+	// Compute available space
 	remaining_space := self.size[i] - self.content_size[i]
 	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
-
+	// Temporary array of growable children
 	growables := make(
 		[dynamic]^Node,
 		0,
 		self.growable_kid_count,
 		allocator = context.temp_allocator,
 	)
-
+	// Populate the array
 	for &node in self.kids {
 		if !node.is_absolute && node.grow[i] {
 			append(&growables, node)
 		}
 	}
-
+	// As long as there is space remaining and children to grow
 	for remaining_space > 0 && len(growables) > 0 {
 		// Get the smallest size along the layout axis, nodes of this size will be grown first
 		smallest := growables[0].size[i]
@@ -901,9 +1039,9 @@ node_solve_sizes :: proc(self: ^Node) {
 				second_smallest = min(second_smallest, node.size[i])
 			}
 		}
-
+		// Compute the smallest size to add
 		size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
-
+		// Add that amount to every eligable child
 		for node, node_index in growables {
 			if node.size[i] == smallest {
 				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
@@ -916,7 +1054,7 @@ node_solve_sizes :: proc(self: ^Node) {
 			}
 		}
 	}
-
+	// Now compute each child's position within its parent
 	offset_along_axis: f32 = self.padding[i]
 	for node in self.kids {
 		if node.is_absolute {
@@ -951,7 +1089,14 @@ node_receive_input :: proc(self: ^Node) {
 	}
 	if self.is_hovered {
 		if mouse_pressed(.Left) {
+			// Set this node as the globally active one, `is_active` will be true next frame unless the active state is stolen
 			ctx.active_node = self
+			// Reset click counter if there was too much delay
+			if time.since(self.last_click_time) > time.Millisecond * 450 {
+				self.click_count = 0
+			}
+			self.click_count += 1
+			self.last_click_time = time.now()
 		}
 	}
 }
@@ -965,10 +1110,12 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.on_animate(self)
 	}
 
+	// Detect changes in transition values
 	if self.transitions != last_transitions {
 		draw_frames(2)
 	}
 
+	// Compute text position
 	self.text_origin =
 		linalg.lerp(
 			self.box.lo + self.padding.xy,
@@ -977,6 +1124,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		) -
 		self.text_layout.size * self.text_align
 
+	// Perform wrapping if enabled
 	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
 		assert(self.style.font != nil)
 		self.text_layout.text = kn.make_text(
@@ -989,21 +1137,25 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.last_text_size = self.text_layout.size
 	}
 
+	// Compute text selection state if enabled
 	if self.enable_selection {
 		self.text_layout = kn.make_selectable(
 			self.text_layout,
 			ctx.mouse_position - self.text_origin,
-			min(self.selection[0], self.selection[1]),
-			max(self.selection[0], self.selection[1]),
+			min(self.editor.selection[0], self.editor.selection[1]),
+			max(self.editor.selection[0], self.editor.selection[1]),
 		)
 		if self.text_layout.contact.valid && self.is_hovered {
 			set_cursor(.Text)
 		}
+		node_update_selection(self, self.text, &self.text_layout)
 	}
 
+	// Is transformation necessary?
 	is_transformed :=
 		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
 
+	// Perform transformations
 	if is_transformed {
 		transform_origin := self.box.lo + self.size * self.style.transform_origin
 		kn.push_matrix()
@@ -1013,30 +1165,36 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.translate(-transform_origin + self.style.translate)
 	}
 
+	// Apply clipping
 	if self.clip_content {
 		kn.push_scissor(kn.make_box(self.box))
 	}
 
+	// Draw self
 	if self.on_draw != nil {
 		self.on_draw(self)
 	} else {
 		node_draw_default(self)
 	}
 
-	if self.clip_content {
-		kn.pop_scissor()
-	}
-
 	if is_transformed {
 		kn.pop_matrix()
 	}
 
+	// Draw children
 	for node in self.kids {
 		node_draw_recursively(node, depth + 1)
 	}
 
-	if ctx.is_debugging && self.has_hovered_child {
-		kn.add_box_lines(self.box, 1, paint = kn.LIGHT_GREEN)
+	if self.clip_content {
+		kn.pop_scissor()
+	}
+
+	// Draw debug lines
+	if ODIN_DEBUG {
+		if ctx.is_debugging && self.has_hovered_child {
+			kn.add_box_lines(self.box, 1, paint = kn.LIGHT_GREEN)
+		}
 	}
 }
 
@@ -1049,16 +1207,45 @@ node_draw_default :: proc(self: ^Node) {
 			self.style.shadow_color,
 		)
 	}
-	if self.style.background_paint != nil {
-		kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
+	{
+		switch v in self.style.background_paint {
+		case kn.Color:
+			kn.set_paint(v)
+		case Image_Paint:
+			size := box_size(self.box)
+			if source, ok := use_image(v.index); ok {
+				kn.set_paint(
+					kn.make_atlas_sample(
+						source,
+						{self.box.lo + v.offset * size, self.box.lo + v.size * size},
+						kn.WHITE,
+					),
+				)
+			}
+		}
+		kn.add_box(self.box, self.style.radius)
 	}
 	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
 		if self.enable_selection {
-			draw_text_highlight(&self.text_layout, self.text_origin, kn.GREEN)
+			draw_text_highlight(
+				&self.text_layout,
+				self.text_origin,
+				global_ctx.selection_background_color,
+			)
 		}
-		kn.add_text(self.text_layout, self.text_origin, paint = self.style.foreground_paint)
+		// if len(self.text_layout.lines) > 1 do fmt.panicf("%#v", self.text_layout.glyphs)
+		draw_text(
+			&self.text_layout,
+			self.text_origin,
+			self.style.foreground_paint,
+			global_ctx.selection_foreground_color,
+		)
 		if self.enable_edit {
-			draw_text_layout_cursor(&self.text_layout, self.text_origin, kn.GREEN)
+			draw_text_layout_cursor(
+				&self.text_layout,
+				self.text_origin,
+				global_ctx.selection_background_color,
+			)
 		}
 	}
 	if self.style.stroke_paint != nil {
@@ -1088,6 +1275,25 @@ draw_text_layout_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color
 	)
 }
 
+draw_text :: proc(
+	text: ^kn.Selectable_Text,
+	origin: [2]f32,
+	paint: kn.Paint_Option,
+	selected_color: kn.Color,
+) {
+	for &glyph, glyph_index in text.glyphs {
+		if glyph.source.lo == glyph.source.hi {
+			continue
+		}
+		kn.add_glyph(
+			glyph,
+			text.font_scale,
+			origin + glyph.offset,
+			paint = selected_color if (glyph_index >= text.selection.first_glyph && glyph_index < text.selection.last_glyph) else paint,
+		)
+	}
+}
+
 draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
 	if text.selection.first_glyph == text.selection.last_glyph {
 		return
@@ -1113,6 +1319,56 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 				},
 		}
 		kn.add_box(snapped_box(box), paint = color)
+	}
+}
+
+node_update_selection :: proc(self: ^Node, data: string, text: ^kn.Selectable_Text) {
+	is_separator :: proc(r: rune) -> bool {
+		return !unicode.is_alpha(r) && !unicode.is_number(r)
+	}
+
+	last_selection := self.editor.selection
+	if self.is_active && text.contact.index >= 0 {
+		if !self.was_active {
+			self.select_anchor = text.contact.index
+			if self.click_count == 3 {
+				self.editor.selection = {len(data), 0}
+			} else {
+				self.editor.selection = {text.contact.index, text.contact.index}
+			}
+		}
+		switch self.click_count {
+		case 2:
+			allow_precision := text.contact.index != self.select_anchor
+			if text.contact.index <= self.select_anchor {
+				self.editor.selection[0] =
+					text.contact.index if (allow_precision && is_separator(rune(data[text.contact.index]))) else max(0, strings.last_index_proc(data[:min(text.contact.index, len(data))], is_separator) + 1)
+				self.editor.selection[1] = strings.index_proc(
+					data[self.select_anchor:],
+					is_separator,
+				)
+				if self.editor.selection[1] == -1 {
+					self.editor.selection[1] = len(data)
+				} else {
+					self.editor.selection[1] += self.select_anchor
+				}
+			} else {
+				self.editor.selection[1] = max(
+					0,
+					strings.last_index_proc(data[:self.select_anchor], is_separator) + 1,
+				)
+				// `text.selection.index - 1` is safe as long as `text.selection.index > self.select_anchor`
+				self.editor.selection[0] =
+					0 if (allow_precision && is_separator(rune(data[text.contact.index - 1]))) else strings.index_proc(data[text.contact.index:], is_separator)
+				if self.editor.selection[0] == -1 {
+					self.editor.selection[0] = len(data)
+				} else {
+					self.editor.selection[0] += text.contact.index
+				}
+			}
+		case 1:
+			self.editor.selection[0] = text.contact.index
+		}
 	}
 }
 
@@ -1165,3 +1421,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

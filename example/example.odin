@@ -24,6 +24,8 @@ do_button :: proc(label: union #no_nil {
 			fg = tw.SLATE_300,
 			font = font,
 			on_animate = proc(self: ^Node) {
+				self.style.stroke_paint = kn.fade(tw.FUCHSIA_400, f32(i32(self.is_focused)))
+				self.style.stroke_width = 2
 				self.style.background_paint = kn.fade(
 					tw.SLATE_600,
 					0.3 + self.transitions[0] * 0.3,
@@ -34,108 +36,17 @@ do_button :: proc(label: union #no_nil {
 					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
 				if self.is_hovered {
 					set_cursor(.Pointer)
+					if self.parent != nil && self.parent.has_focused_child {
+						focus_node(self.id)
+					}
 				}
 			},
 		}, loc = loc)
 }
 
-do_frame :: proc() {
-	using opal
-	ctx := global_ctx
-	kn.new_frame()
-
-	begin()
-	begin_node({size = kn.get_size(), bg = tw.NEUTRAL_950, vertical = true})
-
-	begin_node(
-		{
-			h = 20,
-			fit_y = true,
-			max_w = math.F32_MAX,
-			grow_x = true,
-			p = 2,
-			gap = 4,
-			bg = tw.NEUTRAL_900,
-		},
-	)
-	do_button("File")
-	do_button("Edit")
-	do_button("Select")
-	do_button("Object")
-	do_node({grow = true, max_size = math.F32_MAX})
-	do_button("Help")
-	end_node()
-
-	do_node({h = 1, grow_x = true, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
-	begin_node({max_size = math.F32_MAX, grow = true})
-
-	begin_node({max_size = math.F32_MAX, grow = true, p = 20})
-	do_button(lucide.ACTIVITY, font = &lucide.font, font_size = 20)
-	do_button(lucide.ALARM_CLOCK, font = &lucide.font, font_size = 20)
-	do_button(lucide.ALIGN_VERTICAL_DISTRIBUTE_START, font = &lucide.font, font_size = 20)
-	end_node()
-
-	do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
-
-	begin_node(
-		{
-			w = 200,
-			grow_y = true,
-			max_h = math.F32_MAX,
-			vertical = true,
-			gap = 2,
-			p = 2,
-			bg = tw.NEUTRAL_900,
-		},
-	)
-	do_node({size = 100, bg = tw.EMERALD_500, pos = {100, -50}})
-	do_button("amogus")
-	do_node(
-		{
-			text = FILLER_TEXT,
-			fit_y = true,
-			grow_x = true,
-			max_w = math.F32_MAX,
-			font_size = 12,
-			fg = tw.SLATE_200,
-			wrap = true,
-			py = 10,
-			selectable = true,
-		},
-	)
-	do_button("amosgusdaws")
-	end_node()
-
-	end_node()
-
-	end_node()
-	end()
-
-	if ctx.is_debugging {
-		kn.set_paint(kn.BLACK)
-		text := kn.make_text(
-			fmt.tprintf(
-				"FPS: %.0f\n%.0f\n%v\nhovered: %i",
-				kn.get_fps(),
-				ctx.mouse_position,
-				ctx.frame_duration,
-				ctx.hovered_id,
-			),
-			12,
-		)
-		kn.add_box({0, text.size}, paint = kn.fade(kn.BLACK, 1.0))
-		kn.add_text(text, 0, paint = kn.WHITE)
-	}
-
-	kn.set_clear_color(kn.WHITE)
-	kn.present(!requires_redraw())
-
-	free_all(context.temp_allocator)
-}
-
 cursors: [sdl3.SystemCursor]^sdl3.Cursor
 
-FILLER_TEXT :: "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem."
+FILLER_TEXT :: "Algo de texto que puedes selecionar sí gusta."
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -177,10 +88,13 @@ main :: proc() {
 
 	ctx := global_ctx
 
+	image := load_image("image.png") or_else panic("Could not load image!")
+
 	// Create system cursors
 	for cursor in sdl3.SystemCursor {
 		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
 	}
+
 	// Set cursor callback
 	ctx.on_set_cursor = proc(cursor: Cursor) -> bool {
 		switch cursor {
@@ -218,6 +132,97 @@ main :: proc() {
 			}
 		}
 
-		do_frame()
+		kn.new_frame()
+
+		begin()
+		begin_node({size = kn.get_size(), bg = tw.NEUTRAL_950, vertical = true})
+
+		begin_node(
+			{
+				h = 20,
+				fit_y = true,
+				max_w = math.F32_MAX,
+				grow_x = true,
+				p = 2,
+				gap = 4,
+				bg = tw.NEUTRAL_900,
+			},
+		)
+		do_button("File")
+		do_button("Edit")
+		do_button("Select")
+		do_button("Object")
+		do_node({grow = true, max_size = math.F32_MAX})
+		do_button("Help")
+		end_node()
+
+		do_node({h = 1, grow_x = true, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
+		begin_node({max_size = math.F32_MAX, grow = true})
+
+		begin_node({max_size = math.F32_MAX, grow = true, p = 20})
+		do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
+		do_button(lucide.ARCHIVE, font = &lucide.font, font_size = 20)
+		do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
+		end_node()
+
+		do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
+
+		begin_node(
+			{
+				w = 200,
+				grow_y = true,
+				max_h = math.F32_MAX,
+				vertical = true,
+				gap = 2,
+				p = 2,
+				bg = tw.NEUTRAL_900,
+			},
+		)
+		do_node(
+			{size = 100, bg = Image_Paint{index = image, size = 1}, radius = 50, pos = {100, -50}},
+		)
+		do_node(
+			{
+				text = FILLER_TEXT,
+				fit_y = true,
+				grow_x = true,
+				max_w = math.F32_MAX,
+				font_size = 12,
+				fg = tw.SLATE_200,
+				wrap = true,
+				selectable = true,
+				py = 10,
+			},
+		)
+		do_button("Botón A")
+		do_button("Botón B")
+		end_node()
+
+		end_node()
+
+		end_node()
+		end()
+
+		if ctx.is_debugging {
+			kn.set_paint(kn.BLACK)
+			text := kn.make_text(
+				fmt.tprintf(
+					"FPS: %.0f\n%.0f\n%v\nhovered: %i",
+					kn.get_fps(),
+					ctx.mouse_position,
+					ctx.frame_duration,
+					ctx.hovered_id,
+				),
+				12,
+			)
+			kn.add_box({0, text.size}, paint = kn.fade(kn.BLACK, 1.0))
+			kn.add_text(text, 0, paint = kn.WHITE)
+		}
+
+		kn.set_clear_color(kn.WHITE)
+		kn.present(!requires_redraw())
+
+		free_all(context.temp_allocator)
 	}
 }
+
