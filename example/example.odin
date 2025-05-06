@@ -70,9 +70,9 @@ do_frame :: proc() {
 	begin_node({max_size = math.F32_MAX, grow = true})
 
 	begin_node({max_size = math.F32_MAX, grow = true, p = 20})
-	do_button("A")
-	do_button("B")
-	do_node({size = 100, bg = tw.EMERALD_500, pos = {100, -50}})
+	do_button(lucide.ACTIVITY, font = &lucide.font, font_size = 20)
+	do_button(lucide.ALARM_CLOCK, font = &lucide.font, font_size = 20)
+	do_button(lucide.ALIGN_VERTICAL_DISTRIBUTE_START, font = &lucide.font, font_size = 20)
 	end_node()
 
 	do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
@@ -100,6 +100,7 @@ do_frame :: proc() {
 			fg = tw.SLATE_200,
 			wrap = true,
 			py = 10,
+			selectable = true,
 		},
 	)
 	do_button("amosgusdaws")
@@ -180,7 +181,6 @@ main :: proc() {
 	for cursor in sdl3.SystemCursor {
 		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
 	}
-
 	// Set cursor callback
 	ctx.on_set_cursor = proc(cursor: Cursor) -> bool {
 		switch cursor {
@@ -188,6 +188,8 @@ main :: proc() {
 			return sdl3.SetCursor(cursors[.DEFAULT])
 		case .Pointer:
 			return sdl3.SetCursor(cursors[.POINTER])
+		case .Text:
+			return sdl3.SetCursor(cursors[.TEXT])
 		}
 		return false
 	}
@@ -219,4 +221,3 @@ main :: proc() {
 		do_frame()
 	}
 }
-

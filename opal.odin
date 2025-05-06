@@ -87,6 +87,8 @@ Node_Config :: struct {
 	abs:             bool,
 	wrap:            bool,
 	clip:            bool,
+	selectable:      bool,
+	editable:        bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
@@ -121,6 +123,8 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.relative_size = config.relative_size
 	self.enable_wrapping = config.wrap
 	self.clip_content = config.clip
+	self.enable_selection = config.selectable
+	self.enable_edit = config.editable
 }
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
@@ -197,14 +201,19 @@ Node :: struct {
 	enable_wrapping:    bool,
 
 	// Opal sacrifices one frame of responsiveness for faster frames. This value is a representation of the previous frame's input
+	was_hovered:        bool,
 	is_hovered:         bool,
 
 	// True if any nodes below this one in the tree are hovered
 	has_hovered_child:  bool,
 
-	// Clicked
+	// Active state
+	was_active:         bool,
 	is_active:          bool,
 	has_active_child:   bool,
+	is_focused:         bool,
+
+	// If overflowing content is clipped
 	clip_content:       bool,
 
 	// Interaction
@@ -261,6 +270,7 @@ _print_struct_memory_configuration :: proc() {
 Cursor :: enum {
 	Normal,
 	Pointer,
+	Text,
 }
 
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
@@ -607,7 +617,7 @@ begin :: proc() {
 
 	if ctx.mouse_button_down != ctx.mouse_button_was_down ||
 	   ctx.mouse_position != ctx.last_mouse_position {
-		draw_frames(1)
+		draw_frames(2)
 	}
 }
 
@@ -986,6 +996,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			min(self.selection[0], self.selection[1]),
 			max(self.selection[0], self.selection[1]),
 		)
+		if self.text_layout.contact.valid && self.is_hovered {
+			set_cursor(.Text)
+		}
 	}
 
 	is_transformed :=
@@ -1152,4 +1165,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-
