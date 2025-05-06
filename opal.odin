@@ -8,9 +8,9 @@ package opal
 //
 
 import kn "../katana"
-import "../katana/sdl3glue"
 import "base:runtime"
 import "core:fmt"
+import "core:io"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
@@ -20,9 +20,7 @@ import "core:slice"
 import "core:strings"
 import "core:sys/windows"
 import "core:time"
-import "lucide"
-import tw "tailwind_colors"
-import "vendor:sdl3"
+import "tedit"
 
 // Generic unique identifiers
 Id :: u32
@@ -38,19 +36,29 @@ Vector2 :: [2]f32
 //
 Padding :: [4]f32
 
+Clip :: enum u8 {
+	None,
+	Partial,
+	Full,
+}
+
 Node_Config :: struct {
 	p:               [4]f32,
 	text:            string,
 	pos:             [2]f32,
 	size:            [2]f32,
 	max_size:        [2]f32,
-	rsize:           [2]f32,
+	relative_size:   [2]f32,
 	bg:              kn.Paint_Option,
 	stroke:          kn.Paint_Option,
 	fg:              kn.Paint_Option,
 	font:            ^kn.Font,
 	on_draw:         proc(_: ^Node),
 	on_animate:      proc(_: ^Node),
+	on_create:       proc(_: ^Node),
+	on_drop:         proc(_: ^Node),
+	on_add:          proc(_: ^Node),
+	data:            rawptr,
 	px:              f32,
 	py:              f32,
 	pl:              f32,
@@ -85,8 +93,8 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.is_absolute = config.abs
 	self.padding = {
 		max(config.p.x, config.px, config.pl),
-		max(config.p.y, config.px, config.pt),
-		max(config.p.z, config.py, config.pr),
+		max(config.p.y, config.py, config.pt),
+		max(config.p.z, config.px, config.pr),
 		max(config.p.w, config.py, config.pb),
 	}
 	self.spacing = config.gap
@@ -108,7 +116,9 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.text = config.text
 	self.on_draw = config.on_draw
 	self.on_animate = config.on_animate
-	self.relative_size = config.rsize
+	self.on_create = config.on_create
+	self.on_drop = config.on_drop
+	self.relative_size = config.relative_size
 	self.enable_wrapping = config.wrap
 	self.clip_content = config.clip
 }
@@ -116,47 +126,8 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
 	config := config
 	config.abs = true
-	config.rsize = 1
+	config.relative_size = 1
 	return config
-}
-
-Node_Info :: struct {
-	style:         Node_Style,
-	// The node's local position within its parent; or screen position if its a root
-	position:      [2]f32,
-
-	// The maximum size the node is allowed to grow to
-	max_size:      [2]f32,
-
-	// The node's actual size, this is subject to change until `end()` is called
-	// The initial value is effectively the node's minimum size
-	size:          [2]f32,
-
-	// If the node will be grown to fill available space
-	grow:          [2]bool,
-
-	// If the node will grow to acommodate its kids
-	fit:           [2]bool,
-
-	// How the node is aligned on its origin if it is a root node
-	align:         [2]f32,
-
-	// Values for the node's children layout
-	content_align: [2]f32,
-	content_size:  [2]f32,
-	padding:       [4]f32,
-	spacing:       f32,
-	vertical:      bool,
-
-	// Z index (higher values appear in front of lower ones)
-	z_index:       u32,
-
-	// Draw logic override
-	on_animate:    proc(self: ^Node),
-	on_draw:       proc(self: ^Node),
-
-	// User data
-	user_data:     rawptr,
 }
 
 //
@@ -206,6 +177,15 @@ Node :: struct {
 	// How the node is aligned on its origin if it is a root node
 	align:              [2]f32,
 
+	// Where text is aligned within the box
+	text_align:         [2]f32,
+
+	// This is known after box is calculated
+	text_origin:        [2]f32,
+
+	// Text selection indices
+	selection:          [2]int,
+
 	// Values for the node's children layout
 	padding:            [4]f32,
 	content_align:      [2]f32,
@@ -227,22 +207,29 @@ Node :: struct {
 	has_active_child:   bool,
 	clip_content:       bool,
 
+	// Interaction
+	enable_selection:   bool,
+	enable_edit:        bool,
+
 	// Z index (higher values appear in front of lower ones)
 	z_index:            u32,
 
+	// If the node is hidden by clipping
+	is_hidden:          bool,
+
 	// Appearance
 	text:               string,
-	text_layout:        kn.Text,
+	text_layout:        kn.Selectable_Text,
 	last_text_size:     [2]f32,
 	style:              Node_Style,
 	transitions:        [3]f32,
-
-	// Draw logic override
+	on_create:          proc(self: ^Node),
+	on_drop:            proc(self: ^Node),
 	on_animate:         proc(self: ^Node),
 	on_draw:            proc(self: ^Node),
-
-	// User data
-	user_data:          rawptr,
+	on_add:             proc(self: ^Node),
+	data:               rawptr,
+	retained_data:      rawptr,
 }
 
 //
@@ -289,8 +276,11 @@ Mouse_Button :: enum {
 Context :: struct {
 	// Input state
 	mouse_position:        Vector2,
+	last_mouse_position:   Vector2,
 	mouse_button_down:     [Mouse_Button]bool,
 	mouse_button_was_down: [Mouse_Button]bool,
+	key_down:              [256]bool,
+	key_was_down:          [256]bool,
 	hovered_node:          ^Node,
 	focused_node:          ^Node,
 	active_node:           ^Node,
@@ -326,27 +316,89 @@ Context :: struct {
 	frame_start_time:      time.Time,
 	frame_duration:        time.Duration,
 
+	// How many frames are queued for drawing
+	queued_frames:         int,
+
+	// If the graphics backend should redraw the UI
+	requires_redraw:       bool,
+
 	// Debug state
 	is_debugging:          bool,
 }
 
-@(private)
+// @(private)
 global_ctx: ^Context
 
-//
-// Unique ID hashing for retaining node states
-//
+box_width :: proc(box: Box) -> f32 {
+	return box.hi.x - box.lo.x
+}
+box_height :: proc(box: Box) -> f32 {
+	return box.hi.y - box.lo.y
+}
+box_center_x :: proc(box: Box) -> f32 {
+	return (box.lo.x + box.hi.x) * 0.5
+}
+box_center_y :: proc(box: Box) -> f32 {
+	return (box.lo.y + box.hi.y) * 0.5
+}
 
-// FNV1A64_OFFSET_BASIS :: 0xcbf29ce484222325
-// FNV1A64_PRIME :: 0x00000100000001B3
+box_size :: proc(box: Box) -> [2]f32 {
+	return box.hi - box.lo
+}
 
-// fnv64a :: proc(data: []byte, seed: u64) -> u64 {
-// 	h: u64 = seed
-// 	for b in data {
-// 		h = (h ~ u64(b)) * FNV1A64_PRIME
-// 	}
-// 	return h
-// }
+size_ratio :: proc(size: [2]f32, ratio: [2]f32) -> [2]f32 {
+	return [2]f32 {
+		max(size.x, size.y * (ratio.x / ratio.y)),
+		max(size.y, size.x * (ratio.y / ratio.x)),
+	}
+}
+
+// If `a` is inside of `b`
+point_in_box :: proc(a: [2]f32, b: Box) -> bool {
+	return (a.x >= b.lo.x) && (a.x < b.hi.x) && (a.y >= b.lo.y) && (a.y < b.hi.y)
+}
+
+// If `a` is touching `b`
+box_touches_box :: proc(a, b: Box) -> bool {
+	return (a.hi.x >= b.lo.x) && (a.lo.x <= b.hi.x) && (a.hi.y >= b.lo.y) && (a.lo.y <= b.hi.y)
+}
+
+// If `a` is contained entirely in `b`
+box_contains_box :: proc(a, b: Box) -> bool {
+	return (b.lo.x >= a.lo.x) && (b.hi.x <= a.hi.x) && (b.lo.y >= a.lo.y) && (b.hi.y <= a.hi.y)
+}
+
+// Get the clip status of `b` inside `a`
+get_clip :: proc(a, b: Box) -> Clip {
+	if a.lo.x > b.hi.x || a.hi.x < b.lo.x || a.lo.y > b.hi.y || a.hi.y < b.lo.y {
+		return .Full
+	}
+	if a.lo.x >= b.lo.x && a.hi.x <= b.hi.x && a.lo.y >= b.lo.y && a.hi.y <= b.hi.y {
+		return .None
+	}
+	return .Partial
+}
+
+// Updates `a` to fit `b` inside it
+update_bounding :: proc(a, b: Box) -> Box {
+	a := a
+	a.lo = linalg.min(a.lo, b.lo)
+	a.hi = linalg.max(a.hi, b.hi)
+	return a
+}
+
+// Clamps `a` inside `b`
+clamp_box :: proc(a, b: Box) -> Box {
+	return {linalg.clamp(a.lo, b.lo, b.hi), linalg.clamp(a.hi, b.lo, b.hi)}
+}
+
+snapped_box :: proc(box: Box) -> Box {
+	return Box{linalg.floor(box.lo), linalg.floor(box.hi)}
+}
+
+box_center :: proc(a: Box) -> [2]f32 {
+	return {(a.lo.x + a.hi.x) * 0.5, (a.lo.y + a.hi.y) * 0.5}
+}
 
 FNV1A32_OFFSET_BASIS :: 0x811c9dc5
 FNV1A32_PRIME :: 0x01000193
@@ -439,6 +491,7 @@ context_init :: proc(ctx: ^Context) {
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
+	ctx.queued_frames = 2
 }
 
 context_deinit :: proc(ctx: ^Context) {
@@ -515,6 +568,22 @@ mouse_released :: proc(button: Mouse_Button) -> bool {
 	return !ctx.mouse_button_down[button] && ctx.mouse_button_was_down[button]
 }
 
+
+key_down :: proc(key: int) -> bool {
+	ctx := global_ctx
+	return ctx.key_down[key]
+}
+
+key_pressed :: proc(key: int) -> bool {
+	ctx := global_ctx
+	return ctx.key_down[key] && !ctx.key_was_down[key]
+}
+
+key_released :: proc(key: int) -> bool {
+	ctx := global_ctx
+	return !ctx.key_down[key] && ctx.key_was_down[key]
+}
+
 //
 // Clear the UI construction state for a new frame
 //
@@ -535,6 +604,11 @@ begin :: proc() {
 	ctx.hovered_node = nil
 	ctx.focused_node = nil
 	ctx.active_node = nil
+
+	if ctx.mouse_button_down != ctx.mouse_button_was_down ||
+	   ctx.mouse_position != ctx.last_mouse_position {
+		draw_frames(1)
+	}
 }
 
 //
@@ -557,8 +631,10 @@ end :: proc() {
 		node_solve_sizes_recursively(root)
 		node_solve_box_recursively(root)
 
-		kn.set_draw_order(int(root.z_index))
-		node_draw_recursively(root)
+		if ctx.queued_frames > 0 {
+			kn.set_draw_order(int(root.z_index))
+			node_draw_recursively(root)
+		}
 	}
 
 	for &node, node_index in ctx.nodes {
@@ -594,10 +670,22 @@ end :: proc() {
 	}
 
 	ctx.mouse_button_was_down = ctx.mouse_button_down
+	ctx.last_mouse_position = ctx.mouse_position
+
+	ctx.requires_redraw = ctx.queued_frames > 0
+	ctx.queued_frames = max(0, ctx.queued_frames - 1)
 }
 
 set_cursor :: proc(cursor: Cursor) {
 	global_ctx.cursor = cursor
+}
+
+draw_frames :: proc(how_many: int) {
+	global_ctx.queued_frames += how_many
+}
+
+requires_redraw :: proc() -> bool {
+	return global_ctx.requires_redraw
 }
 
 //
@@ -723,7 +811,9 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		if self.style.font == nil {
 			self.style.font = &kn.DEFAULT_FONT
 		}
-		self.text_layout = kn.make_text(self.text, self.style.font_size, self.style.font^)
+		self.text_layout = kn.Selectable_Text {
+			text = kn.make_text(self.text, self.style.font_size, self.style.font^),
+		}
 		self.content_size = linalg.max(
 			self.content_size,
 			self.text_layout.size,
@@ -760,8 +850,8 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 
 node_solve_box_recursively :: proc(self: ^Node) {
 	for node in self.kids {
-		node.box.lo = self.box.lo + node.position
-		node.box.hi = node.box.lo + node.size
+		node.box.lo = linalg.floor(self.box.lo + node.position)
+		node.box.hi = node.box.lo + linalg.floor(node.size)
 		node_solve_box_recursively(node)
 	}
 }
@@ -827,7 +917,6 @@ node_solve_sizes :: proc(self: ^Node) {
 			if node.grow[j] {
 				node.size[j] = max(node.size[j], available_span)
 			}
-
 			node.position[j] =
 				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
 			offset_along_axis += node.size[i] + self.spacing
@@ -838,7 +927,7 @@ node_solve_sizes :: proc(self: ^Node) {
 node_solve_sizes_recursively :: proc(self: ^Node) {
 	node_solve_sizes(self)
 	for node in self.kids {
-		node_solve_sizes(node)
+		node_solve_sizes_recursively(node)
 	}
 }
 
@@ -860,8 +949,43 @@ node_receive_input :: proc(self: ^Node) {
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	ctx := global_ctx
 	node_receive_input(self)
+
+	last_transitions := self.transitions
 	if self.on_animate != nil {
 		self.on_animate(self)
+	}
+
+	if self.transitions != last_transitions {
+		draw_frames(2)
+	}
+
+	self.text_origin =
+		linalg.lerp(
+			self.box.lo + self.padding.xy,
+			self.box.hi - self.padding.zw,
+			self.text_align,
+		) -
+		self.text_layout.size * self.text_align
+
+	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
+		assert(self.style.font != nil)
+		self.text_layout.text = kn.make_text(
+			self.text,
+			self.style.font_size,
+			self.style.font^,
+			wrap = .Words,
+			max_size = {self.size.x, math.F32_MAX},
+		)
+		self.last_text_size = self.text_layout.size
+	}
+
+	if self.enable_selection {
+		self.text_layout = kn.make_selectable(
+			self.text_layout,
+			ctx.mouse_position - self.text_origin,
+			min(self.selection[0], self.selection[1]),
+			max(self.selection[0], self.selection[1]),
+		)
 	}
 
 	is_transformed :=
@@ -916,22 +1040,13 @@ node_draw_default :: proc(self: ^Node) {
 		kn.add_box(self.box, self.style.radius, paint = self.style.background_paint)
 	}
 	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
-		if self.text_layout.size.x > self.size.x && self.enable_wrapping {
-			assert(self.style.font != nil)
-			self.text_layout = kn.make_text(
-				self.text,
-				self.style.font_size,
-				self.style.font^,
-				wrap = .Words,
-				max_size = {self.size.x, math.F32_MAX},
-			)
-			self.last_text_size = self.text_layout.size
+		if self.enable_selection {
+			draw_text_highlight(&self.text_layout, self.text_origin, kn.GREEN)
 		}
-		kn.add_text(
-			self.text_layout,
-			self.box.lo + self.padding.xy,
-			paint = self.style.foreground_paint,
-		)
+		kn.add_text(self.text_layout, self.text_origin, paint = self.style.foreground_paint)
+		if self.enable_edit {
+			draw_text_layout_cursor(&self.text_layout, self.text_origin, kn.GREEN)
+		}
 	}
 	if self.style.stroke_paint != nil {
 		kn.add_box_lines(
@@ -943,100 +1058,93 @@ node_draw_default :: proc(self: ^Node) {
 	}
 }
 
-//
-// The demo UI
-//
-
-cursors: [sdl3.SystemCursor]^sdl3.Cursor
-
-FILLER_TEXT :: "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem."
-
-main :: proc() {
-	when ODIN_DEBUG {
-		track: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
-
-		defer {
-			if len(track.allocation_map) > 0 {
-				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-				for _, entry in track.allocation_map {
-					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-				}
-			}
-			mem.tracking_allocator_destroy(&track)
-		}
+draw_text_layout_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
+	if len(text.glyphs) == 0 {
+		return
 	}
-
-	if !sdl3.Init({.VIDEO}) {
-		panic("Could not initialize SDL3")
-	}
-	defer sdl3.Quit()
-
-	window := sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE})
-	defer sdl3.DestroyWindow(window)
-
-	platform := sdl3glue.make_platform_sdl3glue(window)
-	defer kn.destroy_platform(&platform)
-
-	kn.start_on_platform(platform)
-	defer kn.shutdown()
-
-	lucide.load()
-
-	init()
-	defer deinit()
-
-	ctx := global_ctx
-
-	window_props := sdl3.GetWindowProperties(window)
-	window_hwnd := cast(windows.HWND)sdl3.GetPointerProperty(
-		window_props,
-		sdl3.PROP_WINDOW_WIN32_HWND_POINTER,
-		nil,
+	line_height := text.font.line_height * text.font_scale
+	cursor_origin := origin + text.glyphs[text.selection.first_glyph].offset
+	kn.add_box(
+		snapped_box(
+			{
+				{cursor_origin.x - 1, cursor_origin.y},
+				{cursor_origin.x + 1, cursor_origin.y + line_height},
+			},
+		),
+		paint = color,
 	)
+}
 
-	// Create system cursors
-	for cursor in sdl3.SystemCursor {
-		cursors[cursor] = sdl3.CreateSystemCursor(cursor)
+draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
+	if text.selection.first_glyph == text.selection.last_glyph {
+		return
 	}
-
-	// Set cursor callback
-	ctx.on_set_cursor = proc(cursor: Cursor) -> bool {
-		switch cursor {
-		case .Normal:
-			return sdl3.SetCursor(cursors[.DEFAULT])
-		case .Pointer:
-			return sdl3.SetCursor(cursors[.POINTER])
+	line_height := text.font.line_height * text.font_scale
+	for &line in text.lines {
+		highlight_range := [2]int {
+			max(text.selection.first_glyph, line.first_glyph),
+			min(text.selection.last_glyph, line.last_glyph),
 		}
-		return false
+		if highlight_range.x > highlight_range.y {
+			continue
+		}
+		box := Box {
+			origin + text.glyphs[highlight_range.x].offset,
+			origin +
+			text.glyphs[highlight_range.y].offset +
+			{
+					text.font.space_advance *
+					text.font_scale *
+					f32(i32(text.selection.last_glyph > line.last_glyph)),
+					line_height,
+				},
+		}
+		kn.add_box(snapped_box(box), paint = color)
 	}
+}
 
-	loop: for {
-		event: sdl3.Event
-		for sdl3.PollEvent(&event) {
-			#partial switch event.type {
-			case .QUIT:
-				break loop
-			case .KEY_DOWN:
-				if event.key.key == sdl3.K_F3 {
-					ctx.is_debugging = !ctx.is_debugging
+Input_Descriptor :: struct {
+	data:      rawptr,
+	type_info: ^runtime.Type_Info,
+}
+
+Input_State :: struct {
+	editor:           tedit.Editor,
+	builder:          strings.Builder,
+	type_info:        runtime.Type_Info,
+	match_list:       [dynamic]string,
+	offset:           [2]f32,
+	action_time:      time.Time,
+	closest_match:    string,
+	anchor:           int,
+	last_mouse_index: int,
+}
+
+to_obfuscated_reader :: proc(reader: ^strings.Reader) -> io.Reader {
+	return io.Reader(io.Stream {
+		procedure = proc(
+			data: rawptr,
+			mode: io.Stream_Mode,
+			p: []byte,
+			_: i64,
+			_: io.Seek_From,
+		) -> (
+			n: i64,
+			err: io.Error,
+		) {
+			if mode == .Read {
+				r := (^strings.Reader)(data)
+				nn: int
+				nn, err = strings.reader_read(r, p)
+				if len(p) > 0 {
+					p[0] = '*'
 				}
-			case .MOUSE_BUTTON_DOWN:
-				handle_mouse_down(Mouse_Button(int(event.button.button) - 1))
-			case .MOUSE_BUTTON_UP:
-				handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
-			case .MOUSE_MOTION:
-				handle_mouse_motion(event.motion.x, event.motion.y)
-			case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
-				kn.set_size(event.window.data1, event.window.data2)
-			case .TEXT_INPUT:
-				handle_text_input(event.text.text)
+				n = i64(min(nn, 1))
 			}
-		}
-
-		do_frame()
-	}
+			return
+		},
+		data = reader,
+	})
 }
 
 string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> string {
@@ -1045,94 +1153,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	return strings.to_string(b)
 }
 
-do_button :: proc(label: union #no_nil {
-		string,
-		rune,
-	}, font: ^kn.Font = nil, font_size: f32 = 14, loc := #caller_location) {
-	do_node({
-			p = 3,
-			fit = true,
-			text = label.(string) or_else string_from_rune(label.(rune)),
-			font_size = font_size,
-			fg = tw.SLATE_800,
-			font = font,
-			on_animate = proc(self: ^Node) {
-				self.style.background_paint = kn.mix(
-					self.transitions[0],
-					tw.SLATE_300,
-					tw.SLATE_400,
-				)
-				self.style.transform_origin = 0.5
-				self.style.scale = 1 - 0.05 * self.transitions[1]
-				self.transitions[1] +=
-					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
-				self.transitions[0] +=
-					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(7)
-				if self.is_hovered {
-					set_cursor(.Pointer)
-				}
-			},
-		}, loc = loc)
-}
-
-do_frame :: proc() {
-	ctx := global_ctx
-	kn.new_frame()
-
-	begin()
-	center := linalg.array_cast(kn.get_size(), f32) / 2
-	begin_node(
-		{
-			p = 4,
-			gap = 20,
-			vertical = true,
-			content_align_x = 0.5,
-			content_align_y = 0.5,
-			bg = kn.Color{0, 0, 0, 0},
-			size = linalg.array_cast(kn.get_size(), f32),
-		},
-	)
-	begin_node({gap = 10, grow_x = true, max_size = math.F32_MAX, h = 200, fit_y = true})
-	for i in 1 ..= 3 {
-		push_id(i)
-		do_node(
-			{
-				text = FILLER_TEXT,
-				grow = true,
-				max_size = math.F32_MAX,
-				font_size = 20,
-				fg = tw.GRAY_700,
-				bg = tw.STONE_300,
-				fit_y = true,
-				wrap = true,
-				clip = true,
-			},
-		)
-		pop_id()
-	}
-	end_node()
-	do_button(lucide.TRENDING_DOWN, font = &lucide.font, font_size = 20)
-	do_button("Button")
-	end_node()
-	end()
-
-	if ctx.is_debugging {
-		kn.set_paint(kn.BLACK)
-		text := kn.make_text(
-			fmt.tprintf(
-				"FPS: %.0f\n%.0f\n%v",
-				kn.get_fps(),
-				ctx.mouse_position,
-				ctx.frame_duration,
-			),
-			14,
-		)
-		kn.add_box({0, text.size}, paint = kn.fade(kn.BLACK, 1.0))
-		kn.add_text(text, 0, paint = kn.WHITE)
-	}
-
-	kn.set_clear_color(kn.WHITE)
-	kn.present()
-
-	free_all(context.temp_allocator)
-}
