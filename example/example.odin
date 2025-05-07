@@ -34,9 +34,6 @@ do_button :: proc(label: union #no_nil {
 					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
 				self.transitions[0] +=
 					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
-				if self.is_hovered {
-					set_cursor(.Pointer)
-				}
 			},
 		}, loc = loc)
 }
@@ -65,9 +62,6 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			self.transitions[0] +=
 				(f32(i32(self.is_hovered || self.has_hovered_child)) - self.transitions[0]) *
 				rate_per_second(14)
-			if self.is_hovered || self.has_hovered_child {
-				set_cursor(.Pointer)
-			}
 		},
 	})
 	do_node(

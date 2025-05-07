@@ -1067,7 +1067,6 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	}
 	self.box.hi = self.box.lo + self.size
 
-	// Necessary, but not explicitly included
 	node_receive_input(self)
 }
 
