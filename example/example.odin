@@ -8,6 +8,7 @@ import tw "../tailwind_colors"
 import "core:fmt"
 import "core:math"
 import "core:mem"
+import "core:time"
 import "vendor:sdl3"
 
 do_button :: proc(label: union #no_nil {
@@ -21,12 +22,12 @@ do_button :: proc(label: union #no_nil {
 			fit = true,
 			text = label.(string) or_else string_from_rune(label.(rune)),
 			font_size = font_size,
-			fg = tw.SLATE_300,
+			fg = tw.NEUTRAL_300,
 			font = font,
 			max_size = math.F32_MAX,
 			on_animate = proc(self: ^Node) {
 				self.style.background_paint = kn.fade(
-					tw.SLATE_600,
+					tw.NEUTRAL_600,
 					0.3 + self.transitions[0] * 0.3,
 				)
 				self.transitions[1] +=
@@ -49,14 +50,18 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		pr = 12,
 		radius = 3,
 		fit = true,
-		gap = 10,
+		gap = 6,
 		max_size = math.F32_MAX,
 		grow_x = true,
 		content_align_y = 0.5,
 		on_animate = proc(self: ^Node) {
-			self.style.background_paint = kn.fade(tw.SLATE_600, 0.3 + self.transitions[0] * 0.3)
+			self.style.background_paint = kn.fade(
+				tw.NEUTRAL_600,
+				self.transitions[0] * 0.3 + self.transitions[1] * 0.3,
+			)
 			self.transitions[1] +=
-				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
+				(f32(i32(self.is_active || self.has_active_child)) - self.transitions[1]) *
+				rate_per_second(14)
 			self.transitions[0] +=
 				(f32(i32(self.is_hovered || self.has_hovered_child)) - self.transitions[0]) *
 				rate_per_second(14)
@@ -71,11 +76,12 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			font = &lucide.font,
 			font_size = 14,
 			fit = true,
-			fg = tw.SLATE_300,
+			fg = tw.NEUTRAL_300,
 		},
 	)
-	do_node({text = label, font_size = 12, fit = true, fg = tw.SLATE_300})
+	do_node({text = label, font_size = 12, fit = true, fg = tw.NEUTRAL_300})
 	end_node()
+	pop_id()
 }
 
 @(deferred_out = __do_menu)
@@ -88,11 +94,9 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 		fit = true,
 		text = label,
 		font_size = 12,
-		fg = tw.SLATE_300,
+		fg = tw.NEUTRAL_300,
 		on_animate = proc(self: ^Node) {
-			self.style.stroke_paint = kn.fade(tw.INDIGO_600, f32(i32(self.is_focused)))
-			self.style.stroke_width = 2
-			self.style.background_paint = kn.fade(tw.SLATE_600, 0.3 + self.transitions[0] * 0.3)
+			self.style.background_paint = kn.fade(tw.NEUTRAL_600, 0.3 + self.transitions[0] * 0.3)
 			self.transitions[1] +=
 				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
 			self.transitions[0] +=
@@ -113,6 +117,9 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	if is_open {
 		begin_node(
 			{
+				shadow_size = 3,
+				shadow_color = kn.BLACK,
+				bounds = Box{0, kn.get_size()},
 				z = 999,
 				abs = true,
 				relative_pos = {0, 1},
@@ -120,8 +127,8 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				fit = true,
 				p = 3,
 				gap = 3,
-				radius = 5,
-				bg = tw.SLATE_800,
+				radius = 3,
+				bg = tw.NEUTRAL_800,
 				vertical = true,
 			},
 		)
@@ -166,6 +173,7 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 	defer sdl3.Quit()
+
 
 	window := sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE})
 	defer sdl3.DestroyWindow(window)
@@ -276,11 +284,28 @@ main :: proc() {
 
 			begin_node({max_size = math.F32_MAX, grow = true})
 			{
-				begin_node({max_size = math.F32_MAX, grow = true, p = 20})
+				begin_node({max_size = math.F32_MAX, grow = true, vertical = true})
 				{
-					// do_button(lucide.ARROW_BIG_UP, font = &lucide.font, font_size = 20)
-					// do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
-					// do_button(lucide.CHART_AREA, font = &lucide.font, font_size = 20)
+					begin_node(
+						{
+							max_h = math.F32_MAX,
+							grow_y = true,
+							p = 3,
+							gap = 3,
+							fit_x = true,
+							vertical = true,
+						},
+					)
+					{
+						do_button(lucide.CIRCLE_PLUS, font = &lucide.font, font_size = 20)
+						do_node({w = 4})
+						do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
+						do_node({w = 4})
+						do_button(lucide.MOVE_3D, font = &lucide.font, font_size = 20)
+						do_button(lucide.ROTATE_3D, font = &lucide.font, font_size = 20)
+						do_button(lucide.SCALE_3D, font = &lucide.font, font_size = 20)
+					}
+					end_node()
 				}
 				end_node()
 
@@ -315,7 +340,7 @@ main :: proc() {
 							grow_x = true,
 							max_w = math.F32_MAX,
 							font_size = 12,
-							fg = tw.SLATE_200,
+							fg = tw.NEUTRAL_200,
 							wrap = true,
 							selectable = true,
 							py = 10,
@@ -335,12 +360,10 @@ main :: proc() {
 			kn.set_paint(kn.BLACK)
 			text := kn.make_text(
 				fmt.tprintf(
-					"FPS: %.0f\n%.0f\n%v\nhovered: %i\n%i nodes",
+					"FPS: %.0f\n%.0f\n%v",
 					kn.get_fps(),
 					ctx.mouse_position,
-					ctx.frame_duration,
-					ctx.hovered_id,
-					len(ctx.nodes),
+					ctx.compute_duration,
 				),
 				12,
 			)
@@ -349,7 +372,9 @@ main :: proc() {
 		}
 
 		kn.set_clear_color(kn.WHITE)
-		kn.present(!requires_redraw())
+		if requires_redraw() {
+			kn.present()
+		}
 
 		free_all(context.temp_allocator)
 	}

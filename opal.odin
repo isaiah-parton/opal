@@ -73,9 +73,11 @@ Node_Config :: struct {
 	size:            [2]f32,
 	max_size:        [2]f32,
 	relative_size:   [2]f32,
+	bounds:          Maybe(Box),
 	bg:              Paint_Variant,
 	stroke:          kn.Paint_Option,
 	fg:              kn.Paint_Option,
+	shadow_color:    kn.Color,
 	font:            ^kn.Font,
 	on_draw:         proc(_: ^Node),
 	on_animate:      proc(_: ^Node),
@@ -83,6 +85,7 @@ Node_Config :: struct {
 	on_drop:         proc(_: ^Node),
 	on_add:          proc(_: ^Node),
 	data:            rawptr,
+	shadow_size:     f32,
 	z:               u32,
 	px:              f32,
 	py:              f32,
@@ -135,6 +138,8 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.align = {config.self_align_x, config.self_align_y}
 	self.position = config.pos
 	self.vertical = config.vertical
+	self.style.shadow_size = config.shadow_size
+	self.style.shadow_color = config.shadow_color
 	self.style.radius = config.radius
 	self.style.stroke_width = config.stroke_width
 	self.style.stroke_paint = config.stroke
@@ -153,6 +158,7 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.enable_selection = config.selectable
 	self.enable_edit = config.editable
 	self.z_index = config.z
+	self.bounds = config.bounds
 }
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
@@ -183,6 +189,7 @@ Node :: struct {
 
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                Box,
+	bounds:             Maybe(Box),
 
 	// The node's local position within its parent; or screen position if its a root
 	position:           [2]f32,
@@ -261,6 +268,9 @@ Node :: struct {
 
 	// If the node is hidden by clipping
 	is_hidden:          bool,
+
+	//
+	time_created:       time.Time,
 
 	// Appearance
 	text:               string,
@@ -344,11 +354,14 @@ Context :: struct {
 	// User images
 	images:                     [dynamic]Maybe(User_Image),
 
-	// Map of node ids
-	nodes_by_id:                map[Id]^Node,
+	// Call index
+	call_index:                 int,
 
-	// Contiguous storage of all nodes in the UI
-	nodes:                      [1024]Maybe(Node),
+	// Nodes by call order
+	node_by_id:                 map[Id]^Node,
+
+	// Node memory is stored contiguously for memory efficiency
+	nodes:                      [2048]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving
 	// They are the root nodes of their layout trees
@@ -366,6 +379,8 @@ Context :: struct {
 	// Profiling state
 	frame_start_time:           time.Time,
 	frame_duration:             time.Duration,
+	compute_start_time:         time.Time,
+	compute_duration:           time.Duration,
 
 	// How many frames are queued for drawing
 	queued_frames:              int,
@@ -594,22 +609,23 @@ pop_id :: proc() {
 
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
-	// reserve(&ctx.nodes, 2048)
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
 	ctx.queued_frames = 2
-	ctx.selection_background_color = kn.GREEN
+	ctx.selection_background_color = kn.LIGHT_GREEN
 	ctx.selection_foreground_color = kn.BLACK
 }
 
 context_deinit :: proc(ctx: ^Context) {
 	assert(ctx != nil)
-	// delete(ctx.nodes)
+	for &node in ctx.nodes {
+		node := (&node.?) or_continue
+		node_destroy(node)
+	}
 	delete(ctx.roots)
 	delete(ctx.stack)
 	delete(ctx.id_stack)
-	delete(ctx.nodes_by_id)
 }
 
 context_set_clipboard :: proc(ctx: ^Context, data: string) {
@@ -717,6 +733,8 @@ begin :: proc() {
 	}
 	ctx.frame_start_time = time.now()
 
+	ctx.compute_start_time = time.now()
+
 	clear(&ctx.id_stack)
 	clear(&ctx.stack)
 	clear(&ctx.roots)
@@ -733,6 +751,7 @@ begin :: proc() {
 	}
 
 	ctx.frame += 1
+	ctx.call_index = 0
 }
 
 //
@@ -750,27 +769,12 @@ end :: proc() {
 
 	// Process and draw the UI
 	for root in ctx.roots {
-		root.box.lo = root.position - root.size * root.align
-		root.box.hi = root.box.lo + root.size
-
 		node_solve_sizes_recursively(root)
 		node_solve_box_recursively(root)
-
-		if ctx.queued_frames > 0 {
-			node_draw_recursively(root)
-		}
+		node_propagate_input_recursively(root)
+		node_draw_recursively(root)
 	}
 
-	if ctx.is_debugging {
-		if ctx.hovered_node != nil {
-			kn.add_box_lines(ctx.hovered_node.box, 1, paint = kn.BLUE)
-		}
-	}
-	kn.set_draw_order(0)
-
-	//
-	// Set ID references for input events for the next frame
-	//
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
 	} else {
@@ -789,16 +793,17 @@ end :: proc() {
 		ctx.active_id = 0
 	}
 
+	kn.set_draw_order(0)
+
 	// Clean up unused nodes
-	for &node, node_index in ctx.nodes {
-		node := node.? or_continue
+	for id, node in ctx.node_by_id {
 		if node.is_dead {
+			delete_key(&ctx.node_by_id, node.id)
 			if node.on_drop != nil {
-				node.on_drop(&node)
+				node.on_drop(node)
 			}
-			node_destroy(&node)
-			delete_key(&ctx.nodes_by_id, node.id)
-			// unordered_remove(&ctx.nodes, node_index)
+			node_destroy(node)
+			(^Maybe(Node))(node)^ = nil
 		} else {
 			node.is_dead = true
 		}
@@ -810,6 +815,8 @@ end :: proc() {
 	// Update redraw state
 	ctx.requires_redraw = ctx.queued_frames > 0
 	ctx.queued_frames = max(0, ctx.queued_frames - 1)
+
+	ctx.compute_duration = time.since(ctx.compute_start_time)
 }
 
 set_cursor :: proc(cursor: Cursor) {
@@ -817,7 +824,7 @@ set_cursor :: proc(cursor: Cursor) {
 }
 
 draw_frames :: proc(how_many: int) {
-	global_ctx.queued_frames += how_many
+	global_ctx.queued_frames = max(global_ctx.queued_frames, how_many)
 }
 
 requires_redraw :: proc() -> bool {
@@ -869,47 +876,40 @@ text_node_style :: proc() -> Node_Style {
 //
 // Get an existing node by its id or create a new one
 //
-get_or_create_node :: proc(id: Id) -> ^Node {
+get_or_create_node :: proc(id: Id) -> (result: ^Node) {
 	ctx := global_ctx
-	node, ok := ctx.nodes_by_id[id]
-	if !ok {
-		for &slot in ctx.nodes {
+
+	if node, ok := ctx.node_by_id[id]; ok {
+		result = node
+	} else {
+		for &slot, slot_index in ctx.nodes {
 			if slot == nil {
-				slot = Node {
-					id = id,
+				ctx.nodes[slot_index] = Node {
+					id           = id,
+					time_created = time.now(),
 				}
-				node = &slot.?
-				ok = true
+				result = &ctx.nodes[slot_index].?
+				ctx.node_by_id[id] = result
+				draw_frames(1)
 				break
 			}
 		}
-		// append(&ctx.nodes, Node{id = id})
-		// node = &ctx.nodes[len(ctx.nodes) - 1]
-		ctx.nodes_by_id[id] = node
 	}
-	if node == nil {
-		fmt.panicf(
-			"get_or_create_node(%i) would return an nil pointer! This is UNACCEPTABLEEE!!!",
-			id,
-		)
-	}
-	if node.frame == ctx.frame {
-		fmt.printfln("Node %i was called twice in one frame!", node.id)
-		return nil
-	}
-	node.frame = ctx.frame
-	node.parent = ctx.current_node
-	if node.parent != nil {
-		if node.parent.id == node.id {
-			fmt.panicf("Node %i contains itself", node.id)
-		}
-	}
-	return node
+
+	assert(result != nil)
+
+	return
 }
 
 begin_node :: proc(config: Node_Config, loc := #caller_location) -> (self: ^Node) {
+	ctx := global_ctx
 	self = get_or_create_node(hash_loc(loc))
-	node_init(self)
+
+	if self.parent != ctx.current_node {
+		self.parent = ctx.current_node
+		assert(self != self.parent)
+	}
+
 	node_on_new_frame(self, config)
 	push_node(self)
 	return
@@ -944,11 +944,6 @@ do_node :: proc(config: Node_Config, loc := #caller_location) -> ^Node {
 // Node logic
 //
 
-node_init :: proc(self: ^Node) {
-	reserve(&self.kids, 16)
-	clear(&self.kids)
-}
-
 focus_node :: proc(id: Id) {
 	global_ctx.focused_id = id
 }
@@ -957,8 +952,46 @@ node_destroy :: proc(self: ^Node) {
 	delete(self.kids)
 }
 
+node_update_this_frame_input :: proc(self: ^Node) {
+	ctx := global_ctx
+
+	self.was_hovered = self.is_hovered
+	self.is_hovered = ctx.hovered_id == self.id
+
+	self.was_active = self.is_active
+	self.is_active = ctx.active_id == self.id
+
+	self.was_focused = self.is_focused
+	self.is_focused = ctx.focused_id == self.id
+}
+
+node_reset_propagated_input :: proc(self: ^Node) {
+	self.has_hovered_child = false
+	self.has_active_child = false
+	self.has_focused_child = false
+}
+
+node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
+	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
+	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
+	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
+}
+
+node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
+	assert(depth < 128)
+	node_reset_propagated_input(self)
+	node_update_this_frame_input(self)
+	for node in self.kids {
+		node_propagate_input_recursively(node)
+		node_receive_propagated_input(self, node)
+	}
+}
+
 node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	ctx := global_ctx
+
+	reserve(&self.kids, 16)
+	clear(&self.kids)
 
 	self.style.scale = 1
 
@@ -976,19 +1009,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 
 	// Reset accumulative values
 	self.content_size = 0
-
-	// Update input state
-	self.was_hovered = self.is_hovered
-	self.is_hovered = ctx.hovered_id == self.id
-	self.has_hovered_child = false
-
-	self.was_active = self.is_active
-	self.is_active = ctx.active_id == self.id
-	self.has_active_child = false
-
-	self.was_focused = self.is_focused
-	self.is_focused = ctx.focused_id == self.id
-	self.has_focused_child = false
 
 	// Create text layout
 	if len(self.text) > 0 {
@@ -1018,8 +1038,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		return
 	}
 
-	assert(self != self.parent)
-
 	// Child logic
 	append(&self.parent.kids, self)
 
@@ -1029,9 +1047,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 }
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
-	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
-	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
-	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
 	// Propagate content size up the tree in reverse breadth-first
 	if child.is_absolute {
 		return
@@ -1045,11 +1060,155 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	}
 }
 
-node_solve_box_recursively :: proc(self: ^Node) {
+node_solve_box :: proc(self: ^Node, offset: [2]f32) {
+	self.box.lo = offset + self.position
+	if bounds, ok := self.bounds.?; ok {
+		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
+	}
+	self.box.hi = self.box.lo + self.size
+
+	// Necessary, but not explicitly included
+	node_receive_input(self)
+}
+
+node_solve_box_recursively :: proc(self: ^Node, offset: [2]f32 = {}) {
+	node_solve_box(self, offset)
 	for node in self.kids {
-		node.box.lo = linalg.floor(self.box.lo + node.position)
-		node.box.hi = node.box.lo + linalg.floor(node.size)
-		node_solve_box_recursively(node)
+		node.z_index += self.z_index
+		node_solve_box_recursively(node, self.box.lo)
+		node_receive_propagated_input(self, node)
+	}
+}
+
+__node_solve_sizes :: proc(self: ^Node) {
+	if self.vertical {
+		// Compute available space
+		remaining_space := self.size.y - self.content_size.y
+		available_span := self.size.x - self.padding.x - self.padding.z
+		// Temporary array of growable children
+		growables := make(
+			[dynamic]^Node,
+			0,
+			self.growable_kid_count,
+			allocator = context.temp_allocator,
+		)
+		// Populate the array
+		for &node in self.kids {
+			if !node.is_absolute && node.grow.y {
+				append(&growables, node)
+			}
+		}
+		// As long as there is space remaining and children to grow
+		for remaining_space > 0 && len(growables) > 0 {
+			// Get the smallest size along the layout axis, nodes of this size will be grown first
+			smallest := growables[0].size.y
+			// Until they reach this size
+			second_smallest := f32(math.F32_MAX)
+			size_to_add := remaining_space
+			for node in growables {
+				if node.size.y < smallest {
+					second_smallest = smallest
+					smallest = node.size.y
+				}
+				if node.size.y > smallest {
+					second_smallest = min(second_smallest, node.size.y)
+				}
+			}
+			// Compute the smallest size to add
+			size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
+			// Add that amount to every eligable child
+			for node, node_index in growables {
+				if node.size.y == smallest {
+					size_to_add := min(size_to_add, node.max_size.y - node.size.y)
+					if size_to_add <= 0 {
+						unordered_remove(&growables, node_index)
+						continue
+					}
+					node.size.y += size_to_add
+					remaining_space -= size_to_add
+				}
+			}
+		}
+		// Now compute each child's position within its parent
+		offset_along_axis: f32 = self.padding.y
+		for node in self.kids {
+			if node.is_absolute {
+				node.position += self.size * node.relative_position
+				node.size += self.size * node.relative_size
+			} else {
+				node.position.y = offset_along_axis + remaining_space * self.content_align.y
+				if node.grow.x {
+					node.size.x = max(node.size.x, available_span)
+				}
+				node.position.x =
+					self.padding.x + (available_span - node.size.x) * self.content_align.x
+				offset_along_axis += node.size.y + self.spacing
+			}
+		}
+	} else {
+		// Compute available space
+		remaining_space := self.size.x - self.content_size.x
+		available_span := self.size.y - self.padding.y - self.padding.w
+		// Temporary array of growable children
+		growables := make(
+			[dynamic]^Node,
+			0,
+			self.growable_kid_count,
+			allocator = context.temp_allocator,
+		)
+		// Populate the array
+		for &node in self.kids {
+			if !node.is_absolute && node.grow.x {
+				append(&growables, node)
+			}
+		}
+		// As long as there is space remaining and children to grow
+		for remaining_space > 0 && len(growables) > 0 {
+			// Get the smallest size along the layout axis, nodes of this size will be grown first
+			smallest := growables[0].size.x
+			// Until they reach this size
+			second_smallest := f32(math.F32_MAX)
+			size_to_add := remaining_space
+			for node in growables {
+				if node.size.x < smallest {
+					second_smallest = smallest
+					smallest = node.size.x
+				}
+				if node.size.x > smallest {
+					second_smallest = min(second_smallest, node.size.x)
+				}
+			}
+			// Compute the smallest size to add
+			size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
+			// Add that amount to every eligable child
+			for node, node_index in growables {
+				if node.size.x == smallest {
+					size_to_add := min(size_to_add, node.max_size.x - node.size.x)
+					if size_to_add <= 0 {
+						unordered_remove(&growables, node_index)
+						continue
+					}
+					node.size.x += size_to_add
+					remaining_space -= size_to_add
+				}
+			}
+		}
+		// Now compute each child's position within its parent
+		offset_along_axis: f32 = self.padding.x
+		for node in self.kids {
+			if node.is_absolute {
+				node.position += self.size * node.relative_position
+				node.size += self.size * node.relative_size
+			} else {
+				node.position.x = offset_along_axis + remaining_space * self.content_align.x
+				if node.grow.y {
+					node.size.y = max(node.size.y, available_span)
+				}
+				node.position.y =
+					self.padding.y + (available_span - node.size.y) * self.content_align.y
+				offset_along_axis += node.size.x + self.spacing
+			}
+		}
 	}
 }
 
@@ -1123,7 +1282,7 @@ node_solve_sizes :: proc(self: ^Node) {
 }
 
 node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) {
-	assert(depth < 100)
+	assert(depth < 128)
 	node_solve_sizes(self)
 	for node in self.kids {
 		node_solve_sizes_recursively(node, depth + 1)
@@ -1155,8 +1314,8 @@ node_receive_input :: proc(self: ^Node) {
 }
 
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
+	assert(depth < 128)
 	ctx := global_ctx
-	node_receive_input(self)
 
 	last_transitions := self.transitions
 	if self.on_animate != nil {
@@ -1226,10 +1385,12 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	kn.set_draw_order(int(self.z_index))
 
 	// Draw self
-	if self.on_draw != nil {
-		self.on_draw(self)
-	} else {
-		node_draw_default(self)
+	if ctx.queued_frames > 0 {
+		if self.on_draw != nil {
+			self.on_draw(self)
+		} else {
+			node_draw_default(self)
+		}
 	}
 
 	if is_transformed {
@@ -1238,7 +1399,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Draw children
 	for node in self.kids {
-		node.z_index += self.z_index
 		node_draw_recursively(node, depth + 1)
 	}
 
@@ -1248,8 +1408,12 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Draw debug lines
 	if ODIN_DEBUG {
-		if ctx.is_debugging && self.has_hovered_child {
-			kn.add_box_lines(self.box, 1, paint = kn.LIGHT_GREEN)
+		if ctx.is_debugging {
+			if self.has_hovered_child {
+				kn.add_box_lines(self.box, 1, self.style.radius, paint = kn.LIGHT_GREEN)
+			} else if self.is_hovered {
+				kn.add_box(self.box, self.style.radius, paint = kn.fade(kn.RED, 0.3))
+			}
 		}
 	}
 }
@@ -1289,7 +1453,6 @@ node_draw_default :: proc(self: ^Node) {
 				global_ctx.selection_background_color,
 			)
 		}
-		// if len(self.text_layout.lines) > 1 do fmt.panicf("%#v", self.text_layout.glyphs)
 		draw_text(
 			&self.text_layout,
 			self.text_origin,
@@ -1374,7 +1537,17 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 					line_height,
 				},
 		}
-		kn.add_box(snapped_box(box), paint = color)
+		kn.add_box(
+			snapped_box(box),
+			3 *
+			{
+					f32(i32(text.selection.first_glyph >= line.first_glyph)),
+					0,
+					0,
+					f32(i32(text.selection.last_glyph <= line.last_glyph)),
+				},
+			paint = color,
+		)
 	}
 }
 
