@@ -55,9 +55,9 @@ Cursor :: enum {
 	Text,
 }
 
-On_Set_Cursor_Proc :: #type proc(cursor: Cursor) -> bool
-On_Set_Clipboard_Proc :: #type proc(data: string)
-On_Get_Clipboard_Proc :: #type proc() -> string
+On_Set_Cursor_Proc :: #type proc(cursor: Cursor, data: rawptr) -> bool
+On_Set_Clipboard_Proc :: #type proc(text: string, data: rawptr)
+On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> string
 
 Mouse_Button :: enum {
 	Left,
@@ -118,6 +118,7 @@ Node_Config :: struct {
 	selectable:      bool,
 	editable:        bool,
 	root:            bool,
+	widget:          bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
@@ -128,6 +129,7 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 		max(config.p.z, config.px, config.pr),
 		max(config.p.w, config.py, config.pb),
 	}
+	self.is_widget = config.widget
 	self.relative_position = config.relative_pos
 	self.spacing = config.gap
 	self.fit = {config.fit | config.fit_x, config.fit | config.fit_y}
@@ -235,6 +237,9 @@ Node :: struct {
 	is_absolute:        bool,
 	enable_wrapping:    bool,
 
+	// Marks the node as a clickable widget and will steal mouse events from the native window functionality
+	is_widget:          bool,
+
 	// Opal sacrifices one frame of responsiveness for faster frames. This value is a representation of the previous frame's input
 	was_hovered:        bool,
 	is_hovered:         bool,
@@ -289,15 +294,31 @@ Node :: struct {
 	retained_data:      rawptr,
 }
 
+Color :: kn.Color
+
 Image_Paint :: struct {
 	index:  int,
 	offset: [2]f32,
 	size:   [2]f32,
 }
 
+Radial_Gradient :: struct {
+	center: [2]f32,
+	radius: f32,
+	inner:  Color,
+	outer:  Color,
+}
+
+Linear_Gradient :: struct {
+	points: [2][2]f32,
+	colors: [2]Color,
+}
+
 Paint_Variant :: union #no_nil {
-	kn.Color,
+	Color,
 	Image_Paint,
+	Radial_Gradient,
+	Linear_Gradient,
 }
 
 //
@@ -336,6 +357,7 @@ Context :: struct {
 	mouse_button_was_down:      [Mouse_Button]bool,
 	key_down:                   [256]bool,
 	key_was_down:               [256]bool,
+	widget_hovered:             bool,
 	hovered_node:               ^Node,
 	focused_node:               ^Node,
 	active_node:                ^Node,
@@ -345,6 +367,7 @@ Context :: struct {
 	on_set_cursor:              On_Set_Cursor_Proc,
 	on_set_clipboard:           On_Set_Clipboard_Proc,
 	on_get_clipboard:           On_Get_Clipboard_Proc,
+	callback_data:              rawptr,
 	cursor:                     Cursor,
 	last_cursor:                Cursor,
 	selection_background_color: kn.Color,
@@ -632,7 +655,7 @@ context_set_clipboard :: proc(ctx: ^Context, data: string) {
 	if ctx.on_set_clipboard == nil {
 		return
 	}
-	ctx.on_set_clipboard(data)
+	ctx.on_set_clipboard(data, ctx.callback_data)
 }
 
 set_clipboard :: proc(data: string) {
@@ -687,6 +710,11 @@ handle_mouse_down :: proc(button: Mouse_Button) {
 handle_mouse_up :: proc(button: Mouse_Button) {
 	ctx := global_ctx
 	ctx.mouse_button_down[button] = false
+}
+
+handle_window_size_change :: proc(width, height: i32) {
+	kn.set_size(width, height)
+	draw_frames(1)
 }
 
 //
@@ -761,7 +789,7 @@ end :: proc() {
 	ctx := global_ctx
 
 	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
-		if ctx.on_set_cursor(ctx.cursor) {
+		if ctx.on_set_cursor(ctx.cursor, ctx.callback_data) {
 			ctx.last_cursor = ctx.cursor
 		}
 	}
@@ -773,8 +801,12 @@ end :: proc() {
 		node_solve_box_recursively(root)
 	}
 
+	ctx.widget_hovered = false
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
+		if ctx.hovered_node.is_widget {
+			ctx.widget_hovered = true
+		}
 	} else {
 		ctx.hovered_id = 0
 	}
@@ -1082,138 +1114,6 @@ node_solve_box_recursively :: proc(self: ^Node, offset: [2]f32 = {}) {
 	}
 }
 
-__node_solve_sizes :: proc(self: ^Node) {
-	if self.vertical {
-		// Compute available space
-		remaining_space := self.size.y - self.content_size.y
-		available_span := self.size.x - self.padding.x - self.padding.z
-		// Temporary array of growable children
-		growables := make(
-			[dynamic]^Node,
-			0,
-			self.growable_kid_count,
-			allocator = context.temp_allocator,
-		)
-		// Populate the array
-		for &node in self.kids {
-			if !node.is_absolute && node.grow.y {
-				append(&growables, node)
-			}
-		}
-		// As long as there is space remaining and children to grow
-		for remaining_space > 0 && len(growables) > 0 {
-			// Get the smallest size along the layout axis, nodes of this size will be grown first
-			smallest := growables[0].size.y
-			// Until they reach this size
-			second_smallest := f32(math.F32_MAX)
-			size_to_add := remaining_space
-			for node in growables {
-				if node.size.y < smallest {
-					second_smallest = smallest
-					smallest = node.size.y
-				}
-				if node.size.y > smallest {
-					second_smallest = min(second_smallest, node.size.y)
-				}
-			}
-			// Compute the smallest size to add
-			size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
-			// Add that amount to every eligable child
-			for node, node_index in growables {
-				if node.size.y == smallest {
-					size_to_add := min(size_to_add, node.max_size.y - node.size.y)
-					if size_to_add <= 0 {
-						unordered_remove(&growables, node_index)
-						continue
-					}
-					node.size.y += size_to_add
-					remaining_space -= size_to_add
-				}
-			}
-		}
-		// Now compute each child's position within its parent
-		offset_along_axis: f32 = self.padding.y
-		for node in self.kids {
-			if node.is_absolute {
-				node.position += self.size * node.relative_position
-				node.size += self.size * node.relative_size
-			} else {
-				node.position.y = offset_along_axis + remaining_space * self.content_align.y
-				if node.grow.x {
-					node.size.x = max(node.size.x, available_span)
-				}
-				node.position.x =
-					self.padding.x + (available_span - node.size.x) * self.content_align.x
-				offset_along_axis += node.size.y + self.spacing
-			}
-		}
-	} else {
-		// Compute available space
-		remaining_space := self.size.x - self.content_size.x
-		available_span := self.size.y - self.padding.y - self.padding.w
-		// Temporary array of growable children
-		growables := make(
-			[dynamic]^Node,
-			0,
-			self.growable_kid_count,
-			allocator = context.temp_allocator,
-		)
-		// Populate the array
-		for &node in self.kids {
-			if !node.is_absolute && node.grow.x {
-				append(&growables, node)
-			}
-		}
-		// As long as there is space remaining and children to grow
-		for remaining_space > 0 && len(growables) > 0 {
-			// Get the smallest size along the layout axis, nodes of this size will be grown first
-			smallest := growables[0].size.x
-			// Until they reach this size
-			second_smallest := f32(math.F32_MAX)
-			size_to_add := remaining_space
-			for node in growables {
-				if node.size.x < smallest {
-					second_smallest = smallest
-					smallest = node.size.x
-				}
-				if node.size.x > smallest {
-					second_smallest = min(second_smallest, node.size.x)
-				}
-			}
-			// Compute the smallest size to add
-			size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
-			// Add that amount to every eligable child
-			for node, node_index in growables {
-				if node.size.x == smallest {
-					size_to_add := min(size_to_add, node.max_size.x - node.size.x)
-					if size_to_add <= 0 {
-						unordered_remove(&growables, node_index)
-						continue
-					}
-					node.size.x += size_to_add
-					remaining_space -= size_to_add
-				}
-			}
-		}
-		// Now compute each child's position within its parent
-		offset_along_axis: f32 = self.padding.x
-		for node in self.kids {
-			if node.is_absolute {
-				node.position += self.size * node.relative_position
-				node.size += self.size * node.relative_size
-			} else {
-				node.position.x = offset_along_axis + remaining_space * self.content_align.x
-				if node.grow.y {
-					node.size.y = max(node.size.y, available_span)
-				}
-				node.position.y =
-					self.padding.y + (available_span - node.size.y) * self.content_align.y
-				offset_along_axis += node.size.x + self.spacing
-			}
-		}
-	}
-}
-
 node_solve_sizes :: proc(self: ^Node) {
 	// Axis indices
 	i := int(self.vertical)
@@ -1382,7 +1282,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Apply clipping
 	if self.clip_content {
-		kn.push_scissor(kn.make_box(self.box))
+		kn.push_scissor(kn.make_box(self.box, self.style.radius))
 	}
 
 	kn.set_draw_order(int(self.z_index))
@@ -1445,6 +1345,24 @@ node_draw_default :: proc(self: ^Node) {
 					),
 				)
 			}
+		case Radial_Gradient:
+			kn.set_paint(
+				kn.make_radial_gradient(
+					self.box.lo + v.center * self.size,
+					v.radius * max(self.size.x, self.size.y),
+					v.inner,
+					v.outer,
+				),
+			)
+		case Linear_Gradient:
+			kn.set_paint(
+				kn.make_linear_gradient(
+					self.box.lo + v.points[0] * self.size,
+					self.box.lo + v.points[1] * self.size,
+					v.colors[0],
+					v.colors[1],
+				),
+			)
 		}
 		kn.add_box(self.box, self.style.radius)
 	}
