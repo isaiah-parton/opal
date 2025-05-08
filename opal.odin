@@ -103,7 +103,7 @@ Node_Config :: struct {
 	content_align_x: f32,
 	content_align_y: f32,
 	stroke_width:    f32,
-	radius:          f32,
+	radius:          [4]f32,
 	font_size:       f32,
 	fit:             bool,
 	fit_x:           bool,
@@ -771,8 +771,6 @@ end :: proc() {
 	for root in ctx.roots {
 		node_solve_sizes_recursively(root)
 		node_solve_box_recursively(root)
-		node_propagate_input_recursively(root)
-		node_draw_recursively(root)
 	}
 
 	if ctx.hovered_node != nil {
@@ -791,6 +789,11 @@ end :: proc() {
 		ctx.active_id = ctx.active_node.id
 	} else if mouse_released(.Left) {
 		ctx.active_id = 0
+	}
+
+	for root in ctx.roots {
+		node_propagate_input_recursively(root)
+		node_draw_recursively(root)
 	}
 
 	kn.set_draw_order(0)
@@ -1322,7 +1325,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 
 	// Detect changes in transition values
-	if self.transitions != last_transitions {
+	if self.transitions != last_transitions &&
+	   linalg.greater_than_array(self.transitions, 0.01) != {} {
 		draw_frames(2)
 	}
 

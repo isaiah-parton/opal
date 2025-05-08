@@ -10,15 +10,148 @@ import "core:math"
 import "core:mem"
 import "core:time"
 import "vendor:sdl3"
+import "vendor:wgpu"
+
+Vertex :: struct {
+	pos:       [4]f32,
+	tex_coord: [2]f32,
+}
+
+vertex :: proc(pos: [3]f32, tex_coord: [2]f32) -> Vertex {
+	return Vertex{pos = {pos.x, pos.y, pos.z, 1.0}, tex_coord = tex_coord}
+}
+
+Example_Renderer :: struct {
+	vertex_buf:    wgpu.Buffer,
+	index_buf:     wgpu.Buffer,
+	index_count:   uint,
+	bind_group:    wgpu.BindGroup,
+	uniform_buf:   wgpu.Buffer,
+	pipeline:      wgpu.RenderPipeline,
+	pipeline_wire: Maybe(wgpu.RenderPipeline),
+}
+
+example_renderer_init :: proc(self: ^Example_Renderer, device: wgpu.Device) {
+	self.vertex_buf = wgpu.DeviceCreateBufferWithDataSlice(
+	device,
+	&{label = "Vertex Buffer", usage = {.Vertex}},
+	[]Vertex {
+		// top (0, 0, 1)
+		vertex({-1, -1, 1}, {0, 0}),
+		vertex({1, -1, 1}, {1, 0}),
+		vertex({1, 1, 1}, {1, 1}),
+		vertex({-1, 1, 1}, {0, 1}),
+		// bottom (0, 0, -1)
+		vertex({-1, 1, -1}, {1, 0}),
+		vertex({1, 1, -1}, {0, 0}),
+		vertex({1, -1, -1}, {0, 1}),
+		vertex({-1, -1, -1}, {1, 1}),
+		// right (1, 0, 0)
+		vertex({1, -1, -1}, {0, 0}),
+		vertex({1, 1, -1}, {1, 0}),
+		vertex({1, 1, 1}, {1, 1}),
+		vertex({1, -1, 1}, {0, 1}),
+		// left (-1, 0, 0)
+		vertex({-1, -1, 1}, {1, 0}),
+		vertex({-1, 1, 1}, {0, 0}),
+		vertex({-1, 1, -1}, {0, 1}),
+		vertex({-1, -1, -1}, {1, 1}),
+		// front (0, 1, 0)
+		vertex({1, 1, -1}, {1, 0}),
+		vertex({-1, 1, -1}, {0, 0}),
+		vertex({-1, 1, 1}, {0, 1}),
+		vertex({1, 1, 1}, {1, 1}),
+		// back (0, -1, 0)
+		vertex({1, -1, 1}, {0, 0}),
+		vertex({-1, -1, 1}, {1, 0}),
+		vertex({-1, -1, -1}, {1, 1}),
+		vertex({1, -1, -1}, {0, 1}),
+	},
+	)
+
+	self.index_buf = wgpu.DeviceCreateBufferWithDataSlice(
+	device,
+	&{label = "Index Buffer", usage = {.Index}},
+	[]u16 {
+		0,
+		1,
+		2,
+		2,
+		3,
+		0, // top
+		4,
+		5,
+		6,
+		6,
+		7,
+		4, // bottom
+		8,
+		9,
+		10,
+		10,
+		11,
+		8, // right
+		12,
+		13,
+		14,
+		14,
+		15,
+		12, // left
+		16,
+		17,
+		18,
+		18,
+		19,
+		16, // front
+		20,
+		21,
+		22,
+		22,
+		23,
+		20, // back
+	},
+	)
+
+	bind_group_layout := wgpu.DeviceCreateBindGroupLayout(
+		device,
+		&{
+			entryCount = 1,
+			entries = ([^]wgpu.BindGroupLayoutEntry)(
+				&[?]wgpu.BindGroupLayoutEntry {
+					{
+						binding = 0,
+						visibility = {.Vertex},
+						buffer = {minBindingSize = 64, type = .Uniform},
+					},
+				},
+			),
+		},
+	)
+
+	pipeline_layout := wgpu.DeviceCreatePipelineLayout(
+		device,
+		&{bindGroupLayouts = &bind_group_layout},
+	)
+
+	shader := wgpu.DeviceCreateShaderModule(
+		device,
+		&{
+			nextInChain = &wgpu.ShaderSourceWGSL {
+				sType = .ShaderSourceWGSL,
+				code = #load("shader.wgsl"),
+			},
+		},
+	)
+}
 
 do_button :: proc(label: union #no_nil {
 		string,
 		rune,
-	}, font: ^kn.Font = nil, font_size: f32 = 12, loc := #caller_location) {
+	}, font: ^kn.Font = nil, font_size: f32 = 12, radius: [4]f32 = 3, loc := #caller_location) {
 	using opal
 	do_node({
 			p = 3,
-			radius = 3,
+			radius = radius,
 			fit = true,
 			text = label.(string) or_else string_from_rune(label.(rune)),
 			font_size = font_size,
@@ -28,7 +161,7 @@ do_button :: proc(label: union #no_nil {
 			on_animate = proc(self: ^Node) {
 				self.style.background_paint = kn.fade(
 					tw.NEUTRAL_600,
-					0.3 + self.transitions[0] * 0.3,
+					0.3 + f32(i32(self.is_hovered)) * 0.3,
 				)
 				self.transitions[1] +=
 					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
@@ -95,11 +228,8 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
 			self.transitions[0] +=
 				(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
-			if self.is_hovered {
-				set_cursor(.Pointer)
-				if self.parent != nil && self.parent.has_focused_child {
-					focus_node(self.id)
-				}
+			if self.is_hovered && self.parent != nil && self.parent.has_focused_child {
+				focus_node(self.id)
 			}
 		},
 	})
@@ -111,8 +241,8 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	if is_open {
 		begin_node(
 			{
-				shadow_size = 3,
-				shadow_color = kn.BLACK,
+				shadow_size = 5,
+				shadow_color = {0, 0, 0, 128},
 				bounds = Box{0, kn.get_size()},
 				z = 999,
 				abs = true,
@@ -167,7 +297,6 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 	defer sdl3.Quit()
-
 
 	window := sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE})
 	defer sdl3.DestroyWindow(window)
@@ -284,20 +413,35 @@ main :: proc() {
 						{
 							max_h = math.F32_MAX,
 							grow_y = true,
-							p = 3,
-							gap = 3,
+							p = 5,
+							gap = 1,
 							fit_x = true,
 							vertical = true,
 						},
 					)
 					{
-						do_button(lucide.CIRCLE_PLUS, font = &lucide.font, font_size = 20)
-						do_node({w = 4})
-						do_button(lucide.ZAP, font = &lucide.font, font_size = 20)
-						do_node({w = 4})
-						do_button(lucide.MOVE_3D, font = &lucide.font, font_size = 20)
-						do_button(lucide.ROTATE_3D, font = &lucide.font, font_size = 20)
-						do_button(lucide.SCALE_3D, font = &lucide.font, font_size = 20)
+						do_button(lucide.FOLDER_PLUS, font = &lucide.font, font_size = 20)
+						do_node({h = 4})
+						do_button(lucide.WAND_SPARKLES, font = &lucide.font, font_size = 20)
+						do_node({h = 4})
+						do_button(
+							lucide.MOVE_3D,
+							font = &lucide.font,
+							font_size = 20,
+							radius = {3, 3, 0, 0},
+						)
+						do_button(
+							lucide.ROTATE_3D,
+							font = &lucide.font,
+							font_size = 20,
+							radius = 0,
+						)
+						do_button(
+							lucide.SCALE_3D,
+							font = &lucide.font,
+							font_size = 20,
+							radius = {0, 0, 3, 3},
+						)
 					}
 					end_node()
 				}
@@ -354,10 +498,11 @@ main :: proc() {
 			kn.set_paint(kn.BLACK)
 			text := kn.make_text(
 				fmt.tprintf(
-					"FPS: %.0f\n%.0f\n%v",
+					"FPS: %.0f\n%.0f\n%v\n%i",
 					kn.get_fps(),
 					ctx.mouse_position,
 					ctx.compute_duration,
+					ctx.queued_frames,
 				),
 				12,
 			)
