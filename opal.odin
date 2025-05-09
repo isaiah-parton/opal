@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:io"
 import "core:math"
+import "core:math/ease"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:mem"
@@ -242,7 +243,7 @@ Node :: struct {
 	frame:              int,
 
 	// Unique identifier
-	id:                 Id,
+	id:                 Id `fmt:"x"`,
 
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                Box,
@@ -357,7 +358,7 @@ Node :: struct {
 
 	// Text content
 	text:               string,
-	text_layout:        kn.Selectable_Text,
+	text_layout:        kn.Selectable_Text `fmt:"-"`,
 	last_text_size:     [2]f32,
 
 	// View offset of contents
@@ -643,6 +644,10 @@ size_ratio :: proc(size: [2]f32, ratio: [2]f32) -> [2]f32 {
 		max(size.x, size.y * (ratio.x / ratio.y)),
 		max(size.y, size.x * (ratio.y / ratio.x)),
 	}
+}
+
+box_shrink :: proc(self: Box, amount: f32) -> Box {
+	return {self.lo + amount, self.hi - amount}
 }
 
 // If `a` is inside of `b`
@@ -1145,7 +1150,7 @@ begin_node :: proc(config: Node_Config, loc := #caller_location) -> (self: ^Node
 	ctx := global_ctx
 	self = get_or_create_node(hash_loc(loc))
 
-	if self.parent != ctx.current_node {
+	if !config.root && self.parent != ctx.current_node {
 		self.parent = ctx.current_node
 		assert(self != self.parent)
 	}
@@ -1590,13 +1595,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			set_cursor(.Text)
 		}
 		node_update_selection(self, self.text, &self.text_layout)
-		// TODO: Delete this!
-		// kn.add_string(
-		// 	fmt.tprintf("%v\n%v", self.editor.selection, self.text_layout.selection.glyphs),
-		// 	12,
-		// 	{self.box.lo.x, self.box.hi.y},
-		// 	paint = kn.WHITE,
-		// )
 	}
 
 	// Is transformation necessary?
@@ -1714,16 +1712,27 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	if ctx.requires_redraw {
 		if self.show_scrollbars {
+			SCROLLBAR_SIZE :: 6
+			inner_box := box_shrink(self.box, 1)
 			if self.content_size.y > self.size.y {
-				box := Box{{self.box.hi.x - 10, self.box.lo.y}, self.box.hi}
-				radius := box_width(box) / 2
-				thumb_size := box_height(box) * self.size.y / self.content_size.y
-				travel := box_height(box) - thumb_size
-				time := self.scroll.y / (self.content_size.y - self.size.y)
-				kn.add_box(box, radius, paint = tw.SLATE_800)
-				thumb_box := Box{{box.lo.x, box.lo.y + travel * time}, {box.hi.x, 0}}
-				thumb_box.hi.y = thumb_box.lo.y + thumb_size
-				kn.add_box(thumb_box, radius, paint = tw.SLATE_600)
+				do_node(
+					{
+						absolute = true,
+						relative_pos = {1, 0},
+						position = {-SCROLLBAR_SIZE - 1, 1},
+						size = {SCROLLBAR_SIZE, self.size.y - 2},
+						bg = tw.NEUTRAL_900,
+					},
+				)
+				// box := Box{{inner_box.hi.x - SCROLLBAR_SIZE, inner_box.lo.y}, inner_box.hi}
+				// radius := box_width(box) / 2
+				// thumb_size := box_height(box) * self.size.y / self.content_size.y
+				// travel := box_height(box) - thumb_size
+				// time := self.scroll.y / (self.content_size.y - self.size.y)
+				// kn.add_box(box, radius, paint = tw.NEUTRAL_900)
+				// thumb_box := Box{{box.lo.x, box.lo.y + travel * time}, {box.hi.x, 0}}
+				// thumb_box.hi.y = thumb_box.lo.y + thumb_size
+				// kn.add_box(thumb_box, radius, paint = tw.NEUTRAL_700)
 			}
 		}
 		if self.style.stroke_paint != nil {
@@ -1801,16 +1810,18 @@ draw_text :: proc(
 	if ordered_selection.x > ordered_selection.y {
 		ordered_selection = ordered_selection.yx
 	}
+	kn.set_paint(paint)
 	for &glyph, glyph_index in text.glyphs {
 		if glyph.source.lo == glyph.source.hi {
 			continue
 		}
-		kn.add_glyph(
-			glyph,
-			text.font_scale,
-			origin + glyph.offset,
-			paint = selected_color if (glyph_index >= ordered_selection[0] && glyph_index < ordered_selection[1]) else paint,
-		)
+		if glyph_index == ordered_selection[0] {
+			kn.set_paint(selected_color)
+		}
+		if glyph_index == ordered_selection[1] {
+			kn.set_paint(paint)
+		}
+		kn.add_glyph(glyph, text.font_scale, origin + glyph.offset)
 	}
 }
 
@@ -1960,6 +1971,7 @@ Inspector :: struct {
 	position:       [2]f32,
 	move_offset:    [2]f32,
 	is_being_moved: bool,
+	selected_id:    Id,
 	inspected_id:   Id,
 }
 
@@ -1995,7 +2007,11 @@ inspector_show :: proc(self: ^Inspector) {
 	})
 	do_node(
 		{
-			text = "Inspector",
+			text = fmt.tprintf(
+				"Inspector\n(%.0f FPS)\n%v",
+				kn.get_fps(),
+				global_ctx.compute_duration,
+			),
 			font_size = 12,
 			fit = 1,
 			padding = 3,
@@ -2007,6 +2023,25 @@ inspector_show :: proc(self: ^Inspector) {
 	)
 	inspector_reset(&global_ctx.inspector)
 	inspector_build_tree(&global_ctx.inspector)
+	if self.selected_id != 0 {
+		if node, ok := global_ctx.node_by_id[self.selected_id]; ok {
+			do_node(
+				{
+					size = {0, 200},
+					grow = {true, false},
+					max_size = INFINITY,
+					text = fmt.tprintf("%#v", node),
+					font_size = 12,
+					clip = true,
+					show_scrollbars = true,
+					bg = tw.NEUTRAL_950,
+					stroke = tw.NEUTRAL_500,
+					stroke_width = 1,
+					fg = tw.GRAY_50,
+				},
+			)
+		}
+	}
 	end_node()
 }
 
@@ -2072,20 +2107,27 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			text = fmt.tprintf("%x", node.id),
 			font_size = 14,
 			fit = 1,
-			fg = kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.kids) > 0))),
+			fg = tw.EMERALD_500 if self.selected_id == node.id else kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.kids) > 0))),
 		},
 	)
 	end_node()
 	if button_node.is_hovered {
 		self.inspected_id = node.id
 	}
+	if button_node.is_hovered && mouse_pressed(.Right) {
+		if self.selected_id == node.id {
+			self.selected_id = 0
+		} else {
+			self.selected_id = node.id
+		}
+	}
 	if button_node.transitions[0] > 0.01 {
 		begin_node(
 			{
-				padding = {f32(depth + 1) * 10, 0, 0, 0},
+				padding = {10, 0, 0, 0},
 				grow = {true, false},
 				max_size = INFINITY,
-				fit = {0, button_node.transitions[0]},
+				fit = {0, ease.quadratic_in_out(button_node.transitions[0])},
 				clip = true,
 				vertical = true,
 			},

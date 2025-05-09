@@ -4,5 +4,11 @@
 		"command": "odin",
 		"args": ["run", ".", "-debug"],
 		"cwd": "$ZED_WORKTREE_ROOT/example"
+	},
+	{
+		"label": "Run (Optimized)",
+		"command": "odin",
+		"args": ["run", ".", "-o:speed"],
+		"cwd": "$ZED_WORKTREE_ROOT/example"
 	}
 ]
