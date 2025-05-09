@@ -691,6 +691,8 @@ main :: proc() {
 			handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
 		case .MOUSE_MOTION:
 			handle_mouse_motion(event.motion.x, event.motion.y)
+		case .MOUSE_WHEEL:
+			handle_mouse_scroll(event.wheel.x, event.wheel.y)
 		case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
 			handle_window_size_change(event.window.data1, event.window.data2)
 		case .WINDOW_RESTORED:

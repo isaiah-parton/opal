@@ -338,6 +338,7 @@ Node :: struct {
 	text:               string,
 	text_layout:        kn.Selectable_Text,
 	last_text_size:     [2]f32,
+	scroll:             [2]f32,
 	style:              Node_Style,
 	select_anchor:      int,
 	editor:             tedit.Editor,
@@ -413,6 +414,9 @@ Context :: struct {
 	// Current and previous state of mouse position
 	mouse_position:             Vector2,
 	last_mouse_position:        Vector2,
+
+	// Mouse scroll input
+	mouse_scroll:               Vector2,
 
 	// Current and previous states of mouse buttons
 	mouse_button_down:          [Mouse_Button]bool,
@@ -774,37 +778,52 @@ deinit :: proc() {
 
 handle_mouse_motion :: proc(x, y: f32) {
 	global_ctx.mouse_position = {x, y}
+	draw_frames(2)
+}
+
+handle_mouse_scroll :: proc(x, y: f32) {
+	global_ctx.mouse_scroll = {x, y}
+	if key_down(.Left_Shift) || key_down(.Right_Shift) {
+		global_ctx.mouse_scroll = global_ctx.mouse_scroll.yx
+	}
+	draw_frames(2)
 }
 
 handle_text_input :: proc(text: cstring) {
 	for c in string(text) {
 		append(&global_ctx.runes, c)
 	}
+	draw_frames(1)
 }
 
 handle_key_repeat :: proc(key: Keyboard_Key) {
 	ctx := global_ctx
 	ctx.key_was_down[key] = false
+	draw_frames(1)
 }
 
 handle_key_down :: proc(key: Keyboard_Key) {
 	ctx := global_ctx
 	ctx.key_down[key] = true
+	draw_frames(1)
 }
 
 handle_key_up :: proc(key: Keyboard_Key) {
 	ctx := global_ctx
 	ctx.key_down[key] = false
+	draw_frames(1)
 }
 
 handle_mouse_down :: proc(button: Mouse_Button) {
 	ctx := global_ctx
 	ctx.mouse_button_down[button] = true
+	draw_frames(2)
 }
 
 handle_mouse_up :: proc(button: Mouse_Button) {
 	ctx := global_ctx
 	ctx.mouse_button_down[button] = false
+	draw_frames(2)
 }
 
 handle_window_size_change :: proc(width, height: i32) {
@@ -868,11 +887,6 @@ begin :: proc() {
 	ctx.focused_node = nil
 	ctx.active_node = nil
 
-	if ctx.mouse_button_down != ctx.mouse_button_was_down ||
-	   ctx.mouse_position != ctx.last_mouse_position {
-		draw_frames(2)
-	}
-
 	ctx.frame += 1
 	ctx.call_index = 0
 
@@ -908,6 +922,7 @@ end :: proc() {
 
 	ctx.widget_hovered = false
 	if ctx.hovered_node != nil {
+		ctx.hovered_node.scroll += ctx.mouse_scroll
 		ctx.hovered_id = ctx.hovered_node.id
 		if ctx.hovered_node.is_widget {
 			ctx.widget_hovered = true
@@ -952,6 +967,7 @@ end :: proc() {
 	ctx.mouse_button_was_down = ctx.mouse_button_down
 	ctx.last_mouse_position = ctx.mouse_position
 	ctx.key_was_down = ctx.key_down
+	ctx.mouse_scroll = 0
 
 	ctx.compute_duration = time.since(ctx.compute_start_time)
 }
@@ -1305,7 +1321,7 @@ node_solve_box_recursively :: proc(self: ^Node, offset: [2]f32 = {}) {
 	node_solve_box(self, offset)
 	for node in self.kids {
 		node.z_index += self.z_index
-		node_solve_box_recursively(node, self.box.lo)
+		node_solve_box_recursively(node, self.box.lo - self.scroll)
 		node_receive_propagated_input(self, node)
 	}
 }
@@ -1433,7 +1449,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			self.box.hi - self.padding.zw,
 			self.text_align,
 		) -
-		self.text_layout.size * self.text_align
+		self.text_layout.size * self.text_align -
+		self.scroll
 
 	// Perform wrapping if enabled
 	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
@@ -1540,7 +1557,10 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				draw_text_highlight(
 					&self.text_layout,
 					self.text_origin,
-					kn.fade(global_ctx.selection_background_color, 0.5),
+					kn.fade(
+						global_ctx.selection_background_color,
+						0.5 * f32(i32(self.is_focused)),
+					),
 				)
 			}
 			draw_text(
@@ -1553,7 +1573,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				draw_text_cursor(
 					&self.text_layout,
 					self.text_origin,
-					global_ctx.selection_background_color,
+					kn.fade(global_ctx.selection_background_color, f32(i32(self.is_focused))),
 				)
 			}
 		}
