@@ -22,6 +22,7 @@ import "core:sys/windows"
 import "core:time"
 import "core:unicode"
 import "tedit"
+import "vendor:sdl3"
 import stbi "vendor:stb/image"
 
 // Generic unique identifiers
@@ -30,11 +31,6 @@ Id :: u32
 Box :: kn.Box
 
 Vector2 :: [2]f32
-
-RelativeVector2 :: struct {
-	exact:    [2]f32,
-	relative: [2]f32,
-}
 
 //
 // **Padding**
@@ -55,9 +51,80 @@ Cursor :: enum {
 	Text,
 }
 
+Keyboard_Key :: enum i32 {
+	Zero,
+	One,
+	Two,
+	Three,
+	Four,
+	Five,
+	Six,
+	Seven,
+	Eight,
+	Nine,
+	A,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
+	F1,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
+	Tab,
+	Space,
+	Left_Control,
+	Left_Alt,
+	Left_Shift,
+	Right_Control,
+	Right_Alt,
+	Right_Shift,
+	Menu,
+	Escape,
+	Enter,
+	Backspace,
+	Delete,
+	Left,
+	Right,
+	Up,
+	Down,
+	Home,
+	End,
+}
+
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor, data: rawptr) -> bool
 On_Set_Clipboard_Proc :: #type proc(text: string, data: rawptr)
 On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> string
+On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> (width, height: f32)
 
 Mouse_Button :: enum {
 	Left,
@@ -66,85 +133,71 @@ Mouse_Button :: enum {
 }
 
 Node_Config :: struct {
-	p:               [4]f32,
-	text:            string,
-	pos:             [2]f32,
-	relative_pos:    [2]f32,
-	size:            [2]f32,
-	max_size:        [2]f32,
-	relative_size:   [2]f32,
-	bounds:          Maybe(Box),
-	bg:              Paint_Variant,
-	stroke:          kn.Paint_Option,
-	fg:              kn.Paint_Option,
-	shadow_color:    kn.Color,
-	font:            ^kn.Font,
-	on_draw:         proc(_: ^Node),
-	on_animate:      proc(_: ^Node),
-	on_create:       proc(_: ^Node),
-	on_drop:         proc(_: ^Node),
-	on_add:          proc(_: ^Node),
-	data:            rawptr,
-	shadow_size:     f32,
-	z:               u32,
-	px:              f32,
-	py:              f32,
-	pl:              f32,
-	pt:              f32,
-	pr:              f32,
-	pb:              f32,
-	gap:             f32,
-	w:               f32,
-	h:               f32,
-	max_w:           f32,
-	max_h:           f32,
-	self_align_x:    f32,
-	self_align_y:    f32,
-	content_align_x: f32,
-	content_align_y: f32,
-	stroke_width:    f32,
-	radius:          [4]f32,
-	font_size:       f32,
-	fit:             bool,
-	fit_x:           bool,
-	fit_y:           bool,
-	grow:            bool,
-	grow_x:          bool,
-	grow_y:          bool,
-	vertical:        bool,
-	abs:             bool,
-	wrap:            bool,
-	clip:            bool,
-	selectable:      bool,
-	editable:        bool,
-	root:            bool,
-	widget:          bool,
+	padding:       [4]f32,
+	text:          string,
+	position:      [2]f32,
+	relative_pos:  [2]f32,
+	size:          [2]f32,
+	max_size:      [2]f32,
+	relative_size: [2]f32,
+	bounds:        Maybe(Box),
+	bg:            Paint_Variant,
+	stroke:        kn.Paint_Option,
+	fg:            kn.Paint_Option,
+	shadow_color:  kn.Color,
+	font:          ^kn.Font,
+	on_draw:       proc(_: ^Node),
+	on_animate:    proc(_: ^Node),
+	on_create:     proc(_: ^Node),
+	on_drop:       proc(_: ^Node),
+	on_add:        proc(_: ^Node),
+	data:          rawptr,
+	shadow_size:   f32,
+	z:             u32,
+	spacing:       f32,
+	w:             f32,
+	h:             f32,
+	max_w:         f32,
+	max_h:         f32,
+	self_align_x:  f32,
+	self_align_y:  f32,
+	content_align: [2]f32,
+	stroke_width:  f32,
+	stroke_type:   Maybe(kn.Shape_Outline),
+	radius:        [4]f32,
+	font_size:     f32,
+	fit:           [2]bool,
+	grow:          [2]bool,
+	vertical:      bool,
+	absolute:      bool,
+	wrap:          bool,
+	clip:          bool,
+	selectable:    bool,
+	editable:      bool,
+	root:          bool,
+	widget:        bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
-	self.is_absolute = config.abs
-	self.padding = {
-		max(config.p.x, config.px, config.pl),
-		max(config.p.y, config.py, config.pt),
-		max(config.p.z, config.px, config.pr),
-		max(config.p.w, config.py, config.pb),
-	}
+	self.is_absolute = config.absolute
+	self.padding = config.padding
 	self.is_widget = config.widget
 	self.relative_position = config.relative_pos
-	self.spacing = config.gap
-	self.fit = {config.fit | config.fit_x, config.fit | config.fit_y}
-	self.grow = {config.grow | config.grow_x, config.grow | config.grow_y}
+	self.spacing = config.spacing
+	self.fit = config.fit
+	self.grow = config.grow
 	self.size = {max(config.size.x, config.w), max(config.size.y, config.h)}
-	self.max_size = {max(config.max_size.x, config.max_w), max(config.max_size.y, config.max_h)}
-	self.content_align = {config.content_align_x, config.content_align_y}
+	self.max_size = config.max_size
+	self.content_align = config.content_align
 	self.align = {config.self_align_x, config.self_align_y}
-	self.position = config.pos
+	self.position = config.position
 	self.vertical = config.vertical
 	self.style.shadow_size = config.shadow_size
 	self.style.shadow_color = config.shadow_color
 	self.style.radius = config.radius
 	self.style.stroke_width = config.stroke_width
 	self.style.stroke_paint = config.stroke
+	self.style.stroke_type = config.stroke_type.? or_else .Inner_Stroke
 	self.style.background_paint = config.bg
 	self.style.foreground_paint = config.fg
 	self.style.font = config.font
@@ -165,7 +218,7 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
 	config := config
-	config.abs = true
+	config.absolute = true
 	config.relative_size = 1
 	return config
 }
@@ -263,10 +316,14 @@ Node :: struct {
 
 	// If overflowing content is clipped
 	clip_content:       bool,
+	builder:            strings.Builder,
 
 	// Interaction
 	enable_selection:   bool,
 	enable_edit:        bool,
+	is_multiline:       bool,
+	was_confirmed:      bool,
+	was_changed:        bool,
 
 	// Z index (higher values appear in front of lower ones)
 	z_index:            u32,
@@ -290,6 +347,7 @@ Node :: struct {
 	on_animate:         proc(self: ^Node),
 	on_draw:            proc(self: ^Node),
 	on_add:             proc(self: ^Node),
+	on_edit:            proc(self: ^Node),
 	data:               rawptr,
 	retained_data:      rawptr,
 }
@@ -329,7 +387,7 @@ Node_Style :: struct {
 	transform_origin: [2]f32,
 	scale:            [2]f32,
 	translate:        [2]f32,
-	stroke_join:      kn.Shape_Outline,
+	stroke_type:      kn.Shape_Outline,
 	stroke_paint:     kn.Paint_Option,
 	background_paint: Paint_Variant,
 	foreground_paint: kn.Paint_Option,
@@ -339,7 +397,6 @@ Node_Style :: struct {
 	stroke_width:     f32,
 	font_size:        f32,
 	shadow_size:      f32,
-	transform_kids:   bool,
 }
 
 User_Image :: struct {
@@ -351,28 +408,55 @@ User_Image :: struct {
 
 Context :: struct {
 	// Input state
+	screen_size:                Vector2,
+
+	// Current and previous state of mouse position
 	mouse_position:             Vector2,
 	last_mouse_position:        Vector2,
+
+	// Current and previous states of mouse buttons
 	mouse_button_down:          [Mouse_Button]bool,
 	mouse_button_was_down:      [Mouse_Button]bool,
-	key_down:                   [256]bool,
-	key_was_down:               [256]bool,
+
+	// Current and previous state of keyboard
+	key_down:                   [Keyboard_Key]bool,
+	key_was_down:               [Keyboard_Key]bool,
+
+	// If a widget is hovered which would prevent native window interaction
 	widget_hovered:             bool,
+
+	// Transient pointers to interacted nodes
 	hovered_node:               ^Node,
 	focused_node:               ^Node,
 	active_node:                ^Node,
+
+	// Ids of interacted nodes
 	hovered_id:                 Id,
 	focused_id:                 Id,
 	active_id:                  Id,
+
+	// Platform-defined callbacks
 	on_set_cursor:              On_Set_Cursor_Proc,
 	on_set_clipboard:           On_Set_Clipboard_Proc,
 	on_get_clipboard:           On_Get_Clipboard_Proc,
+	on_get_screen_size:         On_Get_Screen_Size_Proc,
+
+	// User-defined data for callbacks
 	callback_data:              rawptr,
+
+	// Private cursor state
 	cursor:                     Cursor,
 	last_cursor:                Cursor,
+
+	// Global visual style
 	selection_background_color: kn.Color,
 	selection_foreground_color: kn.Color,
+
+	// Frame count
 	frame:                      int,
+
+	// Native text input
+	runes:                      [dynamic]rune,
 
 	// User images
 	images:                     [dynamic]Maybe(User_Image),
@@ -418,10 +502,7 @@ Context :: struct {
 // @(private)
 global_ctx: ^Context
 
-//
-// Image helpers
-//
-
+// Load a user image to the next available slot
 load_image :: proc(file: string) -> (index: int, ok: bool) {
 	ctx := global_ctx
 
@@ -454,6 +535,7 @@ load_image :: proc(file: string) -> (index: int, ok: bool) {
 	return
 }
 
+// Use an already loaded user image, copying it to the atlas if it wasn't yet
 use_image :: proc(index: int) -> (source: Box, ok: bool) {
 	ctx := global_ctx
 	if index < 0 || index >= len(ctx.images) {
@@ -695,11 +777,24 @@ handle_mouse_motion :: proc(x, y: f32) {
 }
 
 handle_text_input :: proc(text: cstring) {
-
+	for c in string(text) {
+		append(&global_ctx.runes, c)
+	}
 }
 
-handle_key_down :: proc() {
+handle_key_repeat :: proc(key: Keyboard_Key) {
+	ctx := global_ctx
+	ctx.key_was_down[key] = false
+}
 
+handle_key_down :: proc(key: Keyboard_Key) {
+	ctx := global_ctx
+	ctx.key_down[key] = true
+}
+
+handle_key_up :: proc(key: Keyboard_Key) {
+	ctx := global_ctx
+	ctx.key_down[key] = false
 }
 
 handle_mouse_down :: proc(button: Mouse_Button) {
@@ -736,17 +831,17 @@ mouse_released :: proc(button: Mouse_Button) -> bool {
 	return !ctx.mouse_button_down[button] && ctx.mouse_button_was_down[button]
 }
 
-key_down :: proc(key: int) -> bool {
+key_down :: proc(key: Keyboard_Key) -> bool {
 	ctx := global_ctx
 	return ctx.key_down[key]
 }
 
-key_pressed :: proc(key: int) -> bool {
+key_pressed :: proc(key: Keyboard_Key) -> bool {
 	ctx := global_ctx
 	return ctx.key_down[key] && !ctx.key_was_down[key]
 }
 
-key_released :: proc(key: int) -> bool {
+key_released :: proc(key: Keyboard_Key) -> bool {
 	ctx := global_ctx
 	return !ctx.key_down[key] && ctx.key_was_down[key]
 }
@@ -780,6 +875,14 @@ begin :: proc() {
 
 	ctx.frame += 1
 	ctx.call_index = 0
+
+	if key_pressed(.F3) {
+		ctx.is_debugging = !ctx.is_debugging
+	}
+
+	// Update redraw state
+	ctx.requires_redraw = ctx.queued_frames > 0
+	ctx.queued_frames = max(0, ctx.queued_frames - 1)
 }
 
 //
@@ -787,6 +890,8 @@ begin :: proc() {
 //
 end :: proc() {
 	ctx := global_ctx
+
+	clear(&ctx.runes)
 
 	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
 		if ctx.on_set_cursor(ctx.cursor, ctx.callback_data) {
@@ -846,10 +951,7 @@ end :: proc() {
 
 	ctx.mouse_button_was_down = ctx.mouse_button_down
 	ctx.last_mouse_position = ctx.mouse_position
-
-	// Update redraw state
-	ctx.requires_redraw = ctx.queued_frames > 0
-	ctx.queued_frames = max(0, ctx.queued_frames - 1)
+	ctx.key_was_down = ctx.key_down
 
 	ctx.compute_duration = time.since(ctx.compute_start_time)
 }
@@ -1045,18 +1147,117 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	// Reset accumulative values
 	self.content_size = 0
 
+	self.was_changed = false
+	self.was_confirmed = false
+
+	r: strings.Reader
+	reader := strings.to_reader(&r, self.text)
+
+	if self.enable_edit {
+		if self.editor.builder == nil {
+			self.editor.builder = &self.builder
+			self.editor.undo_text_allocator = context.allocator
+		}
+		if !self.is_focused {
+			strings.builder_reset(self.editor.builder)
+			strings.write_string(self.editor.builder, self.text)
+		}
+		if self.is_focused {
+			reader = strings.to_reader(&r, strings.to_string(self.builder))
+			cmd: tedit.Command
+			control_down := key_down(.Left_Control) || key_down(.Right_Control)
+			shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
+			if control_down {
+				if key_pressed(.A) do cmd = .Select_All
+				if key_pressed(.C) do cmd = .Copy
+				if key_pressed(.V) do cmd = .Paste
+				if key_pressed(.X) do cmd = .Cut
+				if key_pressed(.Z) do cmd = .Undo
+				if key_pressed(.Y) do cmd = .Redo
+			}
+			if len(ctx.runes) > 0 {
+				for char, c in ctx.runes {
+					tedit.input_runes(&self.editor, {char})
+					draw_frames(1)
+					self.was_changed = true
+				}
+			}
+			if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
+			if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
+			// if key_pressed(.Tab) {
+			// 	if len(object.input.closest_match) > 0 {
+			// 		strings.builder_reset(&object.input.builder)
+			// 		strings.write_string(&object.input.builder, object.input.closest_match)
+			// 		self.editor.selection = strings.builder_len(object.input.builder)
+			// 		self.was_changed = true
+			// 		consume_key_press(.Tab)
+			// 	}
+			// 	// self.was_confirmed = true
+			// }
+			if key_pressed(.Enter) {
+				cmd = .New_Line
+				if self.is_multiline {
+					if control_down {
+						self.was_confirmed = true
+					}
+				} else {
+					// if len(object.input.closest_match) > 0 {
+					// 	strings.builder_reset(self.editor.builder)
+					// 	strings.write_string(self.editor.builder, object.input.closest_match)
+					// 	self.was_changed = true
+					// }
+					self.was_confirmed = true
+				}
+			}
+			if key_pressed(.Left) {
+				if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
+				else do cmd = .Word_Left if control_down else .Left
+			}
+			if key_pressed(.Right) {
+				if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
+				else do cmd = .Word_Right if control_down else .Right
+			}
+			if key_pressed(.Up) {
+				if shift_down do cmd = .Select_Up
+				else do cmd = .Up
+			}
+			if key_pressed(.Down) {
+				if shift_down do cmd = .Select_Down
+				else do cmd = .Down
+			}
+			if key_pressed(.Home) {
+				cmd = .Select_Line_Start if control_down else .Line_Start
+			}
+			if key_pressed(.End) {
+				cmd = .Select_Line_End if control_down else .Line_End
+			}
+			if !self.is_multiline && (cmd in tedit.MULTILINE_COMMANDS) {
+				cmd = .None
+			}
+			if cmd != .None {
+				tedit.editor_execute(&self.editor, cmd)
+				if cmd in tedit.EDIT_COMMANDS {
+					self.was_changed = true
+				}
+				draw_frames(1)
+			}
+		}
+
+	}
+
+	if self.style.font == nil {
+		self.style.font = &kn.DEFAULT_FONT
+	}
+
 	// Create text layout
-	if len(self.text) > 0 {
-		if self.style.font == nil {
-			self.style.font = &kn.DEFAULT_FONT
-		}
-		self.text_layout = kn.Selectable_Text {
-			text = kn.make_text(self.text, self.style.font_size, self.style.font^),
-		}
-		self.content_size = linalg.max(
-			self.content_size,
-			self.text_layout.size,
-			self.last_text_size,
+	self.text_layout = kn.Selectable_Text {
+		text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
+	}
+	self.content_size = linalg.max(self.content_size, self.text_layout.size, self.last_text_size)
+	if kn.text_is_empty(&self.text_layout) && self.enable_edit {
+		self.content_size.y = max(
+			self.content_size.y,
+			self.style.font.line_height * self.style.font_size,
 		)
 	}
 
@@ -1257,13 +1458,18 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.text_layout = kn.make_selectable(
 			self.text_layout,
 			ctx.mouse_position - self.text_origin,
-			min(self.editor.selection[0], self.editor.selection[1]),
-			max(self.editor.selection[0], self.editor.selection[1]),
+			self.editor.selection,
 		)
 		if self.text_layout.contact.valid && self.is_hovered {
 			set_cursor(.Text)
 		}
 		node_update_selection(self, self.text, &self.text_layout)
+		kn.add_string(
+			fmt.tprintf("%v\n%v", self.editor.selection, self.text_layout.selection.glyphs),
+			12,
+			{self.box.lo.x, self.box.hi.y},
+			paint = kn.WHITE,
+		)
 	}
 
 	// Is transformation necessary?
@@ -1288,17 +1494,84 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	kn.set_draw_order(int(self.z_index))
 
 	// Draw self
-	if ctx.queued_frames > 0 {
+	if ctx.requires_redraw {
+		if self.style.shadow_color != {} {
+			kn.add_box_shadow(
+				self.box,
+				self.style.radius[0],
+				self.style.shadow_size,
+				self.style.shadow_color,
+			)
+		}
+		{
+			switch v in self.style.background_paint {
+			case kn.Color:
+				kn.set_paint(v)
+			case Image_Paint:
+				size := box_size(self.box)
+				if source, ok := use_image(v.index); ok {
+					kn.set_paint(
+						kn.make_atlas_sample(
+							source,
+							{self.box.lo + v.offset * size, self.box.lo + v.size * size},
+							kn.WHITE,
+						),
+					)
+				}
+			case Radial_Gradient:
+				kn.set_paint(
+					kn.make_radial_gradient(
+						self.box.lo + v.center * self.size,
+						v.radius * max(self.size.x, self.size.y),
+						v.inner,
+						v.outer,
+					),
+				)
+			case Linear_Gradient:
+				kn.set_paint(
+					kn.make_linear_gradient(
+						self.box.lo + v.points[0] * self.size,
+						self.box.lo + v.points[1] * self.size,
+						v.colors[0],
+						v.colors[1],
+					),
+				)
+			}
+			kn.add_box(self.box, self.style.radius)
+		}
+		if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
+			if self.enable_selection {
+				draw_text_highlight(
+					&self.text_layout,
+					self.text_origin,
+					kn.fade(global_ctx.selection_background_color, 0.5),
+				)
+			}
+			draw_text(
+				&self.text_layout,
+				self.text_origin,
+				self.style.foreground_paint,
+				global_ctx.selection_foreground_color,
+			)
+			if self.enable_edit {
+				draw_text_cursor(
+					&self.text_layout,
+					self.text_origin,
+					global_ctx.selection_background_color,
+				)
+			}
+		}
+
 		if self.on_draw != nil {
 			self.on_draw(self)
-		} else {
-			node_draw_default(self)
 		}
 	}
 
-	if is_transformed {
-		kn.pop_matrix()
-	}
+	// kn.add_box(
+	// 	self.box,
+	// 	self.style.radius,
+	// 	kn.fade(kn.RED, max(0, 1 - cast(f32)time.duration_seconds(time.since(self.time_created)))),
+	// )
 
 	// Draw children
 	for node in self.kids {
@@ -1309,108 +1582,43 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.pop_scissor()
 	}
 
+	if ctx.requires_redraw && self.style.stroke_paint != nil {
+		kn.add_box_lines(
+			self.box,
+			self.style.stroke_width,
+			self.style.radius,
+			paint = self.style.stroke_paint,
+			outline = self.style.stroke_type,
+		)
+	}
+
+	if is_transformed {
+		kn.pop_matrix()
+	}
+
 	// Draw debug lines
 	if ODIN_DEBUG {
 		if ctx.is_debugging {
 			if self.has_hovered_child {
 				kn.add_box_lines(self.box, 1, self.style.radius, paint = kn.LIGHT_GREEN)
 			} else if self.is_hovered {
-				kn.add_box(self.box, self.style.radius, paint = kn.fade(kn.RED, 0.3))
+				kn.add_box(self.box, self.style.radius, paint = kn.fade(kn.CADET_BLUE, 0.3))
 			}
 		}
 	}
 }
 
-node_draw_default :: proc(self: ^Node) {
-	if self.style.shadow_color != {} {
-		kn.add_box_shadow(
-			self.box,
-			self.style.radius[0],
-			self.style.shadow_size,
-			self.style.shadow_color,
-		)
-	}
-	{
-		switch v in self.style.background_paint {
-		case kn.Color:
-			kn.set_paint(v)
-		case Image_Paint:
-			size := box_size(self.box)
-			if source, ok := use_image(v.index); ok {
-				kn.set_paint(
-					kn.make_atlas_sample(
-						source,
-						{self.box.lo + v.offset * size, self.box.lo + v.size * size},
-						kn.WHITE,
-					),
-				)
-			}
-		case Radial_Gradient:
-			kn.set_paint(
-				kn.make_radial_gradient(
-					self.box.lo + v.center * self.size,
-					v.radius * max(self.size.x, self.size.y),
-					v.inner,
-					v.outer,
-				),
-			)
-		case Linear_Gradient:
-			kn.set_paint(
-				kn.make_linear_gradient(
-					self.box.lo + v.points[0] * self.size,
-					self.box.lo + v.points[1] * self.size,
-					v.colors[0],
-					v.colors[1],
-				),
-			)
-		}
-		kn.add_box(self.box, self.style.radius)
-	}
-	if self.style.foreground_paint != nil && !kn.text_is_empty(&self.text_layout) {
-		if self.enable_selection {
-			draw_text_highlight(
-				&self.text_layout,
-				self.text_origin,
-				global_ctx.selection_background_color,
-			)
-		}
-		draw_text(
-			&self.text_layout,
-			self.text_origin,
-			self.style.foreground_paint,
-			global_ctx.selection_foreground_color,
-		)
-		if self.enable_edit {
-			draw_text_layout_cursor(
-				&self.text_layout,
-				self.text_origin,
-				global_ctx.selection_background_color,
-			)
-		}
-	}
-	if self.style.stroke_paint != nil {
-		kn.add_box_lines(
-			self.box,
-			self.style.stroke_width,
-			self.style.radius,
-			paint = self.style.stroke_paint,
-		)
-	}
-}
-
-draw_text_layout_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
+draw_text_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
 	if len(text.glyphs) == 0 {
 		return
 	}
 	line_height := text.font.line_height * text.font_scale
-	cursor_origin := origin + text.glyphs[text.selection.first_glyph].offset
+	cursor_origin := origin + text.glyphs[text.selection.glyphs[0]].offset
 	kn.add_box(
-		snapped_box(
-			{
-				{cursor_origin.x - 1, cursor_origin.y},
-				{cursor_origin.x + 1, cursor_origin.y + line_height},
-			},
-		),
+		{
+			{cursor_origin.x - 1, cursor_origin.y},
+			{cursor_origin.x + 1, cursor_origin.y + line_height},
+		},
 		paint = color,
 	)
 }
@@ -1421,6 +1629,10 @@ draw_text :: proc(
 	paint: kn.Paint_Option,
 	selected_color: kn.Color,
 ) {
+	ordered_selection := text.selection.glyphs
+	if ordered_selection.x > ordered_selection.y {
+		ordered_selection = ordered_selection.yx
+	}
 	for &glyph, glyph_index in text.glyphs {
 		if glyph.source.lo == glyph.source.hi {
 			continue
@@ -1429,20 +1641,24 @@ draw_text :: proc(
 			glyph,
 			text.font_scale,
 			origin + glyph.offset,
-			paint = selected_color if (glyph_index >= text.selection.first_glyph && glyph_index < text.selection.last_glyph) else paint,
+			paint = selected_color if (glyph_index >= ordered_selection[0] && glyph_index < ordered_selection[1]) else paint,
 		)
 	}
 }
 
 draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
-	if text.selection.first_glyph == text.selection.last_glyph {
+	if text.selection.glyphs[0] == text.selection.glyphs[1] {
 		return
 	}
 	line_height := text.font.line_height * text.font_scale
+	ordered_selection := text.selection.glyphs
+	if ordered_selection[0] > ordered_selection[1] {
+		ordered_selection = ordered_selection.yx
+	}
 	for &line in text.lines {
 		highlight_range := [2]int {
-			max(text.selection.first_glyph, line.first_glyph),
-			min(text.selection.last_glyph, line.last_glyph),
+			max(ordered_selection[0], line.first_glyph),
+			min(ordered_selection[1], line.last_glyph),
 		}
 		if highlight_range.x > highlight_range.y {
 			continue
@@ -1454,18 +1670,18 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 			{
 					text.font.space_advance *
 					text.font_scale *
-					f32(i32(text.selection.last_glyph > line.last_glyph)),
+					f32(i32(ordered_selection[1] > line.last_glyph)),
 					line_height,
 				},
 		}
 		kn.add_box(
-			snapped_box(box),
+			box,
 			3 *
 			{
-					f32(i32(text.selection.first_glyph >= line.first_glyph)),
+					f32(i32(ordered_selection[0] >= line.first_glyph)),
 					0,
 					0,
-					f32(i32(text.selection.last_glyph <= line.last_glyph)),
+					f32(i32(ordered_selection[1] <= line.last_glyph)),
 				},
 			paint = color,
 		)

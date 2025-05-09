@@ -9,6 +9,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:mem"
+import "core:strings"
 import "core:time"
 import "vendor:sdl3"
 import "vendor:wgpu"
@@ -148,7 +149,7 @@ example_renderer_init :: proc(self: ^Example_Renderer, device: wgpu.Device) {
 do_window_button :: proc(icon: rune, color: kn.Color, loc := #caller_location) -> bool {
 	using opal
 	node := do_node({
-			p = 3,
+			padding = 3,
 			fit = true,
 			text = string_from_rune(icon),
 			font_size = 20,
@@ -179,7 +180,7 @@ do_button :: proc(label: union #no_nil {
 	}, font: ^kn.Font = nil, font_size: f32 = 12, radius: [4]f32 = 3, loc := #caller_location) -> bool {
 	using opal
 	node := do_node({
-			p = 3,
+			padding = 3,
 			radius = radius,
 			fit = true,
 			text = label.(string) or_else string_from_rune(label.(rune)),
@@ -208,14 +209,13 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	push_id(hash(loc))
 
 	begin_node({
-		p = 3,
-		pr = 12,
+		padding = {3, 3, 12, 3},
 		radius = 3,
 		fit = true,
-		gap = 6,
+		spacing = 6,
 		max_size = math.F32_MAX,
-		grow_x = true,
-		content_align_y = 0.5,
+		grow = {true, false},
+		content_align = {0, 0.5},
 		widget = true,
 		on_animate = proc(self: ^Node) {
 			self.style.background_paint = kn.fade(
@@ -249,7 +249,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	using opal
 	push_id(hash(loc))
 	node := begin_node({
-		p = 3,
+		padding = 3,
 		radius = 3,
 		fit = true,
 		text = label,
@@ -279,12 +279,12 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				shadow_color = {0, 0, 0, 128},
 				bounds = Box{0, kn.get_size()},
 				z = 999,
-				abs = true,
+				absolute = true,
 				relative_pos = {0, 1},
-				pos = {0, 4},
+				position = {0, 4},
 				fit = true,
-				p = 3,
-				gap = 3,
+				padding = 3,
+				spacing = 3,
 				radius = 3,
 				bg = tw.NEUTRAL_800,
 				vertical = true,
@@ -310,11 +310,36 @@ __do_menu :: proc(is_open: bool) {
 FILLER_TEXT :: "Algo de texto que puedes seleccionar si gusta."
 
 App :: struct {
-	cursors:  [sdl3.SystemCursor]^sdl3.Cursor,
-	window:   ^sdl3.Window,
-	image:    int,
-	run:      bool,
-	platform: kn.Platform,
+	cursors:     [sdl3.SystemCursor]^sdl3.Cursor,
+	window:      ^sdl3.Window,
+	image:       int,
+	run:         bool,
+	platform:    kn.Platform,
+	edited_text: string,
+}
+
+translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
+	switch code {
+	case sdl3.K_LEFT:
+		return .Left
+	case sdl3.K_RIGHT:
+		return .Right
+	case sdl3.K_LSHIFT:
+		return .Left_Shift
+	case sdl3.K_RSHIFT:
+		return .Right_Shift
+	case sdl3.K_LCTRL:
+		return .Left_Control
+	case sdl3.K_RCTRL:
+		return .Right_Control
+	case sdl3.K_BACKSPACE:
+		return .Backspace
+	case sdl3.K_DELETE:
+		return .Delete
+	case sdl3.K_F3:
+		return .F3
+	}
+	return .Escape
 }
 
 main :: proc() {
@@ -392,6 +417,9 @@ main :: proc() {
 		app.window = sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE, .BORDERLESS, .TRANSPARENT})
 		sdl3.SetWindowHitTest(app.window, hit_test_callback, nil)
 		sdl3.SetWindowMinimumSize(app.window, 500, 400)
+		if !sdl3.StartTextInput(app.window) {
+			panic("Can't accept text input!")
+		}
 
 		platform := sdl3glue.make_platform_sdl3glue(app.window)
 		kn.start_on_platform(platform)
@@ -435,7 +463,7 @@ main :: proc() {
 				size = kn.get_size(),
 				bg = tw.NEUTRAL_950,
 				vertical = true,
-				p = 1,
+				padding = 1,
 				stroke_width = 1,
 				stroke = tw.NEUTRAL_800,
 				radius = 8,
@@ -446,15 +474,15 @@ main :: proc() {
 			begin_node(
 				{
 					h = 20,
-					fit_y = true,
 					max_w = math.F32_MAX,
-					grow_x = true,
+					fit = {false, true},
+					grow = {true, false},
+					content_align = {0, 0.5},
 					bg = tw.NEUTRAL_900,
-					content_align_y = 0.5,
 				},
 			)
 			{
-				begin_node({fit = true, p = 3, gap = 3})
+				begin_node({fit = true, padding = 3, spacing = 3})
 				{
 					if do_menu("File") {
 						do_menu_item("New", lucide.PLUS)
@@ -497,7 +525,7 @@ main :: proc() {
 			}
 			end_node()
 
-			do_node({h = 1, grow_x = true, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
+			do_node({h = 1, grow = {true, false}, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
 
 			begin_node({max_size = math.F32_MAX, grow = true})
 			{
@@ -506,10 +534,10 @@ main :: proc() {
 					begin_node(
 						{
 							max_h = math.F32_MAX,
-							grow_y = true,
-							p = 5,
-							gap = 1,
-							fit_x = true,
+							grow = {false, true},
+							fit = {true, false},
+							padding = 5,
+							spacing = 1,
 							vertical = true,
 						},
 					)
@@ -541,54 +569,76 @@ main :: proc() {
 				}
 				end_node()
 
-				do_node({w = 1, grow_y = true, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
+				do_node({w = 1, grow = {false, true}, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
 
 				begin_node(
 					{
 						w = 200,
-						grow_y = true,
+						grow = {false, true},
 						max_h = math.F32_MAX,
 						vertical = true,
-						gap = 2,
-						p = 10,
-						// bg = Linear_Gradient {
-						// 	colors = {tw.NEUTRAL_800, tw.NEUTRAL_900},
-						// 	points = {0, 1},
-						// },
+						spacing = 2,
+						padding = 10,
 						bg = Radial_Gradient {
 							center = 0.5,
 							radius = 0.5,
 							inner = tw.NEUTRAL_800,
 							outer = tw.NEUTRAL_900,
 						},
-						content_align_x = 0.5,
-						content_align_y = 0.5,
+						content_align = 0.5,
 					},
 				)
 				{
 					do_node(
-						{
-							size = 100,
-							bg = Image_Paint{index = app.image, size = 1},
-							radius = 50,
-							pos = {100, -50},
-						},
+						{size = 100, bg = Image_Paint{index = app.image, size = 1}, radius = 50},
 					)
 					do_node(
 						{
 							text = FILLER_TEXT,
-							fit_y = true,
-							grow_x = true,
+							fit = {false, true},
+							grow = {true, false},
 							max_w = math.F32_MAX,
 							font_size = 12,
 							fg = tw.NEUTRAL_200,
 							wrap = true,
 							selectable = true,
-							py = 10,
+							padding = {0, 10, 0, 10},
 						},
 					)
 					do_button("Botón A")
 					do_button("Botón B")
+					node := do_node({
+						bg = tw.NEUTRAL_950,
+						stroke = tw.NEUTRAL_500,
+						stroke_width = 1,
+						clip = true,
+						text = app.edited_text,
+						font_size = 12,
+						padding = 4,
+						radius = 3,
+						fg = tw.NEUTRAL_50,
+						fit = {false, true},
+						max_w = math.F32_MAX,
+						grow = {true, false},
+						editable = true,
+						selectable = true,
+						widget = true,
+						stroke_type = .Outer_Stroke,
+						on_animate = proc(self: ^Node) {
+							self.style.stroke_paint = tw.LIME_500
+							self.style.stroke_width = 3 * self.transitions[1]
+							self.transitions[1] +=
+								(f32(i32(self.is_focused)) - self.transitions[1]) *
+								rate_per_second(14)
+							self.transitions[0] +=
+								(f32(i32(self.is_hovered)) - self.transitions[0]) *
+								rate_per_second(14)
+						},
+					})
+					if node.was_changed {
+						delete(app.edited_text)
+						app.edited_text = strings.clone(strings.to_string(node.builder))
+					}
 				}
 				end_node()
 			}
@@ -628,9 +678,13 @@ main :: proc() {
 		case .QUIT:
 			app.run = false
 		case .KEY_DOWN:
-			if event.key.key == sdl3.K_F3 {
-				global_ctx.is_debugging = !global_ctx.is_debugging
+			key := translate_keycode(event.key.key)
+			if event.key.repeat {
+				handle_key_repeat(key)
 			}
+			handle_key_down(key)
+		case .KEY_UP:
+			handle_key_up(translate_keycode(event.key.key))
 		case .MOUSE_BUTTON_DOWN:
 			handle_mouse_down(Mouse_Button(int(event.button.button) - 1))
 		case .MOUSE_BUTTON_UP:
