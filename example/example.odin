@@ -4,6 +4,7 @@ import opal ".."
 import kn "../../katana"
 import "../../katana/sdl3glue"
 import "../lucide"
+import "../sdl3app"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
@@ -155,7 +156,7 @@ do_window_button :: proc(icon: rune, color: kn.Color, loc := #caller_location) -
 			font_size = 20,
 			fg = tw.NEUTRAL_300,
 			font = &lucide.font,
-			max_size = math.F32_MAX,
+			max_size = INFINITY,
 			widget = true,
 			on_animate = proc(self: ^Node) {
 				self.style.background_paint = kn.fade(tw.ROSE_500, self.transitions[0])
@@ -187,7 +188,7 @@ do_button :: proc(label: union #no_nil {
 			font_size = font_size,
 			fg = tw.NEUTRAL_300,
 			font = font,
-			max_size = math.F32_MAX,
+			max_size = INFINITY,
 			widget = true,
 			on_animate = proc(self: ^Node) {
 				self.style.background_paint = kn.fade(
@@ -213,7 +214,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		radius = 3,
 		fit = true,
 		spacing = 6,
-		max_size = math.F32_MAX,
+		max_size = INFINITY,
 		grow = {true, false},
 		content_align = {0, 0.5},
 		widget = true,
@@ -286,7 +287,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				padding = 3,
 				spacing = 3,
 				radius = 3,
-				bg = tw.NEUTRAL_800,
+				bg = tw.NEUTRAL_900,
 				vertical = true,
 			},
 		)
@@ -309,37 +310,10 @@ __do_menu :: proc(is_open: bool) {
 
 FILLER_TEXT :: "Algo de texto que puedes seleccionar si gusta."
 
-App :: struct {
-	cursors:     [sdl3.SystemCursor]^sdl3.Cursor,
-	window:      ^sdl3.Window,
+My_App :: struct {
+	using app:   sdl3app.App,
 	image:       int,
-	run:         bool,
-	platform:    kn.Platform,
 	edited_text: string,
-}
-
-translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
-	switch code {
-	case sdl3.K_LEFT:
-		return .Left
-	case sdl3.K_RIGHT:
-		return .Right
-	case sdl3.K_LSHIFT:
-		return .Left_Shift
-	case sdl3.K_RSHIFT:
-		return .Right_Shift
-	case sdl3.K_LCTRL:
-		return .Left_Control
-	case sdl3.K_RCTRL:
-		return .Right_Control
-	case sdl3.K_BACKSPACE:
-		return .Backspace
-	case sdl3.K_DELETE:
-		return .Delete
-	case sdl3.K_F3:
-		return .F3
-	}
-	return .Escape
 }
 
 main :: proc() {
@@ -363,356 +337,225 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	hit_test_callback :: proc "c" (
-		window: ^sdl3.Window,
-		point: ^sdl3.Point,
-		data: rawptr,
-	) -> sdl3.HitTestResult {
-		context = runtime.default_context()
-		width, height: i32
-		sdl3.GetWindowSize(window, &width, &height)
-		titlebar := sdl3.Rect{0, 0, width, 30}
-		opal.handle_mouse_motion(f32(point.x), f32(point.y))
-		CORNER_SIZE :: 8
-		if sdl3.PointInRect(point^, {0, 0, CORNER_SIZE, CORNER_SIZE}) {
-			return .RESIZE_TOPLEFT
-		}
-		if sdl3.PointInRect(point^, {width - CORNER_SIZE, 0, CORNER_SIZE, CORNER_SIZE}) {
-			return .RESIZE_TOPRIGHT
-		}
-		if sdl3.PointInRect(point^, {0, height - CORNER_SIZE, CORNER_SIZE, CORNER_SIZE}) {
-			return .RESIZE_BOTTOMLEFT
-		}
-		if sdl3.PointInRect(
-			point^,
-			{width - CORNER_SIZE, height - CORNER_SIZE, CORNER_SIZE, CORNER_SIZE},
-		) {
-			return .RESIZE_BOTTOMRIGHT
-		}
-		SIZE :: 3
-		if sdl3.PointInRect(point^, {0, 0, SIZE, height}) {
-			return .RESIZE_LEFT
-		}
-		if sdl3.PointInRect(point^, {width - SIZE, 0, SIZE, height}) {
-			return .RESIZE_RIGHT
-		}
-		if sdl3.PointInRect(point^, {0, 0, width, SIZE}) {
-			return .RESIZE_TOP
-		}
-		if sdl3.PointInRect(point^, {0, height - SIZE, width, SIZE}) {
-			return .RESIZE_BOTTOM
-		}
-		if !opal.global_ctx.widget_hovered && sdl3.PointInRect(point^, titlebar) {
-			return .DRAGGABLE
-		}
-		return .NORMAL
-	}
-
-
-	app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.AppResult {
-		context = runtime.default_context()
-		appstate^ = new_clone(App{run = true})
-		app := (^App)(appstate^)
-
-		app.window = sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE, .BORDERLESS, .TRANSPARENT})
-		sdl3.SetWindowHitTest(app.window, hit_test_callback, nil)
-		sdl3.SetWindowMinimumSize(app.window, 500, 400)
-		if !sdl3.StartTextInput(app.window) {
-			panic("Can't accept text input!")
-		}
-
-		platform := sdl3glue.make_platform_sdl3glue(app.window)
-		kn.start_on_platform(platform)
-		lucide.load()
-		opal.init()
-		opal.global_ctx.callback_data = app
-		opal.global_ctx.on_set_cursor = proc(cursor: opal.Cursor, data: rawptr) -> bool {
-			app := (^App)(data)
-			switch cursor {
-			case .Normal:
-				return sdl3.SetCursor(app.cursors[.DEFAULT])
-			case .Pointer:
-				return sdl3.SetCursor(app.cursors[.POINTER])
-			case .Text:
-				return sdl3.SetCursor(app.cursors[.TEXT])
-			}
-			return false
-		}
-
-		// Create system cursors
-		for cursor in sdl3.SystemCursor {
-			app.cursors[cursor] = sdl3.CreateSystemCursor(cursor)
-		}
-
-		app.image = opal.load_image("image.png") or_else panic("Could not load image!")
-
-		return .CONTINUE
-	}
-
-	app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
-		using opal
-		context = runtime.default_context()
-		app := (^App)(appstate)
-		ctx := global_ctx
-
-		kn.new_frame()
-
-		begin()
-		begin_node(
-			{
-				size = kn.get_size(),
-				bg = tw.NEUTRAL_950,
-				vertical = true,
-				padding = 1,
-				stroke_width = 1,
-				stroke = tw.NEUTRAL_800,
-				radius = 8,
-				clip = true,
-			},
-		)
-		{
+	sdl3app.state = new_clone(My_App {
+		run = true,
+		on_start = proc(app: ^sdl3app.App) {
+			app := (^My_App)(app)
+			lucide.load()
+			app.image = opal.load_image("image.png") or_else panic("Could not load image!")
+		},
+		on_frame = proc(app: ^sdl3app.App) {
+			app := (^My_App)(app)
+			using opal
+			begin()
 			begin_node(
 				{
-					h = 20,
-					max_w = math.F32_MAX,
-					fit = {false, true},
-					grow = {true, false},
-					content_align = {0, 0.5},
-					bg = tw.NEUTRAL_900,
+					size = kn.get_size(),
+					bg = tw.NEUTRAL_950,
+					vertical = true,
+					padding = 1,
+					stroke_width = 1,
+					stroke = tw.NEUTRAL_600,
+					radius = 8,
+					clip = true,
 				},
 			)
 			{
-				begin_node({fit = true, padding = 3, spacing = 3})
+				begin_node(
+					{
+						size = {0, 20},
+						max_size = INFINITY,
+						fit = {false, true},
+						grow = {true, false},
+						content_align = {0, 0.5},
+						bg = tw.NEUTRAL_900,
+					},
+				)
 				{
-					if do_menu("File") {
-						do_menu_item("New", lucide.PLUS)
-						do_menu_item("Open", lucide.FOLDER_OPEN)
-						do_menu_item("Save", lucide.SAVE)
-						do_menu_item("Save As", lucide.SAVE)
+					begin_node({fit = true, padding = 3, spacing = 3})
+					{
+						if do_menu("File") {
+							do_menu_item("New", lucide.PLUS)
+							do_menu_item("Open", lucide.FOLDER_OPEN)
+							do_menu_item("Save", lucide.SAVE)
+							do_menu_item("Save As", lucide.SAVE)
+						}
+						if do_menu("Edit") {
+							do_menu_item("Undo", lucide.UNDO)
+							do_menu_item("Redo", lucide.REDO)
+						}
+						if do_menu("Select") {
+							do_menu_item("All", lucide.TEXT_SELECT)
+							do_menu_item("Invert", lucide.LASSO_SELECT)
+						}
+						if do_menu("Object") {
+							do_menu_item("Create", lucide.PLUS)
+							do_menu_item("Delete", lucide.TRASH)
+						}
+						if do_menu("Help") {
+							do_menu_item("Manual", lucide.BOOK)
+							do_menu_item("Forum", lucide.MESSAGE_CIRCLE)
+						}
 					}
-					if do_menu("Edit") {
-						do_menu_item("Undo", lucide.UNDO)
-						do_menu_item("Redo", lucide.REDO)
+					end_node()
+					do_node({grow = true, max_size = INFINITY})
+					if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
+						sdl3.MinimizeWindow(app.window)
 					}
-					if do_menu("Select") {
-						do_menu_item("All", lucide.TEXT_SELECT)
-						do_menu_item("Invert", lucide.LASSO_SELECT)
+					if do_window_button(lucide.CHEVRON_UP, tw.ROSE_500) {
+						if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
+							sdl3.RestoreWindow(app.window)
+						} else {
+							sdl3.MaximizeWindow(app.window)
+						}
 					}
-					if do_menu("Object") {
-						do_menu_item("Create", lucide.PLUS)
-						do_menu_item("Delete", lucide.TRASH)
-					}
-					if do_menu("Help") {
-						do_menu_item("Manual", lucide.BOOK)
-						do_menu_item("Forum", lucide.MESSAGE_CIRCLE)
+					if do_window_button(lucide.X, tw.ROSE_500) {
+						app.run = false
 					}
 				}
 				end_node()
-				do_node({grow = true, max_size = math.F32_MAX})
-				if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
-					sdl3.MinimizeWindow(app.window)
-				}
-				if do_window_button(lucide.CHEVRON_UP, tw.ROSE_500) {
-					if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
-						sdl3.RestoreWindow(app.window)
-					} else {
-						sdl3.MaximizeWindow(app.window)
-					}
-				}
-				if do_window_button(lucide.X, tw.ROSE_500) {
-					app.run = false
-				}
-			}
-			end_node()
 
-			do_node({h = 1, grow = {true, false}, max_w = math.F32_MAX, bg = tw.NEUTRAL_800})
+				do_node(
+					{
+						size = {0, 1},
+						grow = {true, false},
+						max_size = INFINITY,
+						bg = tw.NEUTRAL_600,
+					},
+				)
 
-			begin_node({max_size = math.F32_MAX, grow = true})
-			{
-				begin_node({max_size = math.F32_MAX, grow = true, vertical = true})
+				begin_node({max_size = INFINITY, grow = true})
 				{
+					begin_node({max_size = INFINITY, grow = true, vertical = true})
+					{
+						begin_node(
+							{
+								max_size = INFINITY,
+								grow = {false, true},
+								fit = {true, false},
+								padding = 5,
+								spacing = 1,
+								vertical = true,
+							},
+						)
+						{
+							do_button(lucide.FOLDER_PLUS, font = &lucide.font, font_size = 20)
+							do_node({size = {0, 4}})
+							do_button(lucide.WAND_SPARKLES, font = &lucide.font, font_size = 20)
+							do_node({size = {0, 4}})
+							do_button(
+								lucide.MOVE_3D,
+								font = &lucide.font,
+								font_size = 20,
+								radius = {3, 3, 0, 0},
+							)
+							do_button(
+								lucide.ROTATE_3D,
+								font = &lucide.font,
+								font_size = 20,
+								radius = 0,
+							)
+							do_button(
+								lucide.SCALE_3D,
+								font = &lucide.font,
+								font_size = 20,
+								radius = {0, 0, 3, 3},
+							)
+						}
+						end_node()
+					}
+					end_node()
+
+					do_node(
+						{
+							size = {1, 0},
+							grow = {false, true},
+							max_size = INFINITY,
+							bg = tw.NEUTRAL_600,
+						},
+					)
+
 					begin_node(
 						{
-							max_h = math.F32_MAX,
+							size = {200, 0},
 							grow = {false, true},
-							fit = {true, false},
-							padding = 5,
-							spacing = 1,
+							max_size = INFINITY,
 							vertical = true,
+							spacing = 2,
+							padding = 10,
+							bg = Radial_Gradient {
+								center = {1, 0.5},
+								radius = 0.5,
+								inner = tw.NEUTRAL_800,
+								outer = tw.NEUTRAL_900,
+							},
+							content_align = 0.5,
 						},
 					)
 					{
-						do_button(lucide.FOLDER_PLUS, font = &lucide.font, font_size = 20)
-						do_node({h = 4})
-						do_button(lucide.WAND_SPARKLES, font = &lucide.font, font_size = 20)
-						do_node({h = 4})
-						do_button(
-							lucide.MOVE_3D,
-							font = &lucide.font,
-							font_size = 20,
-							radius = {3, 3, 0, 0},
+						do_node(
+							{
+								size = 100,
+								bg = Image_Paint{index = app.image, size = 1},
+								radius = 50,
+							},
 						)
-						do_button(
-							lucide.ROTATE_3D,
-							font = &lucide.font,
-							font_size = 20,
-							radius = 0,
+						do_node(
+							{
+								text = FILLER_TEXT,
+								fit = {false, true},
+								grow = {true, false},
+								max_size = INFINITY,
+								font_size = 12,
+								fg = tw.NEUTRAL_200,
+								wrap = true,
+								selectable = true,
+								padding = {0, 10, 0, 10},
+							},
 						)
-						do_button(
-							lucide.SCALE_3D,
-							font = &lucide.font,
-							font_size = 20,
-							radius = {0, 0, 3, 3},
-						)
+						do_button("Botón A")
+						do_button("Botón B")
+						node := do_node({
+							bg = tw.NEUTRAL_950,
+							stroke = tw.NEUTRAL_500,
+							stroke_width = 1,
+							clip = true,
+							text = app.edited_text,
+							font_size = 12,
+							padding = 4,
+							radius = 3,
+							fg = tw.NEUTRAL_50,
+							fit = {false, true},
+							max_size = INFINITY,
+							grow = {true, false},
+							editable = true,
+							selectable = true,
+							widget = true,
+							stroke_type = .Outer_Stroke,
+							on_animate = proc(self: ^Node) {
+								self.style.stroke_paint = tw.LIME_500
+								self.style.stroke_width = 3 * self.transitions[1]
+								self.transitions[1] +=
+									(f32(i32(self.is_focused)) - self.transitions[1]) *
+									rate_per_second(14)
+								self.transitions[0] +=
+									(f32(i32(self.is_hovered)) - self.transitions[0]) *
+									rate_per_second(14)
+							},
+						})
+						if node.was_changed {
+							delete(app.edited_text)
+							app.edited_text = strings.clone(strings.to_string(node.builder))
+						}
 					}
 					end_node()
 				}
 				end_node()
-
-				do_node({w = 1, grow = {false, true}, max_h = math.F32_MAX, bg = tw.NEUTRAL_800})
-
-				begin_node(
-					{
-						w = 200,
-						grow = {false, true},
-						max_h = math.F32_MAX,
-						vertical = true,
-						spacing = 2,
-						padding = 10,
-						bg = Radial_Gradient {
-							center = 0.5,
-							radius = 0.5,
-							inner = tw.NEUTRAL_800,
-							outer = tw.NEUTRAL_900,
-						},
-						content_align = 0.5,
-					},
-				)
-				{
-					do_node(
-						{size = 100, bg = Image_Paint{index = app.image, size = 1}, radius = 50},
-					)
-					do_node(
-						{
-							text = FILLER_TEXT,
-							fit = {false, true},
-							grow = {true, false},
-							max_w = math.F32_MAX,
-							font_size = 12,
-							fg = tw.NEUTRAL_200,
-							wrap = true,
-							selectable = true,
-							padding = {0, 10, 0, 10},
-						},
-					)
-					do_button("Botón A")
-					do_button("Botón B")
-					node := do_node({
-						bg = tw.NEUTRAL_950,
-						stroke = tw.NEUTRAL_500,
-						stroke_width = 1,
-						clip = true,
-						text = app.edited_text,
-						font_size = 12,
-						padding = 4,
-						radius = 3,
-						fg = tw.NEUTRAL_50,
-						fit = {false, true},
-						max_w = math.F32_MAX,
-						grow = {true, false},
-						editable = true,
-						selectable = true,
-						widget = true,
-						stroke_type = .Outer_Stroke,
-						on_animate = proc(self: ^Node) {
-							self.style.stroke_paint = tw.LIME_500
-							self.style.stroke_width = 3 * self.transitions[1]
-							self.transitions[1] +=
-								(f32(i32(self.is_focused)) - self.transitions[1]) *
-								rate_per_second(14)
-							self.transitions[0] +=
-								(f32(i32(self.is_hovered)) - self.transitions[0]) *
-								rate_per_second(14)
-						},
-					})
-					if node.was_changed {
-						delete(app.edited_text)
-						app.edited_text = strings.clone(strings.to_string(node.builder))
-					}
-				}
-				end_node()
 			}
 			end_node()
-		}
-		end_node()
-		end()
+			end()
+		},
+	})
 
-		if ctx.is_debugging {
-			kn.set_paint(kn.BLACK)
-			text := kn.make_text(
-				fmt.tprintf("FPS: %.0f\n%v", kn.get_fps(), ctx.compute_duration),
-				12,
-			)
-			kn.add_box({0, text.size}, paint = kn.fade(kn.BLACK, 1.0))
-			kn.add_text(text, 0, paint = kn.WHITE)
-		}
-
-		kn.set_clear_color({})
-		if requires_redraw() {
-			kn.present()
-		}
-
-		free_all(context.temp_allocator)
-
-		if !app.run {
-			return .SUCCESS
-		}
-		return .CONTINUE
-	}
-
-	app_event :: proc "c" (appstate: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
-		using opal
-		context = runtime.default_context()
-		app := (^App)(appstate)
-		#partial switch event.type {
-		case .QUIT:
-			app.run = false
-		case .KEY_DOWN:
-			key := translate_keycode(event.key.key)
-			if event.key.repeat {
-				handle_key_repeat(key)
-			}
-			handle_key_down(key)
-		case .KEY_UP:
-			handle_key_up(translate_keycode(event.key.key))
-		case .MOUSE_BUTTON_DOWN:
-			handle_mouse_down(Mouse_Button(int(event.button.button) - 1))
-		case .MOUSE_BUTTON_UP:
-			handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
-		case .MOUSE_MOTION:
-			handle_mouse_motion(event.motion.x, event.motion.y)
-		case .MOUSE_WHEEL:
-			handle_mouse_scroll(event.wheel.x, event.wheel.y)
-		case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
-			handle_window_size_change(event.window.data1, event.window.data2)
-		case .WINDOW_RESTORED:
-			draw_frames(2)
-		case .TEXT_INPUT:
-			handle_text_input(event.text.text)
-		}
-		return .CONTINUE
-	}
-
-	app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
-		context = runtime.default_context()
-		app := (^App)(appstate)
-		// kn.destroy_platform(&app.platform)
-		kn.shutdown()
-		opal.deinit()
-		sdl3.DestroyWindow(app.window)
-		sdl3.Quit()
-	}
-
-	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
+	sdl3app.run()
 }
-

@@ -1,12 +1,5 @@
 package opal
 
-//
-// TODO:
-// 	[x] Figure out how to let a node modify its own size
-// 		- Probably through callbacks
-//
-//
-
 import kn "../katana"
 import "base:runtime"
 import "core:fmt"
@@ -24,6 +17,8 @@ import "core:unicode"
 import "tedit"
 import "vendor:sdl3"
 import stbi "vendor:stb/image"
+
+INFINITY :: math.F32_MAX
 
 // Generic unique identifiers
 Id :: u32
@@ -155,12 +150,7 @@ Node_Config :: struct {
 	shadow_size:   f32,
 	z:             u32,
 	spacing:       f32,
-	w:             f32,
-	h:             f32,
-	max_w:         f32,
-	max_h:         f32,
-	self_align_x:  f32,
-	self_align_y:  f32,
+	self_align:    [2]f32,
 	content_align: [2]f32,
 	stroke_width:  f32,
 	stroke_type:   Maybe(kn.Shape_Outline),
@@ -186,10 +176,10 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.spacing = config.spacing
 	self.fit = config.fit
 	self.grow = config.grow
-	self.size = {max(config.size.x, config.w), max(config.size.y, config.h)}
+	self.size = config.size
 	self.max_size = config.max_size
 	self.content_align = config.content_align
-	self.align = {config.self_align_x, config.self_align_y}
+	self.align = config.self_align
 	self.position = config.position
 	self.vertical = config.vertical
 	self.style.shadow_size = config.shadow_size
@@ -231,12 +221,14 @@ node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
 Node :: struct {
 	// Node tree references
 	parent:             ^Node,
+
+	// All nodes invoked between `begin_node` and `end_node`
 	kids:               [dynamic]^Node,
 
-	//
+	// A simple kill switch that causes the node to be discarded
 	is_dead:            bool,
 
-	// Last frame on which this node was added
+	// Last frame on which this node was invoked
 	frame:              int,
 
 	// Unique identifier
@@ -244,37 +236,39 @@ Node :: struct {
 
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                Box,
+
+	// A simple way to force a node to remain within certain boundaries
 	bounds:             Maybe(Box),
 
 	// The node's local position within its parent; or screen position if its a root
 	position:           [2]f32,
 
-	// Absolute nodes are translated from their parent's origin relative to its size before their fixed position is added
+	// Added position relative to parent size
 	relative_position:  [2]f32,
 
 	// The maximum size the node is allowed to grow to
 	max_size:           [2]f32,
 
 	// This is for the node itself to add/subtract from its size on the next frame
+	// TODO: Remove this?
 	added_size:         [2]f32,
 
-	// The node's actual size, this is subject to change until `end()` is called
-	// The initial value is effectively the node's minimum size
+	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
 	size:               [2]f32,
 
-	// Added size relative to the parent
+	// Added size relative to the parent size
 	relative_size:      [2]f32,
 
 	// If the node will be grown to fill available space
 	grow:               [2]bool,
 
-	// If the node will grow to acommodate its kids
+	// If the node will grow to acommodate its contents
 	fit:                [2]bool,
 
-	// How the node is aligned on its origin if it is a root node
+	// How the node is aligned on its origin if it is absolutely positioned
 	align:              [2]f32,
 
-	// Where text is aligned within the box
+	// How text is aligned within the box
 	text_align:         [2]f32,
 
 	// This is known after box is calculated
@@ -282,28 +276,42 @@ Node :: struct {
 
 	// Values for the node's children layout
 	padding:            [4]f32,
+
+	// How the content will be aligned if there is extra space
 	content_align:      [2]f32,
+
+	// This is computed as the minimum space required to fit all children or the node's text content
 	content_size:       [2]f32,
+
+	// TODO: Remove this
 	growable_kid_count: int,
+
+	// Spacing added between children
 	spacing:            f32,
+
+	// If the node's children are arranged vertically
 	vertical:           bool,
+
+	// If true, the node will ignore the normal layout behavior and simply be positioned and sized relative to its parent
 	is_absolute:        bool,
+
+	// If text will be wrapped for the next frame
 	enable_wrapping:    bool,
 
 	// Marks the node as a clickable widget and will steal mouse events from the native window functionality
 	is_widget:          bool,
 
-	// Opal sacrifices one frame of responsiveness for faster frames. This value is a representation of the previous frame's input
+	// If this is the node with the highest z-index that the mouse overlaps
 	was_hovered:        bool,
 	is_hovered:         bool,
-
-	// True if any nodes below this one in the tree are hovered
 	has_hovered_child:  bool,
 
-	// Active state
+	// Active state (clicked)
 	was_active:         bool,
 	is_active:          bool,
 	has_active_child:   bool,
+
+	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
 	was_focused:        bool,
 	is_focused:         bool,
 	has_focused_child:  bool,
@@ -325,31 +333,50 @@ Node :: struct {
 	was_confirmed:      bool,
 	was_changed:        bool,
 
-	// Z index (higher values appear in front of lower ones)
+	// Z index (higher values appear in front of lower ones), nodes will inherit their parent's z-index
 	z_index:            u32,
 
-	// If the node is hidden by clipping
-	is_hidden:          bool,
-
-	//
+	// The timestamp of the node's initialization in the context's arena
 	time_created:       time.Time,
 
-	// Appearance
+	// Text content
 	text:               string,
 	text_layout:        kn.Selectable_Text,
 	last_text_size:     [2]f32,
+
+	// View offset of contents
 	scroll:             [2]f32,
+
+	// Current visual parameters
 	style:              Node_Style,
+
+	// Text editing state
 	select_anchor:      int,
 	editor:             tedit.Editor,
+
+	// Universal state transition values for smooth animations
 	transitions:        [3]f32,
-	on_create:          proc(self: ^Node),
-	on_drop:            proc(self: ^Node),
+
+	//
+	// Callbacks for custom look or behavior
+	//
+
+	// Called just before the node is drawn, gives the user a chance to modify the node's style or apply animations based on its state
 	on_animate:         proc(self: ^Node),
+
+	// Called when the node is first initialized, allocate any additional state here
+	on_create:          proc(self: ^Node),
+
+	// Called when the node is discarded, this is to allow the user to clean up any custom state
+	on_drop:            proc(self: ^Node),
+
+	// Called after the default drawing behavior
 	on_draw:            proc(self: ^Node),
-	on_add:             proc(self: ^Node),
-	on_edit:            proc(self: ^Node),
+
+	// Data for use in callbacks
 	data:               rawptr,
+
+	// Optional retained data bound to the node for its lifetime. This is for the user to add state to their custom nodes.
 	retained_data:      rawptr,
 }
 
@@ -380,26 +407,6 @@ Paint_Variant :: union #no_nil {
 	Linear_Gradient,
 }
 
-//
-// This is abstracted out by gut feeling ✊😔
-//
-Node_Style :: struct {
-	radius:           [4]f32,
-	transform_origin: [2]f32,
-	scale:            [2]f32,
-	translate:        [2]f32,
-	stroke_type:      kn.Shape_Outline,
-	stroke_paint:     kn.Paint_Option,
-	background_paint: Paint_Variant,
-	foreground_paint: kn.Paint_Option,
-	font:             ^kn.Font,
-	shadow_color:     kn.Color,
-	rotation:         f32,
-	stroke_width:     f32,
-	font_size:        f32,
-	shadow_size:      f32,
-}
-
 User_Image :: struct {
 	source: Maybe(Box),
 	data:   rawptr,
@@ -407,7 +414,42 @@ User_Image :: struct {
 	height: i32,
 }
 
+Stroke_Type :: kn.Shape_Outline
+
+Paint_Option :: kn.Paint_Option
+
+Font :: kn.Font
+
+//
+// The visual description of a node, used for the default drawing procedure
+// This is abstracted out by gut feeling ✊😔
+//
+Node_Style :: struct {
+	// Corner radius
+	radius:           [4]f32,
+
+	// The origin of transformation (0, 0) = top left, (1, 1) = bottom right
+	transform_origin: [2]f32,
+
+	// Transformation applied to self and children
+	scale:            [2]f32,
+	translate:        [2]f32,
+	rotation:         f32,
+	stroke_type:      Stroke_Type,
+	stroke_paint:     Paint_Option,
+	background_paint: Paint_Variant,
+	foreground_paint: Paint_Option,
+	font:             ^Font,
+	shadow_color:     Color,
+	stroke_width:     f32,
+	font_size:        f32,
+	shadow_size:      f32,
+}
+
 Context :: struct {
+	// Additional frame delay
+	frame_interval:             time.Duration,
+
 	// Input state
 	screen_size:                Vector2,
 
@@ -490,6 +532,8 @@ Context :: struct {
 	// Profiling state
 	frame_start_time:           time.Time,
 	frame_duration:             time.Duration,
+	interval_start_time:        time.Time,
+	interval_duration:          time.Duration,
 	compute_start_time:         time.Time,
 	compute_duration:           time.Duration,
 
@@ -754,7 +798,7 @@ set_clipboard :: proc(data: string) {
 
 rate_per_second :: proc(rate: f32) -> f32 {
 	ctx := global_ctx
-	return f32(time.duration_seconds(ctx.frame_duration)) * rate
+	return f32(time.duration_seconds(ctx.interval_duration)) * rate
 }
 
 //
@@ -873,6 +917,11 @@ begin :: proc() {
 	if ctx.frame_start_time != {} {
 		ctx.frame_duration = time.since(ctx.frame_start_time)
 	}
+	if ctx.interval_start_time != {} {
+		ctx.interval_duration = time.since(ctx.interval_start_time)
+	}
+	ctx.interval_start_time = time.now()
+	time.sleep(max(0, ctx.frame_interval - ctx.frame_duration))
 	ctx.frame_start_time = time.now()
 
 	ctx.compute_start_time = time.now()
@@ -1271,9 +1320,9 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	}
 
 	// TODO: Decide if this is necessary
-	if self.on_add != nil {
-		self.on_add(self)
-	}
+	// if self.on_add != nil {
+	// 	self.on_add(self)
+	// }
 
 	// TODO: Decide if this is necessary also
 	self.size += self.added_size
@@ -1315,6 +1364,8 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	self.box.hi = self.box.lo + self.size
 
 	node_receive_input(self)
+
+	self.scroll = linalg.clamp(self.scroll, 0, linalg.max(self.content_size - self.size, 0))
 }
 
 node_solve_box_recursively :: proc(self: ^Node, offset: [2]f32 = {}) {
@@ -1803,4 +1854,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-
