@@ -151,7 +151,7 @@ do_window_button :: proc(icon: rune, color: kn.Color, loc := #caller_location) -
 	using opal
 	node := do_node({
 			padding = 3,
-			fit = true,
+			fit = 1,
 			text = string_from_rune(icon),
 			font_size = 20,
 			fg = tw.NEUTRAL_300,
@@ -183,7 +183,7 @@ do_button :: proc(label: union #no_nil {
 	node := do_node({
 			padding = 3,
 			radius = radius,
-			fit = true,
+			fit = 1,
 			text = label.(string) or_else string_from_rune(label.(rune)),
 			font_size = font_size,
 			fg = tw.NEUTRAL_300,
@@ -212,7 +212,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	begin_node({
 		padding = {3, 3, 12, 3},
 		radius = 3,
-		fit = true,
+		fit = 1,
 		spacing = 6,
 		max_size = INFINITY,
 		grow = {true, false},
@@ -236,11 +236,11 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			text = string_from_rune(icon),
 			font = &lucide.font,
 			font_size = 14,
-			fit = true,
+			fit = 1,
 			fg = tw.NEUTRAL_300,
 		},
 	)
-	do_node({text = label, font_size = 12, fit = true, fg = tw.NEUTRAL_300})
+	do_node({text = label, font_size = 12, fit = 1, fg = tw.NEUTRAL_300})
 	end_node()
 	pop_id()
 }
@@ -252,17 +252,18 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	node := begin_node({
 		padding = 3,
 		radius = 3,
-		fit = true,
+		fit = 1,
 		text = label,
 		font_size = 12,
 		fg = tw.NEUTRAL_300,
 		widget = true,
 		on_animate = proc(self: ^Node) {
-			self.style.background_paint = kn.fade(tw.NEUTRAL_600, 0.3 + self.transitions[0] * 0.3)
-			self.transitions[1] +=
-				(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
-			self.transitions[0] +=
-				(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
+			self.style.background_paint = kn.fade(
+				tw.NEUTRAL_600,
+				(self.transitions[0] + self.transitions[1]) * 0.3,
+			)
+			node_update_transition(self, 1, self.is_active, 0)
+			node_update_transition(self, 0, self.is_hovered, 0)
 			if self.is_hovered && self.parent != nil && self.parent.has_focused_child {
 				focus_node(self.id)
 			}
@@ -283,7 +284,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				absolute = true,
 				relative_pos = {0, 1},
 				position = {0, 4},
-				fit = true,
+				fit = 1,
 				padding = 3,
 				spacing = 3,
 				radius = 3,
@@ -311,9 +312,12 @@ __do_menu :: proc(is_open: bool) {
 FILLER_TEXT :: "Algo de texto que puedes seleccionar si gusta."
 
 My_App :: struct {
-	using app:   sdl3app.App,
-	image:       int,
-	edited_text: string,
+	using app:             sdl3app.App,
+	image:                 int,
+	edited_text:           string,
+	inspector_position:    [2]f32,
+	drag_offset:           [2]f32,
+	is_dragging_inspector: bool,
 }
 
 main :: proc() {
@@ -356,8 +360,6 @@ main :: proc() {
 					padding = 1,
 					stroke_width = 1,
 					stroke = tw.NEUTRAL_600,
-					radius = 8,
-					clip = true,
 				},
 			)
 			{
@@ -365,14 +367,14 @@ main :: proc() {
 					{
 						size = {0, 20},
 						max_size = INFINITY,
-						fit = {false, true},
+						fit = {0, 1},
 						grow = {true, false},
 						content_align = {0, 0.5},
 						bg = tw.NEUTRAL_900,
 					},
 				)
 				{
-					begin_node({fit = true, padding = 3, spacing = 3})
+					begin_node({fit = 1, padding = 3, spacing = 3})
 					{
 						if do_menu("File") {
 							do_menu_item("New", lucide.PLUS)
@@ -432,7 +434,7 @@ main :: proc() {
 							{
 								max_size = INFINITY,
 								grow = {false, true},
-								fit = {true, false},
+								fit = {1, 0},
 								padding = 5,
 								spacing = 1,
 								vertical = true,
@@ -503,7 +505,7 @@ main :: proc() {
 						do_node(
 							{
 								text = FILLER_TEXT,
-								fit = {false, true},
+								fit = {0, 1},
 								grow = {true, false},
 								max_size = INFINITY,
 								font_size = 12,
@@ -525,7 +527,7 @@ main :: proc() {
 							padding = 4,
 							radius = 3,
 							fg = tw.NEUTRAL_50,
-							fit = {false, true},
+							fit = {0, 1},
 							max_size = INFINITY,
 							grow = {true, false},
 							editable = true,
@@ -553,9 +555,11 @@ main :: proc() {
 				end_node()
 			}
 			end_node()
+			inspector_show(&global_ctx.inspector)
 			end()
 		},
 	})
 
 	sdl3app.run()
 }
+

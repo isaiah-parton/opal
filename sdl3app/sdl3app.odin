@@ -133,6 +133,8 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 			return sdl3.SetCursor(app.cursors[.POINTER])
 		case .Text:
 			return sdl3.SetCursor(app.cursors[.TEXT])
+		case .Dragging:
+			return sdl3.SetCursor(app.cursors[.MOVE])
 		}
 		return false
 	}
@@ -228,3 +230,4 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 run :: proc() {
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
 }
+

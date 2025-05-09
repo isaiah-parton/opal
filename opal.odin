@@ -14,6 +14,8 @@ import "core:strings"
 import "core:sys/windows"
 import "core:time"
 import "core:unicode"
+import "lucide"
+import tw "tailwind_colors"
 import "tedit"
 import "vendor:sdl3"
 import stbi "vendor:stb/image"
@@ -44,6 +46,7 @@ Cursor :: enum {
 	Normal,
 	Pointer,
 	Text,
+	Dragging,
 }
 
 Keyboard_Key :: enum i32 {
@@ -128,44 +131,47 @@ Mouse_Button :: enum {
 }
 
 Node_Config :: struct {
-	padding:       [4]f32,
-	text:          string,
-	position:      [2]f32,
-	relative_pos:  [2]f32,
-	size:          [2]f32,
-	max_size:      [2]f32,
-	relative_size: [2]f32,
-	bounds:        Maybe(Box),
-	bg:            Paint_Variant,
-	stroke:        kn.Paint_Option,
-	fg:            kn.Paint_Option,
-	shadow_color:  kn.Color,
-	font:          ^kn.Font,
-	on_draw:       proc(_: ^Node),
-	on_animate:    proc(_: ^Node),
-	on_create:     proc(_: ^Node),
-	on_drop:       proc(_: ^Node),
-	on_add:        proc(_: ^Node),
-	data:          rawptr,
-	shadow_size:   f32,
-	z:             u32,
-	spacing:       f32,
-	self_align:    [2]f32,
-	content_align: [2]f32,
-	stroke_width:  f32,
-	stroke_type:   Maybe(kn.Shape_Outline),
-	radius:        [4]f32,
-	font_size:     f32,
-	fit:           [2]bool,
-	grow:          [2]bool,
-	vertical:      bool,
-	absolute:      bool,
-	wrap:          bool,
-	clip:          bool,
-	selectable:    bool,
-	editable:      bool,
-	root:          bool,
-	widget:        bool,
+	padding:         [4]f32,
+	text:            string,
+	position:        [2]f32,
+	relative_pos:    [2]f32,
+	size:            [2]f32,
+	max_size:        [2]f32,
+	relative_size:   [2]f32,
+	bounds:          Maybe(Box),
+	bg:              Paint_Variant,
+	stroke:          kn.Paint_Option,
+	fg:              kn.Paint_Option,
+	shadow_color:    kn.Color,
+	font:            ^kn.Font,
+	on_draw:         proc(_: ^Node),
+	on_animate:      proc(_: ^Node),
+	on_create:       proc(_: ^Node),
+	on_drop:         proc(_: ^Node),
+	on_add:          proc(_: ^Node),
+	data:            rawptr,
+	shadow_size:     f32,
+	z:               u32,
+	spacing:         f32,
+	self_align:      [2]f32,
+	content_align:   [2]f32,
+	stroke_width:    f32,
+	stroke_type:     Maybe(kn.Shape_Outline),
+	radius:          [4]f32,
+	font_size:       f32,
+	fit:             [2]f32,
+	grow:            [2]bool,
+	vertical:        bool,
+	absolute:        bool,
+	wrap:            bool,
+	clip:            bool,
+	selectable:      bool,
+	editable:        bool,
+	root:            bool,
+	widget:          bool,
+	inherit_state:   bool,
+	no_inspect:      bool,
+	show_scrollbars: bool,
 }
 
 node_configure :: proc(self: ^Node, config: Node_Config) {
@@ -204,6 +210,10 @@ node_configure :: proc(self: ^Node, config: Node_Config) {
 	self.enable_edit = config.editable
 	self.z_index = config.z
 	self.bounds = config.bounds
+	self.inherit_state = config.inherit_state
+	self.disable_inspection = config.no_inspect
+	self.show_scrollbars = config.show_scrollbars
+	self.data = config.data
 }
 
 node_config_clone_of_parent :: proc(config: Node_Config) -> Node_Config {
@@ -263,7 +273,7 @@ Node :: struct {
 	grow:               [2]bool,
 
 	// If the node will grow to acommodate its contents
-	fit:                [2]bool,
+	fit:                [2]f32,
 
 	// How the node is aligned on its origin if it is absolutely positioned
 	align:              [2]f32,
@@ -316,6 +326,9 @@ Node :: struct {
 	is_focused:         bool,
 	has_focused_child:  bool,
 
+	// If this node will treat its children's state as its own
+	inherit_state:      bool,
+
 	// Times the node was clicked
 	click_count:        u8,
 
@@ -332,6 +345,9 @@ Node :: struct {
 	is_multiline:       bool,
 	was_confirmed:      bool,
 	was_changed:        bool,
+	is_toggled:         bool,
+	disable_inspection: bool,
+	show_scrollbars:    bool,
 
 	// Z index (higher values appear in front of lower ones), nodes will inherit their parent's z-index
 	z_index:            u32,
@@ -346,6 +362,7 @@ Node :: struct {
 
 	// View offset of contents
 	scroll:             [2]f32,
+	target_scroll:      [2]f32,
 
 	// Current visual parameters
 	style:              Node_Style,
@@ -471,6 +488,9 @@ Context :: struct {
 	// If a widget is hovered which would prevent native window interaction
 	widget_hovered:             bool,
 
+	// Which node will receive scroll input
+	scrollable_node:            ^Node,
+
 	// Transient pointers to interacted nodes
 	hovered_node:               ^Node,
 	focused_node:               ^Node,
@@ -545,6 +565,7 @@ Context :: struct {
 
 	// Debug state
 	is_debugging:               bool,
+	inspector:                  Inspector,
 }
 
 // @(private)
@@ -801,6 +822,23 @@ rate_per_second :: proc(rate: f32) -> f32 {
 	return f32(time.duration_seconds(ctx.interval_duration)) * rate
 }
 
+node_update_transition :: proc(self: ^Node, index: int, condition: bool, duration_seconds: f32) {
+	assert(index >= 0 && index < len(self.transitions))
+	rate: f32
+	if duration_seconds <= 0 {
+		rate = 1
+	} else {
+		rate = rate_per_second(1 / duration_seconds)
+	}
+	#no_bounds_check {
+		if condition {
+			self.transitions[index] = min(1, self.transitions[index] + rate)
+		} else {
+			self.transitions[index] = max(0, self.transitions[index] - rate)
+		}
+	}
+}
+
 //
 // Global context proc wrappers
 //
@@ -935,6 +973,7 @@ begin :: proc() {
 	ctx.hovered_node = nil
 	ctx.focused_node = nil
 	ctx.active_node = nil
+	ctx.scrollable_node = nil
 
 	ctx.frame += 1
 	ctx.call_index = 0
@@ -971,7 +1010,6 @@ end :: proc() {
 
 	ctx.widget_hovered = false
 	if ctx.hovered_node != nil {
-		ctx.hovered_node.scroll += ctx.mouse_scroll
 		ctx.hovered_id = ctx.hovered_node.id
 		if ctx.hovered_node.is_widget {
 			ctx.widget_hovered = true
@@ -1126,10 +1164,7 @@ end_node :: proc() {
 	i := int(self.vertical)
 	self.content_size += self.padding.xy + self.padding.zw
 	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
-	self.size = linalg.max(
-		self.size,
-		self.content_size * {f32(i32(self.fit.x)), f32(i32(self.fit.y))},
-	)
+	self.size = linalg.max(self.size, self.content_size * self.fit)
 	pop_node()
 	if ctx.current_node != nil {
 		node_on_child_end(ctx.current_node, self)
@@ -1177,6 +1212,11 @@ node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
 	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
 	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
 	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
+	if self.inherit_state {
+		self.is_hovered = self.is_hovered | self.has_hovered_child
+		self.is_active = self.is_active | self.has_active_child
+		self.is_focused = self.is_focused | self.has_focused_child
+	}
 }
 
 node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
@@ -1319,11 +1359,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		)
 	}
 
-	// TODO: Decide if this is necessary
-	// if self.on_add != nil {
-	// 	self.on_add(self)
-	// }
-
 	// TODO: Decide if this is necessary also
 	self.size += self.added_size
 
@@ -1364,8 +1399,6 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	self.box.hi = self.box.lo + self.size
 
 	node_receive_input(self)
-
-	self.scroll = linalg.clamp(self.scroll, 0, linalg.max(self.content_size - self.size, 0))
 }
 
 node_solve_box_recursively :: proc(self: ^Node, offset: [2]f32 = {}) {
@@ -1454,6 +1487,13 @@ node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) {
 	}
 }
 
+node_is_scrollable :: proc(self: ^Node) -> bool {
+	if self.content_size.x <= self.size.x && self.content_size.y <= self.size.y {
+		return false
+	}
+	return true
+}
+
 node_receive_input :: proc(self: ^Node) {
 	ctx := global_ctx
 	if ctx.mouse_position.x >= self.box.lo.x &&
@@ -1462,6 +1502,11 @@ node_receive_input :: proc(self: ^Node) {
 	   ctx.mouse_position.y <= self.box.hi.y {
 		if !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
 			ctx.hovered_node = self
+
+			// Check if this node's contents can be scrolled
+			if node_is_scrollable(self) {
+				ctx.scrollable_node = self
+			}
 		}
 	}
 	if self.is_hovered {
@@ -1475,6 +1520,24 @@ node_receive_input :: proc(self: ^Node) {
 			self.click_count += 1
 			self.last_click_time = time.now()
 		}
+	}
+
+	// Receive mouse wheel input
+	if ctx.scrollable_node != nil && ctx.scrollable_node.id == self.id {
+		self.target_scroll -= ctx.mouse_scroll * 24
+	}
+
+	// Update and clamp scroll
+	self.target_scroll = linalg.clamp(
+		self.target_scroll,
+		0,
+		linalg.max(self.content_size - self.size, 0),
+	)
+
+	previous_scroll := self.scroll
+	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(8)
+	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
+		draw_frames(1)
 	}
 }
 
@@ -1498,9 +1561,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		linalg.lerp(
 			self.box.lo + self.padding.xy,
 			self.box.hi - self.padding.zw,
-			self.text_align,
+			self.content_align,
 		) -
-		self.text_layout.size * self.text_align -
+		self.text_layout.size * self.content_align -
 		self.scroll
 
 	// Perform wrapping if enabled
@@ -1649,14 +1712,29 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.pop_scissor()
 	}
 
-	if ctx.requires_redraw && self.style.stroke_paint != nil {
-		kn.add_box_lines(
-			self.box,
-			self.style.stroke_width,
-			self.style.radius,
-			paint = self.style.stroke_paint,
-			outline = self.style.stroke_type,
-		)
+	if ctx.requires_redraw {
+		if self.show_scrollbars {
+			if self.content_size.y > self.size.y {
+				box := Box{{self.box.hi.x - 10, self.box.lo.y}, self.box.hi}
+				radius := box_width(box) / 2
+				thumb_size := box_height(box) * self.size.y / self.content_size.y
+				travel := box_height(box) - thumb_size
+				time := self.scroll.y / (self.content_size.y - self.size.y)
+				kn.add_box(box, radius, paint = tw.SLATE_800)
+				thumb_box := Box{{box.lo.x, box.lo.y + travel * time}, {box.hi.x, 0}}
+				thumb_box.hi.y = thumb_box.lo.y + thumb_size
+				kn.add_box(thumb_box, radius, paint = tw.SLATE_600)
+			}
+		}
+		if self.style.stroke_paint != nil {
+			kn.add_box_lines(
+				self.box,
+				self.style.stroke_width,
+				self.style.radius,
+				paint = self.style.stroke_paint,
+				outline = self.style.stroke_type,
+			)
+		}
 	}
 
 	if is_transformed {
@@ -1671,6 +1749,29 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			} else if self.is_hovered {
 				kn.add_box(self.box, self.style.radius, paint = kn.fade(kn.CADET_BLUE, 0.3))
 			}
+		}
+		if ctx.inspector.inspected_id == self.id {
+			if self.parent != nil {
+				if box_width(self.box) == 0 {
+					kn.add_box(
+						{
+							{self.parent.box.lo.x, self.box.lo.y},
+							{self.parent.box.hi.x, self.box.hi.y},
+						},
+						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
+					)
+				}
+				if box_height(self.box) == 0 {
+					kn.add_box(
+						{
+							{self.box.lo.x, self.parent.box.lo.y},
+							{self.box.hi.x, self.parent.box.hi.y},
+						},
+						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
+					)
+				}
+			}
+			kn.add_box(self.box, paint = kn.fade(kn.BLUE_VIOLET, 0.5))
 		}
 	}
 }
@@ -1854,3 +1955,146 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+
+Inspector :: struct {
+	position:       [2]f32,
+	move_offset:    [2]f32,
+	is_being_moved: bool,
+	inspected_id:   Id,
+}
+
+INSPECTOR_BACKGROUND :: tw.STONE_900
+INSPECTOR_BACKGROUND_ACCENT :: tw.STONE_800
+
+inspector_show :: proc(self: ^Inspector) {
+	begin_node({
+		position = self.position,
+		size = {300, 500},
+		vertical = true,
+		padding = 1,
+		stroke_width = 1,
+		stroke = tw.CYAN_800,
+		z = 1,
+		no_inspect = true,
+		data = self,
+		bg = INSPECTOR_BACKGROUND,
+		on_animate = proc(self: ^Node) {
+			inspector := (^Inspector)(self.data)
+			if (self.is_hovered || self.has_hovered_child) && mouse_pressed(.Middle) {
+				inspector.is_being_moved = true
+				inspector.move_offset = global_ctx.mouse_position - self.box.lo
+			}
+			if mouse_released(.Middle) {
+				inspector.is_being_moved = false
+			}
+			if inspector.is_being_moved {
+				set_cursor(.Dragging)
+				inspector.position = global_ctx.mouse_position - inspector.move_offset
+			}
+		},
+	})
+	do_node(
+		{
+			text = "Inspector",
+			font_size = 12,
+			fit = 1,
+			padding = 3,
+			fg = tw.CYAN_50,
+			grow = {true, false},
+			max_size = INFINITY,
+			content_align = 0.5,
+		},
+	)
+	inspector_reset(&global_ctx.inspector)
+	inspector_build_tree(&global_ctx.inspector)
+	end_node()
+}
+
+inspector_build_tree :: proc(self: ^Inspector) {
+	begin_node(
+		{
+			padding = 4,
+			vertical = true,
+			max_size = INFINITY,
+			grow = true,
+			clip = true,
+			show_scrollbars = true,
+		},
+	)
+	for root in global_ctx.roots {
+		if root.disable_inspection {
+			continue
+		}
+		inspector_build_node_widget(self, root)
+	}
+	end_node()
+}
+
+inspector_reset :: proc(self: ^Inspector) {
+	self.inspected_id = 0
+}
+
+inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
+	assert(depth < 128)
+	push_id(int(node.id))
+	button_node := begin_node({
+		content_align = {0, 0.5},
+		spacing = 4,
+		grow = {true, false},
+		max_size = INFINITY,
+		padding = {4, 2, 4, 2},
+		fit = {0, 1},
+		widget = true,
+		inherit_state = true,
+		data = node,
+		on_animate = proc(self: ^Node) {
+			node := (^Node)(self.data)
+			self.style.background_paint = kn.fade(
+				tw.STONE_600,
+				f32(i32(self.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.kids) > 0)),
+			)
+			if self.is_hovered && self.was_active && !self.is_active {
+				self.is_toggled = !self.is_toggled
+			}
+			node_update_transition(self, 0, self.is_toggled, 0.1)
+		},
+	})
+	do_node(
+		{
+			text = "-" if button_node.is_toggled else "+",
+			font_size = 14,
+			fit = 1,
+			fg = nil if (len(node.kids) == 0) else tw.EMERALD_50,
+		},
+	)
+	do_node(
+		{
+			text = fmt.tprintf("%x", node.id),
+			font_size = 14,
+			fit = 1,
+			fg = kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.kids) > 0))),
+		},
+	)
+	end_node()
+	if button_node.is_hovered {
+		self.inspected_id = node.id
+	}
+	if button_node.transitions[0] > 0.01 {
+		begin_node(
+			{
+				padding = {f32(depth + 1) * 10, 0, 0, 0},
+				grow = {true, false},
+				max_size = INFINITY,
+				fit = {0, button_node.transitions[0]},
+				clip = true,
+				vertical = true,
+			},
+		)
+		for child in node.kids {
+			inspector_build_node_widget(self, child, depth + 1)
+		}
+		end_node()
+	}
+	pop_id()
+}
+
