@@ -1137,9 +1137,10 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	// Configure the node
 	node_configure(self, config)
 
-	if config.root {
-		self.parent = nil
-	}
+	// TODO: Find a use/place for this!
+	// if config.root {
+	// 	self.parent = nil
+	// }
 
 	// Keep alive this frame
 	self.is_dead = false
@@ -1147,12 +1148,15 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	// Reset accumulative values
 	self.content_size = 0
 
+	// Reset some state
 	self.was_changed = false
 	self.was_confirmed = false
 
+	// Initialize string reader for text construction
 	r: strings.Reader
 	reader := strings.to_reader(&r, self.text)
 
+	// Perform text editing
 	if self.enable_edit {
 		if self.editor.builder == nil {
 			self.editor.builder = &self.builder
@@ -1163,7 +1167,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 			strings.write_string(self.editor.builder, self.text)
 		}
 		if self.is_focused {
-			reader = strings.to_reader(&r, strings.to_string(self.builder))
 			cmd: tedit.Command
 			control_down := key_down(.Left_Control) || key_down(.Right_Control)
 			shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
@@ -1184,16 +1187,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 			}
 			if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
 			if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
-			// if key_pressed(.Tab) {
-			// 	if len(object.input.closest_match) > 0 {
-			// 		strings.builder_reset(&object.input.builder)
-			// 		strings.write_string(&object.input.builder, object.input.closest_match)
-			// 		self.editor.selection = strings.builder_len(object.input.builder)
-			// 		self.was_changed = true
-			// 		consume_key_press(.Tab)
-			// 	}
-			// 	// self.was_confirmed = true
-			// }
 			if key_pressed(.Enter) {
 				cmd = .New_Line
 				if self.is_multiline {
@@ -1201,11 +1194,6 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 						self.was_confirmed = true
 					}
 				} else {
-					// if len(object.input.closest_match) > 0 {
-					// 	strings.builder_reset(self.editor.builder)
-					// 	strings.write_string(self.editor.builder, object.input.closest_match)
-					// 	self.was_changed = true
-					// }
 					self.was_confirmed = true
 				}
 			}
@@ -1241,6 +1229,7 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 				}
 				draw_frames(1)
 			}
+			reader = strings.to_reader(&r, strings.to_string(self.builder))
 		}
 
 	}
@@ -1253,7 +1242,11 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	self.text_layout = kn.Selectable_Text {
 		text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
 	}
+
+	// Include text in content size
 	self.content_size = linalg.max(self.content_size, self.text_layout.size, self.last_text_size)
+
+	// If there's no text, just add the font line height to content size
 	if kn.text_is_empty(&self.text_layout) && self.enable_edit {
 		self.content_size.y = max(
 			self.content_size.y,
@@ -1261,16 +1254,18 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		)
 	}
 
+	// TODO: Decide if this is necessary
 	if self.on_add != nil {
 		self.on_add(self)
 	}
 
-	//
+	// TODO: Decide if this is necessary also
 	self.size += self.added_size
 
 	// Root
 	if self.parent == nil {
 		append(&ctx.roots, self)
+		//
 		return
 	}
 
@@ -1464,12 +1459,13 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			set_cursor(.Text)
 		}
 		node_update_selection(self, self.text, &self.text_layout)
-		kn.add_string(
-			fmt.tprintf("%v\n%v", self.editor.selection, self.text_layout.selection.glyphs),
-			12,
-			{self.box.lo.x, self.box.hi.y},
-			paint = kn.WHITE,
-		)
+		// TODO: Delete this!
+		// kn.add_string(
+		// 	fmt.tprintf("%v\n%v", self.editor.selection, self.text_layout.selection.glyphs),
+		// 	12,
+		// 	{self.box.lo.x, self.box.hi.y},
+		// 	paint = kn.WHITE,
+		// )
 	}
 
 	// Is transformation necessary?
