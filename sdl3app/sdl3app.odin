@@ -56,8 +56,12 @@ translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
 		return .Backspace
 	case sdl3.K_DELETE:
 		return .Delete
-	case sdl3.K_F3:
-		return .F3
+	case sdl3.K_F1 ..= sdl3.K_F12:
+		return opal.Keyboard_Key(int(opal.Keyboard_Key.F1) + int(code - sdl3.K_F1))
+	case sdl3.K_A ..= sdl3.K_Z:
+		return opal.Keyboard_Key(int(opal.Keyboard_Key.A) + int(code - sdl3.K_A))
+	case sdl3.K_0 ..= sdl3.K_9:
+		return opal.Keyboard_Key(int(opal.Keyboard_Key.Zero) + int(code - sdl3.K_0))
 	}
 	return .Escape
 }
@@ -137,6 +141,19 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 			return sdl3.SetCursor(app.cursors[.MOVE])
 		}
 		return false
+	}
+	opal.global_ctx.on_set_clipboard = proc(data: rawptr, text: string) -> bool {
+		text_cstring := strings.clone_to_cstring(text)
+		ok := sdl3.SetClipboardText(text_cstring)
+		delete(text_cstring)
+		return ok
+	}
+	opal.global_ctx.on_get_clipboard = proc(data: rawptr) -> (text: string, ok: bool) {
+		raw_text := sdl3.GetClipboardText()
+		if raw_text == nil {
+			return "", false
+		}
+		return strings.string_from_null_terminated_ptr(raw_text, 8192), true
 	}
 
 	// Create system cursors
@@ -230,4 +247,3 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 run :: proc() {
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
 }
-

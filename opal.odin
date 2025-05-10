@@ -121,9 +121,9 @@ Keyboard_Key :: enum i32 {
 }
 
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor, data: rawptr) -> bool
-On_Set_Clipboard_Proc :: #type proc(text: string, data: rawptr)
-On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> string
-On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> (width, height: f32)
+On_Set_Clipboard_Proc :: #type proc(data: rawptr, text: string) -> bool
+On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> (string, bool)
+On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> (width: f32, height: f32)
 
 Mouse_Button :: enum {
 	Left,
@@ -805,15 +805,15 @@ context_deinit :: proc(ctx: ^Context) {
 	delete(ctx.id_stack)
 }
 
-context_set_clipboard :: proc(ctx: ^Context, data: string) {
+context_set_clipboard :: proc(ctx: ^Context, text: string) {
 	if ctx.on_set_clipboard == nil {
 		return
 	}
-	ctx.on_set_clipboard(data, ctx.callback_data)
+	ctx.on_set_clipboard(ctx.callback_data, text)
 }
 
-set_clipboard :: proc(data: string) {
-	context_set_clipboard(global_ctx, data)
+set_clipboard :: proc(text: string) {
+	context_set_clipboard(global_ctx, text)
 }
 
 //
@@ -995,6 +995,14 @@ begin :: proc() {
 //
 end :: proc() {
 	ctx := global_ctx
+
+	// Include built-in UI
+	if key_down(.Left_Control) && key_down(.Left_Shift) && key_pressed(.I) {
+		ctx.inspector.shown = !ctx.inspector.shown
+	}
+	if ctx.inspector.shown {
+		inspector_show(&ctx.inspector)
+	}
 
 	clear(&ctx.runes)
 
@@ -1270,6 +1278,8 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 		if self.editor.builder == nil {
 			self.editor.builder = &self.builder
 			self.editor.undo_text_allocator = context.allocator
+			self.editor.set_clipboard = ctx.on_set_clipboard
+			self.editor.get_clipboard = ctx.on_get_clipboard
 		}
 		if !self.is_focused {
 			strings.builder_reset(self.editor.builder)
@@ -1664,12 +1674,16 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 					),
 				)
 			}
-			draw_text(
-				&self.text_layout,
-				self.text_origin,
-				self.style.foreground_paint,
-				global_ctx.selection_foreground_color,
-			)
+			if self.enable_selection && self.is_focused {
+				draw_text(
+					&self.text_layout,
+					self.text_origin,
+					self.style.foreground_paint,
+					global_ctx.selection_foreground_color,
+				)
+			} else {
+				kn.add_text(self.text_layout, self.text_origin, self.style.foreground_paint)
+			}
 			if self.enable_edit {
 				draw_text_cursor(
 					&self.text_layout,
@@ -1799,18 +1813,18 @@ draw_text :: proc(
 	if ordered_selection.x > ordered_selection.y {
 		ordered_selection = ordered_selection.yx
 	}
-	kn.set_paint(paint)
+	default_paint := kn.paint_index_from_option(paint)
+	selected_paint := kn.paint_index_from_option(selected_color)
 	for &glyph, glyph_index in text.glyphs {
 		if glyph.source.lo == glyph.source.hi {
 			continue
 		}
-		if glyph_index == ordered_selection[0] {
-			kn.set_paint(selected_color)
-		}
-		if glyph_index == ordered_selection[1] {
-			kn.set_paint(paint)
-		}
-		kn.add_glyph(glyph, text.font_scale, origin + glyph.offset)
+		kn.add_glyph(
+			glyph,
+			text.font_scale,
+			origin + glyph.offset,
+			selected_paint if glyph_index >= ordered_selection[0] && glyph_index < ordered_selection[1] else default_paint,
+		)
 	}
 }
 
@@ -1823,6 +1837,7 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 	if ordered_selection[0] > ordered_selection[1] {
 		ordered_selection = ordered_selection.yx
 	}
+	kn.set_paint(color)
 	for &line in text.lines {
 		highlight_range := [2]int {
 			max(ordered_selection[0], line.first_glyph),
@@ -1851,7 +1866,6 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 					0,
 					f32(i32(ordered_selection[1] <= line.last_glyph)),
 				},
-			paint = color,
 		)
 	}
 }
@@ -1957,6 +1971,7 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 }
 
 Inspector :: struct {
+	shown:          bool,
 	position:       [2]f32,
 	move_offset:    [2]f32,
 	is_being_moved: bool,
@@ -1965,27 +1980,40 @@ Inspector :: struct {
 }
 
 INSPECTOR_BACKGROUND :: tw.STONE_900
-INSPECTOR_BACKGROUND_ACCENT :: tw.STONE_800
+INSPECTOR_ACCENT :: tw.STONE_800
 
 inspector_show :: proc(self: ^Inspector) {
-	begin_node({
-		position = self.position,
-		size = {300, 500},
-		vertical = true,
-		padding = 1,
-		stroke_width = 1,
-		stroke = tw.CYAN_800,
-		z = 1,
-		no_inspect = true,
+	begin_node(
+		{
+			position = self.position,
+			size = {300, 500},
+			vertical = true,
+			padding = 1,
+			stroke_width = 1,
+			stroke = tw.CYAN_800,
+			z = 1,
+			no_inspect = true,
+			bg = INSPECTOR_BACKGROUND,
+		},
+	)
+	do_node({
+		text = fmt.tprintf("Inspector\n(%.0f FPS)\n%v", kn.get_fps(), global_ctx.compute_duration),
+		font_size = 12,
+		fit = 1,
+		padding = 3,
+		bg = tw.NEUTRAL_950,
+		fg = tw.CYAN_50,
+		grow = {true, false},
+		max_size = INFINITY,
+		content_align = 0.5,
 		data = self,
-		bg = INSPECTOR_BACKGROUND,
 		on_animate = proc(self: ^Node) {
 			inspector := (^Inspector)(self.data)
-			if (self.is_hovered || self.has_hovered_child) && mouse_pressed(.Middle) {
+			if (self.is_hovered || self.has_hovered_child) && mouse_pressed(.Left) {
 				inspector.is_being_moved = true
 				inspector.move_offset = global_ctx.mouse_position - self.box.lo
 			}
-			if mouse_released(.Middle) {
+			if mouse_released(.Left) {
 				inspector.is_being_moved = false
 			}
 			if inspector.is_being_moved {
@@ -1994,22 +2022,6 @@ inspector_show :: proc(self: ^Inspector) {
 			}
 		},
 	})
-	do_node(
-		{
-			text = fmt.tprintf(
-				"Inspector\n(%.0f FPS)\n%v",
-				kn.get_fps(),
-				global_ctx.compute_duration,
-			),
-			font_size = 12,
-			fit = 1,
-			padding = 3,
-			fg = tw.CYAN_50,
-			grow = {true, false},
-			max_size = INFINITY,
-			content_align = 0.5,
-		},
-	)
 	inspector_reset(&global_ctx.inspector)
 	inspector_build_tree(&global_ctx.inspector)
 	if self.selected_id != 0 {
@@ -2024,9 +2036,8 @@ inspector_show :: proc(self: ^Inspector) {
 					clip = true,
 					show_scrollbars = true,
 					bg = tw.NEUTRAL_950,
-					stroke = tw.NEUTRAL_500,
-					stroke_width = 1,
 					fg = tw.GRAY_50,
+					selectable = true,
 				},
 			)
 		}
@@ -2124,4 +2135,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

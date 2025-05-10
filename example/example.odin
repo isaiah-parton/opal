@@ -555,11 +555,9 @@ main :: proc() {
 				end_node()
 			}
 			end_node()
-			inspector_show(&global_ctx.inspector)
 			end()
 		},
 	})
 
 	sdl3app.run()
 }
-
