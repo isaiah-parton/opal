@@ -235,6 +235,7 @@ Node :: struct {
 
 	// All nodes invoked between `begin_node` and `end_node`
 	kids:               [dynamic]^Node,
+	growable_kids:      [dynamic]^Node,
 
 	// A simple kill switch that causes the node to be discarded
 	is_dead:            bool,
@@ -293,9 +294,6 @@ Node :: struct {
 
 	// This is computed as the minimum space required to fit all children or the node's text content
 	content_size:       [2]f32,
-
-	// TODO: Remove this
-	growable_kid_count: int,
 
 	// Spacing added between children
 	spacing:            f32,
@@ -1239,6 +1237,7 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 
 	reserve(&self.kids, 16)
 	clear(&self.kids)
+	clear(&self.growable_kids)
 
 	self.style.scale = 1
 
@@ -1378,7 +1377,7 @@ node_on_new_frame :: proc(self: ^Node, config: Node_Config) {
 	append(&self.parent.kids, self)
 
 	if self.grow[int(self.parent.vertical)] {
-		self.parent.growable_kid_count += 1
+		append(&self.parent.growable_kids, self)
 	}
 }
 
@@ -1422,27 +1421,14 @@ node_solve_sizes :: proc(self: ^Node) {
 	// Compute available space
 	remaining_space := self.size[i] - self.content_size[i]
 	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
-	// Temporary array of growable children
-	growables := make(
-		[dynamic]^Node,
-		0,
-		self.growable_kid_count,
-		allocator = context.temp_allocator,
-	)
-	// Populate the array
-	for &node in self.kids {
-		if !node.is_absolute && node.grow[i] {
-			append(&growables, node)
-		}
-	}
 	// As long as there is space remaining and children to grow
-	for remaining_space > 0 && len(growables) > 0 {
+	for remaining_space > 0 && len(self.growable_kids) > 0 {
 		// Get the smallest size along the layout axis, nodes of this size will be grown first
-		smallest := growables[0].size[i]
+		smallest := self.growable_kids[0].size[i]
 		// Until they reach this size
 		second_smallest := f32(math.F32_MAX)
 		size_to_add := remaining_space
-		for node in growables {
+		for node in self.growable_kids {
 			if node.size[i] < smallest {
 				second_smallest = smallest
 				smallest = node.size[i]
@@ -1452,13 +1438,16 @@ node_solve_sizes :: proc(self: ^Node) {
 			}
 		}
 		// Compute the smallest size to add
-		size_to_add = min(second_smallest - smallest, remaining_space / f32(len(growables)))
+		size_to_add = min(
+			second_smallest - smallest,
+			remaining_space / f32(len(self.growable_kids)),
+		)
 		// Add that amount to every eligable child
-		for node, node_index in growables {
+		for node, node_index in self.growable_kids {
 			if node.size[i] == smallest {
 				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
 				if size_to_add <= 0 {
-					unordered_remove(&growables, node_index)
+					unordered_remove(&self.growable_kids, node_index)
 					continue
 				}
 				node.size[i] += size_to_add
@@ -2094,14 +2083,10 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			node_update_transition(self, 0, self.is_toggled, 0.1)
 		},
 	})
-	do_node(
-		{
-			text = "-" if button_node.is_toggled else "+",
-			font_size = 14,
-			fit = 1,
-			fg = nil if (len(node.kids) == 0) else tw.EMERALD_50,
-		},
-	)
+	do_node({size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
+			assert(self.parent != nil)
+			kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
+		}})
 	do_node(
 		{
 			text = fmt.tprintf("%x", node.id),
