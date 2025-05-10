@@ -149,28 +149,26 @@ example_renderer_init :: proc(self: ^Example_Renderer, device: wgpu.Device) {
 
 do_window_button :: proc(icon: rune, color: kn.Color, loc := #caller_location) -> bool {
 	using opal
-	node := do_node({
+	node := do_node(
+		&{
 			padding = 3,
 			fit = 1,
 			text = string_from_rune(icon),
 			font_size = 20,
-			fg = tw.NEUTRAL_300,
+			foreground = tw.NEUTRAL_300,
 			font = &lucide.font,
 			max_size = INFINITY,
-			widget = true,
+			is_widget = true,
 			on_animate = proc(self: ^Node) {
-				self.style.background_paint = kn.fade(tw.ROSE_500, self.transitions[0])
-				self.style.foreground_paint = kn.mix(
-					self.transitions[0],
-					tw.ROSE_50,
-					tw.NEUTRAL_900,
-				)
-				self.transitions[1] +=
-					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
-				self.transitions[0] +=
-					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
+				using opal
+				node_update_transition(self, 0, self.is_hovered, 0.1)
+				node_update_transition(self, 1, self.is_active, 0.1)
+				self.style.background = kn.fade(tw.ROSE_500, self.transitions[0])
+				self.style.foreground = kn.mix(self.transitions[0], tw.ROSE_50, tw.NEUTRAL_900)
 			},
-		}, loc = loc)
+		},
+		loc = loc,
+	)
 	assert(node != nil)
 	return node.was_active && !node.is_active && node.is_hovered
 }
@@ -180,27 +178,29 @@ do_button :: proc(label: union #no_nil {
 		rune,
 	}, font: ^kn.Font = nil, font_size: f32 = 12, radius: [4]f32 = 3, loc := #caller_location) -> bool {
 	using opal
-	node := do_node({
+	node := do_node(
+		&{
 			padding = 3,
 			radius = radius,
 			fit = 1,
 			text = label.(string) or_else string_from_rune(label.(rune)),
 			font_size = font_size,
-			fg = tw.NEUTRAL_300,
+			foreground = tw.NEUTRAL_300,
 			font = font,
 			max_size = INFINITY,
-			widget = true,
+			is_widget = true,
 			on_animate = proc(self: ^Node) {
-				self.style.background_paint = kn.fade(
+				using opal
+				node_update_transition(self, 0, self.is_hovered, 0.1)
+				node_update_transition(self, 1, self.is_active, 0.1)
+				self.style.background = kn.fade(
 					tw.NEUTRAL_600,
 					0.3 + f32(i32(self.is_hovered)) * 0.3,
 				)
-				self.transitions[1] +=
-					(f32(i32(self.is_active)) - self.transitions[1]) * rate_per_second(7)
-				self.transitions[0] +=
-					(f32(i32(self.is_hovered)) - self.transitions[0]) * rate_per_second(14)
 			},
-		}, loc = loc)
+		},
+		loc = loc,
+	)
 	assert(node != nil)
 	return node.was_active && !node.is_active && node.is_hovered
 }
@@ -209,38 +209,36 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	using opal
 	push_id(hash(loc))
 
-	begin_node({
-		padding = {3, 3, 12, 3},
-		radius = 3,
-		fit = 1,
-		spacing = 6,
-		max_size = INFINITY,
-		grow = {true, false},
-		content_align = {0, 0.5},
-		widget = true,
-		on_animate = proc(self: ^Node) {
-			self.style.background_paint = kn.fade(
-				tw.NEUTRAL_600,
-				self.transitions[0] * 0.3 + self.transitions[1] * 0.3,
-			)
-			self.transitions[1] +=
-				(f32(i32(self.is_active || self.has_active_child)) - self.transitions[1]) *
-				rate_per_second(14)
-			self.transitions[0] +=
-				(f32(i32(self.is_hovered || self.has_hovered_child)) - self.transitions[0]) *
-				rate_per_second(14)
-		},
-	})
-	do_node(
-		{
-			text = string_from_rune(icon),
-			font = &lucide.font,
-			font_size = 14,
+	begin_node(
+		&{
+			padding = {3, 3, 12, 3},
 			fit = 1,
-			fg = tw.NEUTRAL_300,
+			spacing = 6,
+			max_size = INFINITY,
+			grow = {true, false},
+			content_align = {0, 0.5},
+			is_widget = true,
+			inherit_state = true,
+			style = {radius = 3},
+			on_animate = proc(self: ^Node) {
+				using opal
+				node_update_transition(self, 0, self.is_hovered, 0.1)
+				node_update_transition(self, 1, self.is_active, 0.1)
+				self.style.background = kn.fade(
+					tw.NEUTRAL_600,
+					self.transitions[0] * 0.3 + self.transitions[1] * 0.3,
+				)
+			},
 		},
 	)
-	do_node({text = label, font_size = 12, fit = 1, fg = tw.NEUTRAL_300})
+	do_node(
+		&{
+			text = string_from_rune(icon),
+			fit = 1,
+			style = {foreground = tw.NEUTRAL_300, font_size = 14, font = &lucide.font},
+		},
+	)
+	do_node(&{text = label, fit = 1, style = {font_size = 12, foreground = tw.NEUTRAL_300}})
 	end_node()
 	pop_id()
 }
@@ -249,26 +247,28 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	using opal
 	push_id(hash(loc))
-	node := begin_node({
-		padding = 3,
-		radius = 3,
-		fit = 1,
-		text = label,
-		font_size = 12,
-		fg = tw.NEUTRAL_300,
-		widget = true,
-		on_animate = proc(self: ^Node) {
-			self.style.background_paint = kn.fade(
-				tw.NEUTRAL_600,
-				(self.transitions[0] + self.transitions[1]) * 0.3,
-			)
-			node_update_transition(self, 1, self.is_active, 0)
-			node_update_transition(self, 0, self.is_hovered, 0)
-			if self.is_hovered && self.parent != nil && self.parent.has_focused_child {
-				focus_node(self.id)
-			}
+	node := do_node(
+		&{
+			padding = 3,
+			radius = 3,
+			fit = 1,
+			text = label,
+			font_size = 12,
+			foreground = tw.NEUTRAL_300,
+			is_widget = true,
+			on_animate = proc(self: ^Node) {
+				self.style.background = kn.fade(
+					tw.NEUTRAL_600,
+					(self.transitions[0] + self.transitions[1]) * 0.3,
+				)
+				node_update_transition(self, 1, self.is_active, 0)
+				node_update_transition(self, 0, self.is_hovered, 0)
+				if self.is_hovered && self.parent != nil && self.parent.has_focused_child {
+					focus_node(self.id)
+				}
+			},
 		},
-	})
+	)
 
 	assert(node != nil)
 
@@ -276,19 +276,25 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 
 	if is_open {
 		begin_node(
-			{
+			&{
+				is_root = true,
+				node_relative_placement = Node_Relative_Placement {
+					node = node,
+					relative_offset = {0, 1},
+					exact_offset = {0, 10},
+				},
 				shadow_size = 5,
 				shadow_color = {0, 0, 0, 128},
 				bounds = Box{0, kn.get_size()},
-				z = 999,
-				absolute = true,
-				relative_pos = {0, 1},
-				position = {0, 4},
+				z_index = 999,
+				// is_absolute = true,
+				// relative_position = {0, 1},
+				// position = {0, 4},
 				fit = 1,
 				padding = 3,
 				spacing = 3,
 				radius = 3,
-				bg = tw.NEUTRAL_900,
+				background = tw.NEUTRAL_900,
 				vertical = true,
 			},
 		)
@@ -305,7 +311,6 @@ __do_menu :: proc(is_open: bool) {
 	if is_open {
 		end_node()
 	}
-	end_node()
 }
 
 
@@ -353,28 +358,30 @@ main :: proc() {
 			using opal
 			begin()
 			begin_node(
-				{
+				&{
 					size = kn.get_size(),
-					bg = tw.NEUTRAL_950,
+					style = {
+						background = tw.NEUTRAL_950,
+						stroke = tw.NEUTRAL_600,
+						stroke_width = 1,
+					},
 					vertical = true,
 					padding = 1,
-					stroke_width = 1,
-					stroke = tw.NEUTRAL_600,
 				},
 			)
 			{
-				begin_node(
-					{
+				title_node := begin_node(
+					&{
 						size = {0, 20},
 						max_size = INFINITY,
 						fit = {0, 1},
 						grow = {true, false},
 						content_align = {0, 0.5},
-						bg = tw.NEUTRAL_900,
+						style = {background = tw.NEUTRAL_900},
 					},
 				)
 				{
-					begin_node({fit = 1, padding = 3, spacing = 3})
+					begin_node(&{fit = 1, padding = 3, spacing = 3})
 					{
 						if do_menu("File") {
 							do_menu_item("New", lucide.PLUS)
@@ -400,7 +407,7 @@ main :: proc() {
 						}
 					}
 					end_node()
-					do_node({grow = true, max_size = INFINITY})
+					do_node(&{grow = true, max_size = INFINITY})
 					if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
 						sdl3.MinimizeWindow(app.window)
 					}
@@ -416,22 +423,26 @@ main :: proc() {
 					}
 				}
 				end_node()
+				app.enable_window_grab =
+					(title_node.is_hovered || title_node.has_hovered_child) &&
+					!global_ctx.widget_hovered
+				app.window_grab_box = title_node.box
 
 				do_node(
-					{
+					&{
 						size = {0, 1},
 						grow = {true, false},
 						max_size = INFINITY,
-						bg = tw.NEUTRAL_600,
+						background = tw.NEUTRAL_600,
 					},
 				)
 
-				begin_node({max_size = INFINITY, grow = true})
+				begin_node(&{max_size = INFINITY, grow = true})
 				{
-					begin_node({max_size = INFINITY, grow = true, vertical = true})
+					begin_node(&{max_size = INFINITY, grow = true, vertical = true})
 					{
 						begin_node(
-							{
+							&{
 								max_size = INFINITY,
 								grow = {false, true},
 								fit = {1, 0},
@@ -442,9 +453,9 @@ main :: proc() {
 						)
 						{
 							do_button(lucide.FOLDER_PLUS, font = &lucide.font, font_size = 20)
-							do_node({size = {0, 4}})
+							do_node(&{size = {0, 4}})
 							do_button(lucide.WAND_SPARKLES, font = &lucide.font, font_size = 20)
-							do_node({size = {0, 4}})
+							do_node(&{size = {0, 4}})
 							do_button(
 								lucide.MOVE_3D,
 								font = &lucide.font,
@@ -469,82 +480,82 @@ main :: proc() {
 					end_node()
 
 					do_node(
-						{
+						&{
 							size = {1, 0},
 							grow = {false, true},
 							max_size = INFINITY,
-							bg = tw.NEUTRAL_600,
+							style = {background = tw.NEUTRAL_600},
 						},
 					)
 
 					begin_node(
-						{
+						&{
 							size = {200, 0},
 							grow = {false, true},
 							max_size = INFINITY,
 							vertical = true,
-							spacing = 2,
+							spacing = 4,
 							padding = 10,
-							bg = Radial_Gradient {
+							content_align = 0.5,
+							background = Radial_Gradient {
 								center = {1, 0.5},
 								radius = 0.5,
 								inner = tw.NEUTRAL_800,
 								outer = tw.NEUTRAL_900,
 							},
-							content_align = 0.5,
 						},
 					)
 					{
 						do_node(
-							{
+							&{
 								size = 100,
-								bg = Image_Paint{index = app.image, size = 1},
-								radius = 50,
+								style = {
+									radius = 50,
+									background = Image_Paint{index = app.image, size = 1},
+								},
 							},
 						)
 						do_node(
-							{
+							&{
 								text = FILLER_TEXT,
 								fit = {0, 1},
 								grow = {true, false},
 								max_size = INFINITY,
-								font_size = 12,
-								fg = tw.NEUTRAL_200,
-								wrap = true,
-								selectable = true,
+								enable_wrapping = true,
+								enable_selection = true,
 								padding = {0, 10, 0, 10},
+								style = {font_size = 12, foreground = tw.NEUTRAL_200},
 							},
 						)
 						do_button("Botón A")
 						do_button("Botón B")
-						node := do_node({
-							bg = tw.NEUTRAL_950,
-							stroke = tw.NEUTRAL_500,
-							stroke_width = 1,
-							clip = true,
-							text = app.edited_text,
-							font_size = 12,
-							padding = 4,
-							radius = 3,
-							fg = tw.NEUTRAL_50,
-							fit = {0, 1},
-							max_size = INFINITY,
-							grow = {true, false},
-							editable = true,
-							selectable = true,
-							widget = true,
-							stroke_type = .Outer_Stroke,
-							on_animate = proc(self: ^Node) {
-								self.style.stroke_paint = tw.LIME_500
-								self.style.stroke_width = 3 * self.transitions[1]
-								self.transitions[1] +=
-									(f32(i32(self.is_focused)) - self.transitions[1]) *
-									rate_per_second(14)
-								self.transitions[0] +=
-									(f32(i32(self.is_hovered)) - self.transitions[0]) *
-									rate_per_second(14)
+						node := do_node(
+							&{
+								background = tw.NEUTRAL_950,
+								stroke = tw.NEUTRAL_500,
+								stroke_width = 1,
+								clip_content = true,
+								text = app.edited_text,
+								font_size = 12,
+								padding = 4,
+								radius = 3,
+								foreground = tw.NEUTRAL_50,
+								fit = {0, 1},
+								max_size = INFINITY,
+								grow = {true, false},
+								enable_edit = true,
+								enable_selection = true,
+								is_widget = true,
+								stroke_type = .Outer,
+								on_animate = proc(self: ^Node) {
+									using opal
+									node_update_transition(self, 0, self.is_hovered, 0.1)
+									node_update_transition(self, 1, self.is_focused, 0.1)
+									self.style.stroke = tw.LIME_500
+									self.style.stroke_width = 3 * self.transitions[1]
+								},
 							},
-						})
+						)
 						if node.was_changed {
 							delete(app.edited_text)
 							app.edited_text = strings.clone(strings.to_string(node.builder))
@@ -561,3 +572,4 @@ main :: proc() {
 
 	sdl3app.run()
 }
+

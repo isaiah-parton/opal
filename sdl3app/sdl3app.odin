@@ -29,13 +29,15 @@ state: rawptr
 App_Callback :: #type proc(app: ^App)
 
 App :: struct {
-	run:      bool,
-	cursors:  [sdl3.SystemCursor]^sdl3.Cursor,
-	window:   ^sdl3.Window,
-	platform: kn.Platform,
-	on_start: App_Callback,
-	on_frame: App_Callback,
-	on_stop:  App_Callback,
+	run:                bool,
+	cursors:            [sdl3.SystemCursor]^sdl3.Cursor,
+	window:             ^sdl3.Window,
+	platform:           kn.Platform,
+	window_grab_box:    opal.Box,
+	enable_window_grab: bool,
+	on_start:           App_Callback,
+	on_frame:           App_Callback,
+	on_stop:            App_Callback,
 }
 
 translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
@@ -72,10 +74,19 @@ hit_test_callback :: proc "c" (
 	data: rawptr,
 ) -> sdl3.HitTestResult {
 	context = runtime.default_context()
+	app := (^App)(data)
+
 	width, height: i32
 	sdl3.GetWindowSize(window, &width, &height)
-	titlebar := sdl3.Rect{0, 0, width, 30}
+	titlebar := sdl3.Rect {
+		i32(app.window_grab_box.lo.x),
+		i32(app.window_grab_box.lo.y),
+		i32(app.window_grab_box.hi.x - app.window_grab_box.lo.x),
+		i32(app.window_grab_box.hi.y - app.window_grab_box.lo.y),
+	}
+
 	opal.handle_mouse_motion(f32(point.x), f32(point.y))
+
 	CORNER_SIZE :: 8
 	if sdl3.PointInRect(point^, {0, 0, CORNER_SIZE, CORNER_SIZE}) {
 		return .RESIZE_TOPLEFT
@@ -105,7 +116,7 @@ hit_test_callback :: proc "c" (
 	if sdl3.PointInRect(point^, {0, height - SIZE, width, SIZE}) {
 		return .RESIZE_BOTTOM
 	}
-	if !opal.global_ctx.widget_hovered && sdl3.PointInRect(point^, titlebar) {
+	if app.enable_window_grab && sdl3.PointInRect(point^, titlebar) {
 		return .DRAGGABLE
 	}
 	return .NORMAL
@@ -118,7 +129,7 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	app := (^App)(appstate^)
 
 	app.window = sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE, .BORDERLESS, .TRANSPARENT})
-	sdl3.SetWindowHitTest(app.window, hit_test_callback, nil)
+	sdl3.SetWindowHitTest(app.window, hit_test_callback, app)
 	sdl3.SetWindowMinimumSize(app.window, 500, 400)
 	if !sdl3.StartTextInput(app.window) {
 		panic("Can't accept text input!")
@@ -247,3 +258,4 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 run :: proc() {
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
 }
+
