@@ -1,14 +1,14 @@
 [
-	{
-		"label": "Run",
-		"command": "odin",
-		"args": ["run", ".", "-debug"],
-		"cwd": "$ZED_WORKTREE_ROOT/example"
-	},
-	{
-		"label": "Run (Optimized)",
-		"command": "odin",
-		"args": ["run", ".", "-o:speed"],
-		"cwd": "$ZED_WORKTREE_ROOT/example"
-	}
+  {
+    "label": "Run",
+    "command": "odin",
+    "args": ["run", ".", "-debug"],
+    "cwd": "$ZED_WORKTREE_ROOT/example"
+  },
+  {
+    "label": "Run (Blazingly Fast)",
+    "command": "odin",
+    "args": ["run", ".", "-o:speed", "-no-bounds-check"],
+    "cwd": "$ZED_WORKTREE_ROOT/example"
+  }
 ]

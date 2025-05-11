@@ -272,7 +272,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 
 	assert(node != nil)
 
-	is_open := node.is_focused || node.has_focused_child
+	is_open := node.is_focused | node.has_focused_child
 
 	if is_open {
 		begin_node(
@@ -287,15 +287,13 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				shadow_color = {0, 0, 0, 128},
 				bounds = Box{0, kn.get_size()},
 				z_index = 999,
-				// is_absolute = true,
-				// relative_position = {0, 1},
-				// position = {0, 4},
 				fit = 1,
 				padding = 3,
 				spacing = 3,
 				radius = 3,
 				background = tw.NEUTRAL_900,
 				vertical = true,
+				owner = node,
 			},
 		)
 	}
@@ -372,9 +370,9 @@ main :: proc() {
 			{
 				title_node := begin_node(
 					&{
+						fit = {0, 1},
 						size = {0, 20},
 						max_size = INFINITY,
-						fit = {0, 1},
 						grow = {true, false},
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_900},
@@ -572,4 +570,3 @@ main :: proc() {
 
 	sdl3app.run()
 }
-
