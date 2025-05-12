@@ -1588,7 +1588,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				self.style.shadow_color,
 			)
 		}
-		{
+		if self.style.background != {} {
 			switch v in self.style.background {
 			case kn.Color:
 				kn.set_paint(v)
@@ -1950,9 +1950,10 @@ inspector_show :: proc(self: ^Inspector) {
 	do_node(
 		&{
 			text = fmt.tprintf(
-				"Inspector\nFPS: %.0f\nFrame time: %v",
+				"Inspector\nFPS: %.0f\nFrame time: %v\nCompute time: %v",
 				kn.get_fps(),
 				global_ctx.frame_duration,
+				global_ctx.compute_duration,
 			),
 			fit = 1,
 			padding = 3,
@@ -2092,3 +2093,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+

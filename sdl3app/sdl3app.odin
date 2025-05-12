@@ -40,6 +40,16 @@ App :: struct {
 	on_stop:            App_Callback,
 }
 
+App_Descriptor :: struct {
+	width:      i32,
+	height:     i32,
+	min_width:  i32,
+	min_height: i32,
+}
+
+@(private)
+global_descriptor: ^App_Descriptor
+
 translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
 	switch code {
 	case sdl3.K_LEFT:
@@ -128,9 +138,27 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	appstate^ = state
 	app := (^App)(appstate^)
 
-	app.window = sdl3.CreateWindow("OPAL", 800, 600, {.RESIZABLE, .BORDERLESS, .TRANSPARENT})
+	descriptor: App_Descriptor
+	if global_descriptor != nil {
+		descriptor = global_descriptor^
+	} else {
+		descriptor = {
+			width      = 800,
+			height     = 600,
+			min_width  = 500,
+			min_height = 500,
+		}
+	}
+
+	app.window = sdl3.CreateWindow(
+		"OPAL",
+		descriptor.width,
+		descriptor.height,
+		{.RESIZABLE, .BORDERLESS, .TRANSPARENT},
+	)
 	sdl3.SetWindowHitTest(app.window, hit_test_callback, app)
-	sdl3.SetWindowMinimumSize(app.window, 500, 400)
+	sdl3.SetWindowMinimumSize(app.window, descriptor.min_width, descriptor.min_height)
+
 	if !sdl3.StartTextInput(app.window) {
 		panic("Can't accept text input!")
 	}
@@ -164,7 +192,7 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 		if raw_text == nil {
 			return "", false
 		}
-		return strings.string_from_null_terminated_ptr(raw_text, 8192), true
+		return string(cstring(raw_text)), true
 	}
 
 	// Create system cursors
@@ -255,7 +283,8 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	sdl3.Quit()
 }
 
-run :: proc() {
+run :: proc(descriptor: ^App_Descriptor = nil) {
+	global_descriptor = descriptor
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
 }
 

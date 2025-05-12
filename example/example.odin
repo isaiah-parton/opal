@@ -568,5 +568,6 @@ main :: proc() {
 		},
 	})
 
-	sdl3app.run()
+	sdl3app.run(&{width = 1000, height = 800})
 }
+
