@@ -10,20 +10,6 @@ import "core:strings"
 import "core:time"
 import "vendor:sdl3"
 
-detect_tiling_window_manager :: proc() -> bool {
-	if ODIN_OS == .Linux {
-		if value, ok := os.lookup_env("XDG_CURRENT_DESKTOP"); ok {
-			if strings.contains(value, "i3") ||
-			   strings.contains(value, "bspwm") ||
-			   strings.contains(value, "sway") {
-				return true
-			}
-			delete(value)
-		}
-	}
-	return false
-}
-
 state: rawptr
 
 App_Callback :: #type proc(app: ^App)
@@ -166,35 +152,44 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 
 	platform := sdl3glue.make_platform_sdl3glue(app.window, descriptor.vsync)
 	kn.start_on_platform(platform)
-	opal.init()
-	opal.global_ctx.callback_data = app
-	opal.global_ctx.on_set_cursor = proc(cursor: opal.Cursor, data: rawptr) -> bool {
-		app := (^App)(data)
-		switch cursor {
-		case .Normal:
-			return sdl3.SetCursor(app.cursors[.DEFAULT])
-		case .Pointer:
-			return sdl3.SetCursor(app.cursors[.POINTER])
-		case .Text:
-			return sdl3.SetCursor(app.cursors[.TEXT])
-		case .Dragging:
-			return sdl3.SetCursor(app.cursors[.MOVE])
-		}
-		return false
-	}
-	opal.global_ctx.on_set_clipboard = proc(data: rawptr, text: string) -> bool {
-		text_cstring := strings.clone_to_cstring(text)
-		ok := sdl3.SetClipboardText(text_cstring)
-		delete(text_cstring)
-		return ok
-	}
-	opal.global_ctx.on_get_clipboard = proc(data: rawptr) -> (text: string, ok: bool) {
-		raw_text := sdl3.GetClipboardText()
-		if raw_text == nil {
-			return "", false
-		}
-		return string(cstring(raw_text)), true
-	}
+
+	opal.init({
+		callback_data = app,
+		on_set_cursor = proc(cursor: opal.Cursor, data: rawptr) -> bool {
+			app := (^App)(data)
+			switch cursor {
+			case .Normal:
+				return sdl3.SetCursor(app.cursors[.DEFAULT])
+			case .Pointer:
+				return sdl3.SetCursor(app.cursors[.POINTER])
+			case .Text:
+				return sdl3.SetCursor(app.cursors[.TEXT])
+			case .Dragging:
+				return sdl3.SetCursor(app.cursors[.MOVE])
+			}
+			return false
+		},
+		on_set_clipboard = proc(_: rawptr, text: string) -> bool {
+			text_cstring := strings.clone_to_cstring(text)
+			ok := sdl3.SetClipboardText(text_cstring)
+			delete(text_cstring)
+			return ok
+		},
+		on_get_clipboard = proc(_: rawptr) -> (text: string, ok: bool) {
+			raw_text := sdl3.GetClipboardText()
+			if raw_text == nil {
+				return "", false
+			}
+			return string(cstring(raw_text)), true
+		},
+		on_get_screen_size = proc(data: rawptr) -> [2]f32 {
+			app := (^App)(data)
+			width, height: i32
+			sdl3.GetWindowSize(app.window, &width, &height)
+			return {f32(width), f32(height)}
+		},
+	})
+
 
 	// Create system cursors
 	for cursor in sdl3.SystemCursor {
@@ -262,11 +257,13 @@ app_event :: proc "c" (appstate: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 	case .MOUSE_WHEEL:
 		handle_mouse_scroll(event.wheel.x, event.wheel.y)
 	case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
-		handle_window_size_change(event.window.data1, event.window.data2)
+		handle_window_resize(event.window.data1, event.window.data2)
 	case .WINDOW_RESTORED:
 		draw_frames(2)
 	case .TEXT_INPUT:
 		handle_text_input(event.text.text)
+	case .WINDOW_MOVED:
+		handle_window_move()
 	}
 	return .CONTINUE
 }
@@ -287,5 +284,19 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 run :: proc(descriptor: ^App_Descriptor = nil) {
 	global_descriptor = descriptor
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
+}
+
+detect_tiling_window_manager :: proc() -> bool {
+	if ODIN_OS == .Linux {
+		if value, ok := os.lookup_env("XDG_CURRENT_DESKTOP"); ok {
+			if strings.contains(value, "i3") ||
+			   strings.contains(value, "bspwm") ||
+			   strings.contains(value, "sway") {
+				return true
+			}
+			delete(value)
+		}
+	}
+	return false
 }
 

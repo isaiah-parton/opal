@@ -2,21 +2,21 @@ package tedit
 
 // Based on "code:text/edit"
 
-import "core:fmt"
 import "base:runtime"
-import "core:time"
+import "core:fmt"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 MAX_UNDO :: 10
 
-Command_Set :: distinct bit_set[Command; u32]
+Command_Set :: distinct bit_set[Command;u32]
 
 Command :: enum u32 {
 	None,
 	Undo,
 	Redo,
-	New_Line,    // multi-lines
+	New_Line, // multi-lines
 	Cut,
 	Copy,
 	Paste,
@@ -27,8 +27,8 @@ Command :: enum u32 {
 	Delete_Word_Right,
 	Left,
 	Right,
-	Up,          // multi-lines
-	Down,        // multi-lines
+	Up, // multi-lines
+	Down, // multi-lines
 	Word_Left,
 	Word_Right,
 	Start,
@@ -37,7 +37,7 @@ Command :: enum u32 {
 	Line_End,
 	Select_Left,
 	Select_Right,
-	Select_Up,   // multi-lines
+	Select_Up, // multi-lines
 	Select_Down, // multi-lines
 	Select_Word_Left,
 	Select_Word_Right,
@@ -48,34 +48,38 @@ Command :: enum u32 {
 }
 
 MULTILINE_COMMANDS :: Command_Set{.New_Line, .Up, .Down, .Select_Up, .Select_Down}
-EDIT_COMMANDS :: Command_Set{.New_Line, .Delete, .Delete_Word_Left, .Delete_Word_Right, .Backspace, .Cut, .Paste, .Undo, .Redo}
+EDIT_COMMANDS :: Command_Set {
+	.New_Line,
+	.Delete,
+	.Delete_Word_Left,
+	.Delete_Word_Right,
+	.Backspace,
+	.Cut,
+	.Paste,
+	.Undo,
+	.Redo,
+}
 
 Editor :: struct {
-	selection: [2]int,
-	anchor: int,
-
-	line_start,
-	line_end: int,
-
-	builder: ^strings.Builder,
-
-	up_index,
-	down_index: int,
-
-	action: Undo_Action,
-	undo: [dynamic]Undo_Action,
-	redo: [dynamic]Undo_Action,
-	undo_text_allocator: runtime.Allocator,
+	selection:            [2]int,
+	anchor:               int,
+	line_start, line_end: int,
+	builder:              ^strings.Builder,
+	up_index, down_index: int,
+	action:               Undo_Action,
+	undo:                 [dynamic]Undo_Action,
+	redo:                 [dynamic]Undo_Action,
+	undo_text_allocator:  runtime.Allocator,
 
 	// Set these if you want cut/copy/paste functionality
-	set_clipboard: proc(user_data: rawptr, text: string) -> (ok: bool),
-	get_clipboard: proc(user_data: rawptr) -> (text: string, ok: bool),
-	clipboard_user_data: rawptr,
+	set_clipboard:        proc(user_data: rawptr, text: string) -> (ok: bool),
+	get_clipboard:        proc(user_data: rawptr) -> (text: string, ok: bool),
+	clipboard_user_data:  rawptr,
 }
 
 Undo_Action :: struct {
 	selection: [2]int,
-	text: string,
+	text:      string,
 }
 
 Translation :: enum u32 {
@@ -127,10 +131,13 @@ set_text :: proc(e: ^Editor, text: string) {
 editor_undo :: proc(e: ^Editor, undo, redo: ^[dynamic]Undo_Action) {
 	if len(undo) > 0 {
 		item := pop(undo)
-		append(redo, Undo_Action{
-			selection = e.selection,
-			text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
-		})
+		append(
+			redo,
+			Undo_Action {
+				selection = e.selection,
+				text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
+			},
+		)
 		e.selection = item.selection
 		clear(&e.builder.buf)
 		append(&e.builder.buf, item.text)
@@ -161,10 +168,13 @@ input_runes :: proc(e: ^Editor, text: []rune) {
 		return
 	}
 	undo_clear(e, &e.redo)
-	append(&e.undo, Undo_Action{
-		selection = e.selection,
-		text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
-	})
+	append(
+		&e.undo,
+		Undo_Action {
+			selection = e.selection,
+			text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
+		},
+	)
 	if len(e.undo) > MAX_UNDO {
 		pop_front(&e.undo)
 	}
@@ -242,10 +252,10 @@ translate_position :: proc(e: ^Editor, pos: int, t: Translation) -> int {
 	case .Down:
 		pos = e.down_index
 	case .Word_Left:
-		for pos > 0 && is_space(buf[pos-1]) {
+		for pos > 0 && is_space(buf[pos - 1]) {
 			pos -= 1
 		}
-		for pos > 0 && !is_space(buf[pos-1]) {
+		for pos > 0 && !is_space(buf[pos - 1]) {
 			pos -= 1
 		}
 	case .Word_Right:
@@ -256,7 +266,7 @@ translate_position :: proc(e: ^Editor, pos: int, t: Translation) -> int {
 			pos += 1
 		}
 	case .Word_Start:
-		for pos > 0 && !is_space(buf[pos-1]) {
+		for pos > 0 && !is_space(buf[pos - 1]) {
 			pos -= 1
 		}
 	case .Word_End:
@@ -341,46 +351,81 @@ editor_execute :: proc(e: ^Editor, cmd: Command) {
 	assert(e.builder != nil)
 	if int(cmd) > 2 {
 		undo_clear(e, &e.redo)
-		append(&e.undo, Undo_Action{
-			selection = e.selection,
-			text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
-		})
+		append(
+			&e.undo,
+			Undo_Action {
+				selection = e.selection,
+				text = strings.clone_from_bytes(e.builder.buf[:], e.undo_text_allocator),
+			},
+		)
 		if len(e.undo) > MAX_UNDO {
 			pop_front(&e.undo)
 		}
 	}
 	switch cmd {
-	case .None:              /**/
-	case .Undo:              editor_undo(e, &e.undo, &e.redo)
-	case .Redo:              editor_undo(e, &e.redo, &e.undo)
-	case .New_Line:          input_text(e, "\n")
-	case .Cut:               editor_cut(e)
-	case .Copy:              editor_copy(e)
-	case .Paste:             editor_paste(e)
-	case .Select_All:        e.selection = {len(e.builder.buf), 0}
-	case .Backspace:         delete_to(e, .Left)
-	case .Delete:            delete_to(e, .Right)
-	case .Delete_Word_Left:  delete_to(e, .Word_Left)
-	case .Delete_Word_Right: delete_to(e, .Word_Right)
-	case .Left:              move_to(e, .Left)
-	case .Right:             move_to(e, .Right)
-	case .Up:                move_to(e, .Up)
-	case .Down:              move_to(e, .Down)
-	case .Word_Left:         move_to(e, .Word_Left)
-	case .Word_Right:        move_to(e, .Word_Right)
-	case .Start:             move_to(e, .Start)
-	case .End:               move_to(e, .End)
-	case .Line_Start:        move_to(e, .Soft_Line_Start)
-	case .Line_End:          move_to(e, .Soft_Line_End)
-	case .Select_Left:       select_to(e, .Left)
-	case .Select_Right:      select_to(e, .Right)
-	case .Select_Up:         select_to(e, .Up)
-	case .Select_Down:       select_to(e, .Down)
-	case .Select_Word_Left:  select_to(e, .Word_Left)
-	case .Select_Word_Right: select_to(e, .Word_Right)
-	case .Select_Start:      select_to(e, .Start)
-	case .Select_End:        select_to(e, .End)
-	case .Select_Line_Start: select_to(e, .Soft_Line_Start)
-	case .Select_Line_End:   select_to(e, .Soft_Line_End)
+	case .None: /**/
+	case .Undo:
+		editor_undo(e, &e.undo, &e.redo)
+	case .Redo:
+		editor_undo(e, &e.redo, &e.undo)
+	case .New_Line:
+		input_text(e, "\n")
+	case .Cut:
+		editor_cut(e)
+	case .Copy:
+		editor_copy(e)
+	case .Paste:
+		editor_paste(e)
+	case .Select_All:
+		e.selection = {len(e.builder.buf), 0}
+	case .Backspace:
+		delete_to(e, .Left)
+	case .Delete:
+		delete_to(e, .Right)
+	case .Delete_Word_Left:
+		delete_to(e, .Word_Left)
+	case .Delete_Word_Right:
+		delete_to(e, .Word_Right)
+	case .Left:
+		move_to(e, .Left)
+	case .Right:
+		move_to(e, .Right)
+	case .Up:
+		move_to(e, .Up)
+	case .Down:
+		move_to(e, .Down)
+	case .Word_Left:
+		move_to(e, .Word_Left)
+	case .Word_Right:
+		move_to(e, .Word_Right)
+	case .Start:
+		move_to(e, .Start)
+	case .End:
+		move_to(e, .End)
+	case .Line_Start:
+		move_to(e, .Soft_Line_Start)
+	case .Line_End:
+		move_to(e, .Soft_Line_End)
+	case .Select_Left:
+		select_to(e, .Left)
+	case .Select_Right:
+		select_to(e, .Right)
+	case .Select_Up:
+		select_to(e, .Up)
+	case .Select_Down:
+		select_to(e, .Down)
+	case .Select_Word_Left:
+		select_to(e, .Word_Left)
+	case .Select_Word_Right:
+		select_to(e, .Word_Right)
+	case .Select_Start:
+		select_to(e, .Start)
+	case .Select_End:
+		select_to(e, .End)
+	case .Select_Line_Start:
+		select_to(e, .Soft_Line_Start)
+	case .Select_Line_End:
+		select_to(e, .Soft_Line_End)
 	}
 }
+

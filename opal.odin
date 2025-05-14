@@ -123,7 +123,7 @@ Keyboard_Key :: enum i32 {
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor, data: rawptr) -> bool
 On_Set_Clipboard_Proc :: #type proc(data: rawptr, text: string) -> bool
 On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> (string, bool)
-On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> (width: f32, height: f32)
+On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> [2]f32
 
 Mouse_Button :: enum {
 	Left,
@@ -138,6 +138,10 @@ Node_Relative_Placement :: struct {
 }
 
 Color :: kn.Color
+
+fade :: kn.fade
+
+mix :: kn.mix
 
 Image_Paint :: struct {
 	index:  int,
@@ -208,16 +212,18 @@ Node_Style :: struct {
 }
 
 //
-// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.
+// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
 Node_Descriptor :: struct {
 	using style:             Node_Style,
+
+	// The text content to be displayed in place of children
 	text:                    string,
 
-	// Z index (higher values appear in front of lower ones), nodes will inherit their parent's z-index
+	// Z index (higher values appear in front of lower ones), this value stacks down the tree
 	z_index:                 u32,
 
-	// A simple way to force a node to remain within certain boundaries
+	// The node's final box will be loosely bound within this box, maintaining its size
 	bounds:                  Maybe(Box),
 
 	// The node's local position within its parent; or screen position if its a root
@@ -264,14 +270,26 @@ Node_Descriptor :: struct {
 
 	// Marks the node as a clickable widget and will steal mouse events from the native window functionality
 	is_widget:               bool,
+
+	// When true, causes the node to not be adopted by the node before it. It will instead be added as a new root.
 	is_root:                 bool,
 
 	// If overflowing content is clipped
 	clip_content:            bool,
+
+	// If text content can be selected and copied
 	enable_selection:        bool,
+
+	// If text content can be edited
 	enable_edit:             bool,
+
+	// If newlines can be added to the text content
 	is_multiline:            bool,
+
+	// Disallows inspection in the debug inspector
 	disable_inspection:      bool,
+
+	// Show/hide scrollbars when content overflows
 	show_scrollbars:         bool,
 
 	// Values for the node's children layout
@@ -280,7 +298,7 @@ Node_Descriptor :: struct {
 	// How the content will be aligned if there is extra space
 	content_align:           [2]f32,
 
-	//
+	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
 	owner:                   ^Node,
 
 	//
@@ -299,7 +317,7 @@ Node_Descriptor :: struct {
 	// Called after the default drawing behavior
 	on_draw:                 proc(self: ^Node),
 
-	// Data for use in callbacks
+	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
 	data:                    rawptr,
 }
 
@@ -307,84 +325,106 @@ Node_Descriptor :: struct {
 // Generic UI nodes, everything is a made out of these
 //
 Node :: struct {
-	using descriptor:  Node_Descriptor,
+	using descriptor:        Node_Descriptor,
 
 	// Node tree references
-	parent:            ^Node,
+	parent:                  ^Node,
 
 	// All nodes invoked between `begin_node` and `end_node`
-	kids:              [dynamic]^Node,
+	kids:                    [dynamic]^Node,
 
 	// All growable children
-	growable_kids:     [dynamic]^Node,
+	growable_kids:           [dynamic]^Node,
 
 	// A simple kill switch that causes the node to be discarded
-	is_dead:           bool,
+	is_dead:                 bool,
 
 	// Last frame on which this node was invoked
-	frame:             int,
+	frame:                   int,
 
 	// Unique identifier
-	id:                Id `fmt:"x"`,
+	id:                      Id `fmt:"x"`,
 
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
-	box:               Box,
+	box:                     Box,
+
+	// The previous calculated size
+	last_size:               [2]f32,
 
 	// This is known after box is calculated
-	text_origin:       [2]f32,
+	text_origin:             [2]f32,
 
 	// This is computed as the minimum space required to fit all children or the node's text content
-	content_size:      [2]f32,
+	content_size:            [2]f32,
 
 	// If this is the node with the highest z-index that the mouse overlaps
-	was_hovered:       bool,
-	is_hovered:        bool,
-	has_hovered_child: bool,
+	was_hovered:             bool,
+	is_hovered:              bool,
+	has_hovered_child:       bool,
 
 	// Active state (clicked)
-	was_active:        bool,
-	is_active:         bool,
-	has_active_child:  bool,
+	was_active:              bool,
+	is_active:               bool,
+	has_active_child:        bool,
 
 	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
-	was_focused:       bool,
-	is_focused:        bool,
-	has_focused_child: bool,
+	was_focused:             bool,
+	is_focused:              bool,
+	has_focused_child:       bool,
+	// TODO: WHYYYY?!?!
+	will_have_focused_child: bool,
 
 	// Times the node was clicked
-	click_count:       u8,
+	click_count:             u8,
 
 	// Time of last mouse down event over this node
-	last_click_time:   time.Time,
-	builder:           strings.Builder,
+	last_click_time:         time.Time,
+	builder:                 strings.Builder,
 
 	// Interaction
-	is_toggled:        bool,
-	was_confirmed:     bool,
-	was_changed:       bool,
+	is_toggled:              bool,
+	was_confirmed:           bool,
+	was_changed:             bool,
 
 	// The timestamp of the node's initialization in the context's arena
-	time_created:      time.Time,
+	time_created:            time.Time,
 
 	// Text content
-	text_layout:       kn.Selectable_Text `fmt:"-"`,
-	last_text_size:    [2]f32,
+	text_layout:             kn.Selectable_Text `fmt:"-"`,
+	last_text_size:          [2]f32,
 
 	// View offset of contents
-	scroll:            [2]f32,
-	target_scroll:     [2]f32,
+	scroll:                  [2]f32,
+	target_scroll:           [2]f32,
+
+	// Needs scissor
+	has_clipped_child:       bool,
 
 	// Text editing state
-	editor:            tedit.Editor,
+	editor:                  tedit.Editor,
+	last_selection:          [2]int,
 
 	// Universal state transition values for smooth animations
-	transitions:       [3]f32,
+	transitions:             [3]f32,
 
-	//
-	owned_data:        rawptr,
+	// Data intended to live as long as the node does. DO NOT manually free this data.
+	owned_data:              rawptr,
+}
+
+Context_Descriptor :: struct {
+	// Platform-defined callbacks
+	on_set_cursor:      On_Set_Cursor_Proc,
+	on_set_clipboard:   On_Set_Clipboard_Proc,
+	on_get_clipboard:   On_Get_Clipboard_Proc,
+	on_get_screen_size: On_Get_Screen_Size_Proc,
+
+	// User-defined data for callbacks
+	callback_data:      rawptr,
 }
 
 Context :: struct {
+	using descriptor:           Context_Descriptor,
+
 	// Additional frame delay
 	frame_interval:             time.Duration,
 
@@ -400,6 +440,9 @@ Context :: struct {
 
 	// Mouse scroll input
 	mouse_scroll:               Vector2,
+
+	// The mouse offset from the clicked node
+	node_click_offset:          Vector2,
 
 	// Current and previous states of mouse buttons
 	mouse_button_down:          [Mouse_Button]bool,
@@ -424,15 +467,6 @@ Context :: struct {
 	hovered_id:                 Id,
 	focused_id:                 Id,
 	active_id:                  Id,
-
-	// Platform-defined callbacks
-	on_set_cursor:              On_Set_Cursor_Proc,
-	on_set_clipboard:           On_Set_Clipboard_Proc,
-	on_get_clipboard:           On_Get_Clipboard_Proc,
-	on_get_screen_size:         On_Get_Screen_Size_Proc,
-
-	// User-defined data for callbacks
-	callback_data:              rawptr,
 
 	// Private cursor state
 	cursor:                     Cursor,
@@ -540,6 +574,10 @@ use_image :: proc(index: int) -> (source: Box, ok: bool) {
 	return image.source.?
 }
 
+get_screen_box :: proc() -> Box {
+	return {0, global_ctx.screen_size}
+}
+
 //
 // Box helpers
 //
@@ -604,17 +642,17 @@ box_contains_other :: proc(self, other: Box) -> bool {
 
 // Get the clip status of `b` inside `a`
 box_get_clip :: proc(self, other: Box) -> Clip {
-	if self.lo.x > other.hi.x ||
-	   self.hi.x < other.lo.x ||
-	   self.lo.y > other.hi.y ||
-	   self.hi.y < other.lo.y {
-		return .Full
-	}
 	if self.lo.x >= other.lo.x &&
 	   self.hi.x <= other.hi.x &&
 	   self.lo.y >= other.lo.y &&
 	   self.hi.y <= other.hi.y {
 		return .None
+	}
+	if self.lo.x > other.hi.x ||
+	   self.hi.x < other.lo.x ||
+	   self.lo.y > other.hi.y ||
+	   self.hi.y < other.lo.y {
+		return .Full
 	}
 	return .Partial
 }
@@ -636,6 +674,34 @@ box_snapped :: proc(self: Box) -> Box {
 
 box_center :: proc(self: Box) -> [2]f32 {
 	return {(self.lo.x + self.hi.x) * 0.5, (self.lo.y + self.hi.y) * 0.5}
+}
+
+box_cut_left :: proc(self: ^Box, amount: f32) -> (res: Box) {
+	left := min(self.lo.x + amount, self.hi.x)
+	res = {self.lo, {left, self.hi.y}}
+	self.lo.x = left
+	return
+}
+
+box_cut_top :: proc(self: ^Box, amount: f32) -> (res: Box) {
+	top := min(self.lo.y + amount, self.hi.y)
+	res = {self.lo, {self.hi.x, top}}
+	self.lo.y = top
+	return
+}
+
+box_cut_right :: proc(self: ^Box, amount: f32) -> (res: Box) {
+	right := max(self.lo.x, self.hi.x - amount)
+	res = {{right, self.lo.y}, self.hi}
+	self.hi.x = right
+	return
+}
+
+box_cut_bottom :: proc(self: ^Box, amount: f32) -> (res: Box) {
+	bottom := max(self.lo.y, self.hi.y - amount)
+	res = {{self.lo.x, bottom}, self.hi}
+	self.hi.y = bottom
+	return
 }
 
 //
@@ -735,6 +801,8 @@ context_init :: proc(ctx: ^Context) {
 	ctx.queued_frames = 2
 	ctx.selection_background_color = kn.LIGHT_GREEN
 	ctx.selection_foreground_color = kn.BLACK
+	assert(ctx.on_get_screen_size != nil)
+	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
 }
 
 context_deinit :: proc(ctx: ^Context) {
@@ -789,8 +857,9 @@ node_update_transition :: proc(self: ^Node, index: int, condition: bool, duratio
 // Global context proc wrappers
 //
 
-init :: proc() {
+init :: proc(descriptor: Context_Descriptor) {
 	global_ctx = new(Context)
+	global_ctx.descriptor = descriptor
 	context_init(global_ctx)
 }
 
@@ -854,9 +923,14 @@ handle_mouse_up :: proc(button: Mouse_Button) {
 	draw_frames(2)
 }
 
-handle_window_size_change :: proc(width, height: i32) {
+handle_window_resize :: proc(width, height: i32) {
 	kn.set_size(width, height)
+	global_ctx.screen_size = {f32(width), f32(height)}
 	draw_frames(1)
+}
+
+handle_window_move :: proc() {
+	global_ctx.last_draw_time = time.now()
 }
 
 //
@@ -951,7 +1025,7 @@ begin :: proc() {
 // The UI computation sequence after construction is:
 // 1. Solve sizes
 // 2. Compute boxes and receive input
-// 3. Propagate input up trees
+// 3. Propagate input up node trees
 // 4. Draw
 //
 end :: proc() {
@@ -1142,6 +1216,104 @@ end_node :: proc() {
 	self.content_size += self.padding.xy + self.padding.zw
 	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
 	self.size = linalg.max(self.size, self.content_size * self.fit)
+
+	// Add scrollbars
+	if self.show_scrollbars {
+		SCROLLBAR_SIZE :: 8
+		SCROLLBAR_PADDING :: 2
+		inner_box := box_shrink(self.box, 1)
+		push_id(self.id)
+		if self.content_size.y > self.last_size.y {
+			do_node(
+				&{
+					is_absolute = true,
+					relative_position = {1, 0},
+					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
+					relative_size = {0, 1},
+					size = {SCROLLBAR_SIZE, -SCROLLBAR_PADDING * 2},
+					background = tw.NEUTRAL_600,
+					foreground = tw.NEUTRAL_800,
+					radius = SCROLLBAR_SIZE / 2,
+					z_index = 1,
+					data = self,
+					on_draw = proc(self: ^Node) {
+						parent := (^Node)(self.data)
+						inner_box := self.box
+						length := box_height(inner_box) * parent.size.y / parent.content_size.y
+						scroll_travel := max(parent.content_size.y - parent.size.y, 0)
+						scroll_time := parent.scroll.y / scroll_travel
+						thumb_travel := box_height(inner_box) - length
+						thumb_box := Box {
+							{inner_box.lo.x, inner_box.lo.y + thumb_travel * scroll_time},
+							{inner_box.hi.x, 0},
+						}
+						thumb_box.hi.y = thumb_box.lo.y + length
+						kn.add_box(
+							thumb_box,
+							box_width(thumb_box) / 2,
+							paint = self.style.foreground,
+						)
+						if self.is_active {
+							parent.scroll.y =
+								clamp(
+									(global_ctx.mouse_position.y - inner_box.lo.y) / thumb_travel,
+									0,
+									1,
+								) *
+								scroll_travel
+							parent.target_scroll.y = parent.scroll.y
+						}
+					},
+				},
+			)
+		}
+		if self.content_size.x > self.last_size.x {
+			do_node(
+				&{
+					is_absolute = true,
+					relative_position = {0, 1},
+					position = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
+					relative_size = {1, 0},
+					size = {-SCROLLBAR_PADDING * 2, SCROLLBAR_SIZE},
+					background = tw.NEUTRAL_600,
+					foreground = tw.NEUTRAL_800,
+					radius = SCROLLBAR_SIZE / 2,
+					z_index = 1,
+					data = self,
+					on_draw = proc(self: ^Node) {
+						parent := (^Node)(self.data)
+						inner_box := self.box
+						length := box_width(inner_box) * parent.size.x / parent.content_size.x
+						scroll_travel := max(parent.content_size.x - parent.size.x, 0)
+						scroll_time := parent.scroll.x / scroll_travel
+						thumb_travel := box_width(inner_box) - length
+						thumb_box := Box {
+							{inner_box.lo.x + thumb_travel * scroll_time, inner_box.lo.y},
+							{0, inner_box.hi.y},
+						}
+						thumb_box.hi.x = thumb_box.lo.x + length
+						kn.add_box(
+							thumb_box,
+							box_height(thumb_box) / 2,
+							paint = self.style.foreground,
+						)
+						if self.is_active {
+							parent.scroll.x =
+								clamp(
+									(global_ctx.mouse_position.x - inner_box.lo.x) / thumb_travel,
+									0,
+									1,
+								) *
+								scroll_travel
+							parent.target_scroll.x = parent.scroll.x
+						}
+					},
+				},
+			)
+		}
+		pop_id()
+	}
+
 	pop_node()
 	if self.parent != nil {
 		node_on_child_end(self.parent, self)
@@ -1182,17 +1354,19 @@ node_update_this_frame_input :: proc(self: ^Node) {
 node_reset_propagated_input :: proc(self: ^Node) {
 	self.has_hovered_child = false
 	self.has_active_child = false
-	self.has_focused_child = false
+
+	self.has_focused_child = self.will_have_focused_child
+	self.will_have_focused_child = false
 }
 
 node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
-	self.has_hovered_child = self.has_hovered_child | child.is_hovered | child.has_hovered_child
-	self.has_active_child = self.has_active_child | child.is_active | child.has_active_child
-	self.has_focused_child = self.has_focused_child | child.is_focused | child.has_focused_child
+	self.has_hovered_child |= child.is_hovered | child.has_hovered_child
+	self.has_active_child |= child.is_active | child.has_active_child
+	self.has_focused_child |= child.is_focused | child.has_focused_child
 	if self.inherit_state {
-		self.is_hovered = self.is_hovered | self.has_hovered_child
-		self.is_active = self.is_active | self.has_active_child
-		self.is_focused = self.is_focused | self.has_focused_child
+		self.is_hovered |= self.has_hovered_child
+		self.is_active |= self.has_active_child
+		self.is_focused |= self.has_focused_child
 	}
 }
 
@@ -1206,6 +1380,7 @@ node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
 	}
 	if self.owner != nil {
 		node_receive_propagated_input(self.owner, self)
+		self.owner.will_have_focused_child = self.has_focused_child | self.is_focused
 	}
 }
 
@@ -1222,16 +1397,15 @@ node_on_new_frame :: proc(self: ^Node) {
 	// Keep alive this frame
 	self.is_dead = false
 
-	// Reset accumulative values
-	self.content_size = 0
-
 	// Reset some state
+	self.content_size = 0
 	self.was_changed = false
 	self.was_confirmed = false
 
 	// Initialize string reader for text construction
 	string_reader: strings.Reader
 	reader := strings.to_reader(&string_reader, self.text)
+	self.last_selection = self.editor.selection
 
 	// Perform text editing
 	// TODO: Implement up/down movement
@@ -1373,14 +1547,37 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 
 node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offset: [2]f32 = {}) {
 	node_solve_box(self, offset)
+
 	mouse_overlap := mouse_overlap
 	if mouse_overlap {
 		mouse_overlap = node_receive_input(self)
 	}
+
+	// Update and clamp scroll
+	self.target_scroll = linalg.clamp(
+		self.target_scroll,
+		0,
+		linalg.max(self.content_size - self.size, 0),
+	)
+
+	previous_scroll := self.scroll
+	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(10)
+	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
+		draw_frames(1)
+	}
+
+	self.has_clipped_child = false
 	for node in self.kids {
 		node.z_index += self.z_index
-		node_solve_box_recursively(node, mouse_overlap, self.box.lo - self.scroll)
+		node_solve_box_recursively(
+			node,
+			mouse_overlap,
+			self.box.lo - self.scroll * f32(i32(!node.is_absolute)),
+		)
 		node_receive_propagated_input(self, node)
+		if box_get_clip(node.box, self.box) != .None {
+			self.has_clipped_child = true
+		}
 	}
 }
 
@@ -1416,19 +1613,6 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 	// Receive mouse wheel input
 	if ctx.scrollable_node != nil && ctx.scrollable_node.id == self.id {
 		self.target_scroll -= ctx.mouse_scroll * 24
-	}
-
-	// Update and clamp scroll
-	self.target_scroll = linalg.clamp(
-		self.target_scroll,
-		0,
-		linalg.max(self.content_size - self.size, 0),
-	)
-
-	previous_scroll := self.scroll
-	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(8)
-	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
-		draw_frames(1)
 	}
 
 	return
@@ -1513,6 +1697,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	assert(depth < 128)
 	ctx := global_ctx
 
+	self.last_size = self.size
+
 	last_transitions := self.transitions
 	if self.on_animate != nil {
 		self.on_animate(self)
@@ -1547,6 +1733,11 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.last_text_size = self.text_layout.size
 	}
 
+	overflow := linalg.max(self.content_size - self.size, 0)
+
+	enable_scissor :=
+		self.clip_content && (self.has_clipped_child || max(overflow.x, overflow.y) > 0.1)
+
 	// Compute text selection state if enabled
 	if self.enable_selection {
 		self.text_layout = kn.make_selectable(
@@ -1557,7 +1748,16 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		if self.text_layout.contact.valid && self.is_hovered {
 			set_cursor(.Text)
 		}
-		node_update_selection(self, self.text, &self.text_layout)
+		node_update_selection(self)
+		cursor_box := text_get_cursor_box(&self.text_layout, self.text_origin)
+		left := max(0, self.box.lo.x - cursor_box.lo.x)
+		right := max(0, cursor_box.hi.x - self.box.hi.x)
+		if max(left, right) > 0 {
+			enable_scissor = true
+		}
+		if self.is_focused && self.editor.selection != self.last_selection {
+			self.target_scroll.x += right - left
+		}
 	}
 
 	// Is transformation necessary?
@@ -1575,7 +1775,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 
 	// Apply clipping
-	if self.clip_content {
+	if enable_scissor {
 		kn.push_scissor(kn.make_box(self.box, self.style.radius))
 	}
 
@@ -1670,35 +1870,11 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		node_draw_recursively(node, depth + 1)
 	}
 
-	if self.clip_content {
+	if enable_scissor {
 		kn.pop_scissor()
 	}
 
 	if ctx.requires_redraw {
-		if self.show_scrollbars {
-			SCROLLBAR_SIZE :: 6
-			inner_box := box_shrink(self.box, 1)
-			if self.content_size.y > self.size.y {
-				// do_node(
-				// 	&{
-				// 		is_absolute = true,
-				// 		relative_position = {1, 0},
-				// 		position = {-SCROLLBAR_SIZE - 1, 1},
-				// 		size = {SCROLLBAR_SIZE, self.size.y - 2},
-				// 		style = {background = tw.NEUTRAL_800},
-				// 	},
-				// )
-				// box := Box{{inner_box.hi.x - SCROLLBAR_SIZE, inner_box.lo.y}, inner_box.hi}
-				// radius := box_width(box) / 2
-				// thumb_size := box_height(box) * self.size.y / self.content_size.y
-				// travel := box_height(box) - thumb_size
-				// time := self.scroll.y / (self.content_size.y - self.size.y)
-				// kn.add_box(box, radius, paint = tw.NEUTRAL_900)
-				// thumb_box := Box{{box.lo.x, box.lo.y + travel * time}, {box.hi.x, 0}}
-				// thumb_box.hi.y = thumb_box.lo.y + thumb_size
-				// kn.add_box(thumb_box, radius, paint = tw.NEUTRAL_700)
-			}
-		}
 		if self.style.stroke != nil {
 			kn.add_box_lines(
 				self.box,
@@ -1719,8 +1895,10 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	// Draw debug lines
 	if ODIN_DEBUG {
 		if ctx.inspector.inspected_id == self.id {
+			too_smol: bool
 			if self.parent != nil {
 				if box_width(self.box) == 0 {
+					too_smol = true
 					kn.add_box(
 						{
 							{self.parent.box.lo.x + self.parent.padding.x, self.box.lo.y},
@@ -1730,6 +1908,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 					)
 				}
 				if box_height(self.box) == 0 {
+					too_smol = true
 					kn.add_box(
 						{
 							{self.box.lo.x, self.parent.box.lo.y + self.parent.padding.y},
@@ -1739,24 +1918,38 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 					)
 				}
 			}
-			kn.add_box(self.box, paint = kn.fade(kn.BLUE_VIOLET, 0.5))
+			if !too_smol {
+				box := self.box
+				padding_paint := kn.paint_index_from_option(kn.fade(kn.SKY_BLUE, 0.5))
+				if self.padding.x > 0 {
+					kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
+				}
+				if self.padding.y > 0 {
+					kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
+				}
+				if self.padding.z > 0 {
+					kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
+				}
+				if self.padding.w > 0 {
+					kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
+				}
+				kn.add_box(self.box, paint = kn.fade(kn.BLUE_VIOLET, 0.5))
+			}
 		}
 	}
+}
+
+text_get_cursor_box :: proc(self: ^kn.Selectable_Text, offset: [2]f32) -> Box {
+	line_height := self.font.line_height * self.font_scale
+	top_left := offset + self.glyphs[self.selection.glyphs[0]].offset
+	return {{top_left.x - 1, top_left.y}, {top_left.x + 1, top_left.y + line_height}}
 }
 
 draw_text_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
 	if len(text.glyphs) == 0 {
 		return
 	}
-	line_height := text.font.line_height * text.font_scale
-	cursor_origin := origin + text.glyphs[text.selection.glyphs[0]].offset
-	kn.add_box(
-		{
-			{cursor_origin.x - 1, cursor_origin.y},
-			{cursor_origin.x + 1, cursor_origin.y + line_height},
-		},
-		paint = color,
-	)
+	kn.add_box(text_get_cursor_box(text, origin), paint = color)
 }
 
 draw_text :: proc(
@@ -1826,71 +2019,56 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 	}
 }
 
-node_update_selection :: proc(self: ^Node, data: string, text: ^kn.Selectable_Text) {
+node_update_selection :: proc(self: ^Node) {
 	is_separator :: proc(r: rune) -> bool {
 		return !unicode.is_alpha(r) && !unicode.is_number(r)
 	}
 
-	last_selection := self.editor.selection
-	if self.is_active && text.contact.index >= 0 {
+	if self.is_active && self.text_layout.contact.index >= 0 {
 		if !self.was_active {
-			self.editor.anchor = text.contact.index
+			self.editor.anchor = self.text_layout.contact.index
 			if self.click_count == 3 {
-				self.editor.selection = {len(data), 0}
+				self.editor.selection = {len(self.text), 0}
 			} else {
-				self.editor.selection = {text.contact.index, text.contact.index}
+				self.editor.selection = {
+					self.text_layout.contact.index,
+					self.text_layout.contact.index,
+				}
 			}
 		}
 		switch self.click_count {
 		case 2:
-			allow_precision := text.contact.index != self.editor.anchor
-			if text.contact.index <= self.editor.anchor {
+			allow_precision := self.text_layout.contact.index != self.editor.anchor
+			if self.text_layout.contact.index <= self.editor.anchor {
 				self.editor.selection[0] =
-					text.contact.index if (allow_precision && is_separator(rune(data[text.contact.index]))) else max(0, strings.last_index_proc(data[:min(text.contact.index, len(data))], is_separator) + 1)
+					self.text_layout.contact.index if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index]))) else max(0, strings.last_index_proc(self.text[:min(self.text_layout.contact.index, len(self.text))], is_separator) + 1)
 				self.editor.selection[1] = strings.index_proc(
-					data[self.editor.anchor:],
+					self.text[self.editor.anchor:],
 					is_separator,
 				)
 				if self.editor.selection[1] == -1 {
-					self.editor.selection[1] = len(data)
+					self.editor.selection[1] = len(self.text)
 				} else {
 					self.editor.selection[1] += self.editor.anchor
 				}
 			} else {
 				self.editor.selection[1] = max(
 					0,
-					strings.last_index_proc(data[:self.editor.anchor], is_separator) + 1,
+					strings.last_index_proc(self.text[:self.editor.anchor], is_separator) + 1,
 				)
-				// `text.selection.index - 1` is safe as long as `text.selection.index > self.editor.anchor`
+				// `self.text_layout.selection.index - 1` is safe as long as `self.text_layout.selection.index > self.editor.anchor`
 				self.editor.selection[0] =
-					0 if (allow_precision && is_separator(rune(data[text.contact.index - 1]))) else strings.index_proc(data[text.contact.index:], is_separator)
+					0 if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index - 1]))) else strings.index_proc(self.text[self.text_layout.contact.index:], is_separator)
 				if self.editor.selection[0] == -1 {
-					self.editor.selection[0] = len(data)
+					self.editor.selection[0] = len(self.text)
 				} else {
-					self.editor.selection[0] += text.contact.index
+					self.editor.selection[0] += self.text_layout.contact.index
 				}
 			}
 		case 1:
-			self.editor.selection[0] = text.contact.index
+			self.editor.selection[0] = self.text_layout.contact.index
 		}
 	}
-}
-
-Input_Descriptor :: struct {
-	data:      rawptr,
-	type_info: ^runtime.Type_Info,
-}
-
-Input_State :: struct {
-	editor:           tedit.Editor,
-	builder:          strings.Builder,
-	type_info:        runtime.Type_Info,
-	match_list:       [dynamic]string,
-	offset:           [2]f32,
-	action_time:      time.Time,
-	closest_match:    string,
-	anchor:           int,
-	last_mouse_index: int,
 }
 
 to_obfuscated_reader :: proc(reader: ^strings.Reader) -> io.Reader {
@@ -2095,3 +2273,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
