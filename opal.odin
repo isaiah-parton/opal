@@ -379,6 +379,9 @@ Node :: struct {
 
 	// Universal state transition values for smooth animations
 	transitions:       [3]f32,
+
+	//
+	owned_data:        rawptr,
 }
 
 Context :: struct {
@@ -2092,4 +2095,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-
