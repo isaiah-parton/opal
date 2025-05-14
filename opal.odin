@@ -1960,7 +1960,6 @@ inspector_show :: proc(self: ^Inspector) {
 			style = {font_size = 12, background = tw.NEUTRAL_950, foreground = tw.CYAN_50},
 			grow = {true, false},
 			max_size = INFINITY,
-			content_align = 0.5,
 			data = self,
 			on_animate = proc(self: ^Node) {
 				inspector := (^Inspector)(self.data)

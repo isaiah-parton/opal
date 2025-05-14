@@ -45,6 +45,7 @@ App_Descriptor :: struct {
 	height:     i32,
 	min_width:  i32,
 	min_height: i32,
+	vsync:      bool,
 }
 
 @(private)
@@ -163,7 +164,7 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 		panic("Can't accept text input!")
 	}
 
-	platform := sdl3glue.make_platform_sdl3glue(app.window)
+	platform := sdl3glue.make_platform_sdl3glue(app.window, descriptor.vsync)
 	kn.start_on_platform(platform)
 	opal.init()
 	opal.global_ctx.callback_data = app
