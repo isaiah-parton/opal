@@ -59,6 +59,10 @@ main :: proc() {
 			lucide.load()
 			components.theme.icon_font = &lucide.font
 			app.image = opal.load_image("image.png") or_else panic("Could not load image!")
+			opal.set_color(.Selection_Background, tw.SKY_500)
+			opal.set_color(.Selection_Foreground, tw.BLACK)
+			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
+			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -128,7 +132,7 @@ main :: proc() {
 								size = {0, 30},
 								max_size = INFINITY,
 								grow = {true, false},
-								background = tw.NEUTRAL_800,
+								background = tw.NEUTRAL_900,
 								foreground = tw.ROSE_500,
 								font_size = 14,
 								text = fmt.tprintf("Item #%i", i),

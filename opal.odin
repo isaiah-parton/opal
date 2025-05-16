@@ -1,6 +1,7 @@
 package opal
 
 import kn "../katana"
+import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:io"
@@ -211,26 +212,6 @@ Node_Style :: struct {
 	shadow_size:      f32,
 }
 
-Node_Layout_Descriptor :: struct {
-	// Values for the node's children layout
-	padding:  [4]f32,
-
-	// The maximum size the node is allowed to grow to
-	max_size: [2]f32,
-
-	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	size:     [2]f32,
-
-	// If the node will grow to acommodate its contents
-	fit:      [2]f32,
-
-	// If the node will be grown to fill available space
-	grow:     [2]bool,
-
-	// Spacing added between children
-	spacing:  f32,
-}
-
 //
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
@@ -422,6 +403,7 @@ Node :: struct {
 
 	// Needs scissor
 	has_clipped_child:       bool,
+	is_clipped:              bool,
 
 	// Text editing state
 	editor:                  tedit.Editor,
@@ -455,6 +437,13 @@ pop_scope :: proc() {
 	pop(&ctx.scope_stack)
 }
 
+Context_Color :: enum {
+	Selection_Background,
+	Selection_Foreground,
+	Scrollbar_Background,
+	Scrollbar_Foreground,
+}
+
 Context_Descriptor :: struct {
 	// Platform-defined callbacks
 	on_set_cursor:      On_Set_Cursor_Proc,
@@ -467,7 +456,7 @@ Context_Descriptor :: struct {
 }
 
 Context :: struct {
-	using descriptor:           Context_Descriptor,
+	using descriptor:          Context_Descriptor,
 
 	///
 	/// Configuration
@@ -475,118 +464,136 @@ Context :: struct {
 
 	// Prevents sub-pixel positioning to make edges appear perfectly crisp, motion however will not be as smooth
 	// TODO: Implement this
-	snap_to_pixels:             bool,
+	snap_to_pixels:            bool,
 
 	// Additional frame delay
-	frame_interval:             time.Duration,
+	frame_interval:            time.Duration,
 
 	// Time of last drawn frame
-	last_draw_time:             time.Time,
+	last_draw_time:            time.Time,
+
+	// Time of last average
+	last_average_time:         time.Time,
+	frames_since_last_average: int,
 
 	// Input state
-	screen_size:                Vector2,
+	screen_size:               Vector2,
 
 	// Current and previous state of mouse position
-	mouse_position:             Vector2,
-	last_mouse_position:        Vector2,
+	mouse_position:            Vector2,
+	last_mouse_position:       Vector2,
 
 	// Mouse scroll input
-	mouse_scroll:               Vector2,
+	mouse_scroll:              Vector2,
 
 	// The mouse offset from the clicked node
-	node_click_offset:          Vector2,
+	node_click_offset:         Vector2,
 
 	// Current and previous states of mouse buttons
-	mouse_button_down:          [Mouse_Button]bool,
-	mouse_button_was_down:      [Mouse_Button]bool,
+	mouse_button_down:         [Mouse_Button]bool,
+	mouse_button_was_down:     [Mouse_Button]bool,
 
 	// Current and previous state of keyboard
-	key_down:                   [Keyboard_Key]bool,
-	key_was_down:               [Keyboard_Key]bool,
+	key_down:                  [Keyboard_Key]bool,
+	key_was_down:              [Keyboard_Key]bool,
 
 	// If a widget is hovered which would prevent native window interaction
-	widget_hovered:             bool,
+	widget_hovered:            bool,
 
 	// Which node will receive scroll input
-	scrollable_node:            ^Node,
+	scrollable_node:           ^Node,
 
 	// Transient pointers to interacted nodes
-	hovered_node:               ^Node,
-	focused_node:               ^Node,
-	active_node:                ^Node,
+	hovered_node:              ^Node,
+	focused_node:              ^Node,
+	active_node:               ^Node,
 
 	// Ids of interacted nodes
-	hovered_id:                 Id,
-	focused_id:                 Id,
-	active_id:                  Id,
+	hovered_id:                Id,
+	focused_id:                Id,
+	active_id:                 Id,
 
 	// Private cursor state
-	cursor:                     Cursor,
-	last_cursor:                Cursor,
+	cursor:                    Cursor,
+	last_cursor:               Cursor,
 
 	// Global visual style
-	selection_background_color: kn.Color,
-	selection_foreground_color: kn.Color,
+	colors:                    [Context_Color]Color,
 
 	// Frame count
-	frame:                      int,
+	frame:                     int,
 
 	// Native text input
-	runes:                      [dynamic]rune,
+	runes:                     [dynamic]rune,
 
 	// User images
-	images:                     [dynamic]Maybe(User_Image),
+	images:                    [dynamic]Maybe(User_Image),
 
 	// Call index
-	call_index:                 int,
+	call_index:                int,
 
 	// Nodes by call order
-	node_by_id:                 map[Id]^Node,
+	node_by_id:                map[Id]^Node,
 
 	// Node memory is stored contiguously for memory efficiency.
 	// TODO: Implement a dynamic arena because Opal currently crashes once there's no more slots available. (Maybe `begin_node` should be able to fail?)
-	nodes:                      [4096]Maybe(Node),
+	nodes:                     [4096]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
-	roots:                      [dynamic]^Node,
+	roots:                     [dynamic]^Node,
 
 	// The stack of nodes being declared. May contain multiple roots, as its only a way of keeping track of the nodes currently being invoked.
-	stack:                      [dynamic]^Node,
+	stack:                     [dynamic]^Node,
 
 	// The hash stack
-	id_stack:                   [dynamic]Id,
+	id_stack:                  [dynamic]Id,
 
 	//
-	scopes:                     [dynamic]Scope,
+	scopes:                    [dynamic]Scope,
 
 	// Scope stack
-	scope_stack:                [dynamic]^Scope,
-	scope_arena:                mem.Arena,
-	scope_data:                 []u8,
+	scope_stack:               [dynamic]^Scope,
+	scope_arena:               mem.Arena,
+	scope_data:                []u8,
 
 	// The top-most element of the stack
-	current_node:               ^Node,
+	current_node:              ^Node,
 
 	// Profiling state
-	frame_start_time:           time.Time,
-	frame_duration:             time.Duration,
-	interval_start_time:        time.Time,
-	interval_duration:          time.Duration,
-	compute_start_time:         time.Time,
-	compute_duration:           time.Duration,
+	frame_start_time:          time.Time,
+	frame_duration:            time.Duration,
+	frame_duration_sum:        time.Duration,
+	frame_duration_avg:        time.Duration,
+
+	//
+	interval_start_time:       time.Time,
+	interval_duration:         time.Duration,
+
+	//
+	compute_start_time:        time.Time,
+	compute_duration:          time.Duration,
+	compute_duration_sum:      time.Duration,
+	compute_duration_avg:      time.Duration,
+
+	// How many nodes are hidden. (Only available in debug.)
+	drawn_nodes:               int,
 
 	// How many frames are queued for drawing
-	queued_frames:              int,
+	queued_frames:             int,
 
 	// If the graphics backend should redraw the UI
-	requires_redraw:            bool,
+	requires_redraw:           bool,
 
 	// Node inspector
-	inspector:                  Inspector,
+	inspector:                 Inspector,
 }
 
 // @(private)
 global_ctx: ^Context
+
+set_color :: proc(which: Context_Color, value: Color) {
+	global_ctx.colors[which] = value
+}
 
 // Load a user image to the next available slot
 load_image :: proc(file: string) -> (index: int, ok: bool) {
@@ -725,10 +732,10 @@ box_get_rounded_clip :: proc(self, other: Box, radius: f32) -> Clip {
 	   self.hi.y <= other.hi.y - radius {
 		return .None
 	}
-	if self.lo.x > other.hi.x - radius ||
-	   self.hi.x < other.lo.x + radius ||
-	   self.lo.y > other.hi.y - radius ||
-	   self.hi.y < other.lo.y + radius {
+	if self.lo.x > other.hi.x ||
+	   self.hi.x < other.lo.x ||
+	   self.lo.y > other.hi.y ||
+	   self.hi.y < other.lo.y {
 		return .Full
 	}
 	return .Partial
@@ -742,7 +749,7 @@ box_grow_to_fit :: proc(self: ^Box, other: Box) {
 
 // Returns the box clamped inside another
 box_clamped :: proc(self, other: Box) -> Box {
-	return {linalg.clamp(self.lo, other.lo, other.hi), linalg.clamp(self.hi, other.lo, other.hi)}
+	return {linalg.max(self.lo, other.lo), linalg.min(self.hi, other.hi)}
 }
 
 // Snap a box to a whole number position
@@ -795,7 +802,7 @@ box_cut_bottom :: proc(self: ^Box, amount: f32) -> (res: Box) {
 FNV1A32_OFFSET_BASIS :: 0x811c9dc5
 FNV1A32_PRIME :: 0x01000193
 
-fnv32a :: proc(data: []byte, seed: u32) -> u32 {
+fnv32a :: proc(data: []byte, seed: u32 = FNV1A32_OFFSET_BASIS) -> u32 {
 	h: u32 = seed
 	for b in data {
 		h = (h ~ u32(b)) * FNV1A32_PRIME
@@ -879,12 +886,13 @@ pop_id :: proc() {
 
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
+
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.stack, 64)
 	reserve(&ctx.id_stack, 64)
+
 	ctx.queued_frames = 2
-	ctx.selection_background_color = kn.LIGHT_GREEN
-	ctx.selection_foreground_color = kn.BLACK
+
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
 
@@ -1119,12 +1127,37 @@ begin :: proc() {
 end :: proc() {
 	ctx := global_ctx
 
+	// Compute performance averages
+	when ODIN_DEBUG {
+		if time.since(ctx.last_average_time) >= time.Second {
+			ctx.last_average_time = time.now()
+			ctx.frames_since_last_average = max(ctx.frames_since_last_average, 1)
+			ctx.compute_duration_avg = time.Duration(
+				f64(ctx.compute_duration_sum) / f64(ctx.frames_since_last_average),
+			)
+			ctx.frame_duration_avg = time.Duration(
+				f64(ctx.frame_duration_sum) / f64(ctx.frames_since_last_average),
+			)
+			ctx.frames_since_last_average = 0
+			ctx.compute_duration_sum = 0
+			ctx.frame_duration_sum = 0
+			draw_frames(int(ctx.inspector.shown))
+		}
+		ctx.frames_since_last_average += 1
+		ctx.compute_duration_sum += ctx.compute_duration
+		ctx.frame_duration_sum += ctx.frame_duration
+	}
+
 	// Include built-in UI
 	if key_down(.Left_Control) && key_down(.Left_Shift) && key_pressed(.I) {
 		ctx.inspector.shown = !ctx.inspector.shown
 	}
 	if ctx.inspector.shown {
 		inspector_show(&ctx.inspector)
+	}
+
+	when ODIN_DEBUG {
+		ctx.drawn_nodes = 0
 	}
 
 	clear(&ctx.runes)
@@ -1148,6 +1181,9 @@ end :: proc() {
 		node_solve_box_recursively(root)
 	}
 
+	//
+	// Update the global interaction state
+	//
 	ctx.widget_hovered = false
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
@@ -1174,8 +1210,6 @@ end :: proc() {
 		node_propagate_input_recursively(root)
 		node_draw_recursively(root)
 	}
-
-	kn.set_draw_order(0)
 
 	// Clean up unused nodes
 	for id, node in ctx.node_by_id {
@@ -1269,9 +1303,8 @@ get_or_create_node :: proc(id: Id) -> (result: ^Node) {
 				break
 			}
 		}
+		assert(result != nil)
 	}
-
-	assert(result != nil)
 
 	return
 }
@@ -1284,7 +1317,7 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 		self.descriptor = descriptor^
 	}
 
-	if !self.is_root && self.parent != ctx.current_node {
+	if !self.is_root {
 		self.parent = ctx.current_node
 		assert(self != self.parent)
 	}
@@ -1310,11 +1343,16 @@ end_node :: proc() {
 	}
 
 	// Add scrollbars
-	if self.show_scrollbars {
+	if self.show_scrollbars && self.overflow != {} {
 		SCROLLBAR_SIZE :: 8
 		SCROLLBAR_PADDING :: 2
 		inner_box := box_shrink(self.box, 1)
 		push_id(self.id)
+		scrollbar_style := Node_Style {
+			background = ctx.colors[.Scrollbar_Background],
+			foreground = ctx.colors[.Scrollbar_Foreground],
+			radius     = SCROLLBAR_SIZE / 2,
+		}
 		if self.overflow.y > 0 {
 			do_node(
 				&{
@@ -1323,14 +1361,16 @@ end_node :: proc() {
 					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
 					size = {SCROLLBAR_SIZE, -SCROLLBAR_PADDING * 2},
-					background = tw.NEUTRAL_600,
-					foreground = tw.NEUTRAL_800,
-					radius = SCROLLBAR_SIZE / 2,
+					style = scrollbar_style,
 					z_index = 1,
+					padding = 1,
 					data = self,
 					on_draw = proc(self: ^Node) {
 						parent := (^Node)(self.data)
-						inner_box := self.box
+						inner_box := Box {
+							self.box.lo + self.padding.xy,
+							self.box.hi - self.padding.zw,
+						}
 						length := box_height(inner_box) * parent.size.y / parent.content_size.y
 						scroll_travel := max(parent.content_size.y - parent.size.y, 0)
 						scroll_time := parent.scroll.y / scroll_travel
@@ -1367,14 +1407,16 @@ end_node :: proc() {
 					position = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
 					relative_size = {1, 0},
 					size = {-SCROLLBAR_PADDING * 2, SCROLLBAR_SIZE},
-					background = tw.NEUTRAL_600,
-					foreground = tw.NEUTRAL_800,
-					radius = SCROLLBAR_SIZE / 2,
+					style = scrollbar_style,
 					z_index = 1,
+					padding = 1,
 					data = self,
 					on_draw = proc(self: ^Node) {
 						parent := (^Node)(self.data)
-						inner_box := self.box
+						inner_box := Box {
+							self.box.lo + self.padding.xy,
+							self.box.hi - self.padding.zw,
+						}
 						length := box_width(inner_box) * parent.size.x / parent.content_size.x
 						scroll_travel := max(parent.content_size.x - parent.size.x, 0)
 						scroll_time := parent.scroll.x / scroll_travel
@@ -1484,7 +1526,9 @@ node_on_new_frame :: proc(self: ^Node) {
 	clear(&self.kids)
 	clear(&self.growable_kids)
 
-	self.style.scale = 1
+	if self.scale == {} {
+		self.scale = 1
+	}
 
 	// Keep alive this frame
 	self.is_dead = false
@@ -1496,7 +1540,10 @@ node_on_new_frame :: proc(self: ^Node) {
 
 	// Initialize string reader for text construction
 	string_reader: strings.Reader
-	reader := strings.to_reader(&string_reader, self.text)
+	reader: Maybe(io.Reader)
+	if len(self.text) > 0 {
+		reader = strings.to_reader(&string_reader, self.text)
+	}
 	self.last_selection = self.editor.selection
 
 	// Perform text editing
@@ -1508,7 +1555,7 @@ node_on_new_frame :: proc(self: ^Node) {
 			self.editor.set_clipboard = ctx.on_set_clipboard
 			self.editor.get_clipboard = ctx.on_get_clipboard
 		}
-		if !self.is_focused {
+		if self.is_focused != self.was_focused {
 			strings.builder_reset(self.editor.builder)
 			strings.write_string(self.editor.builder, self.text)
 		}
@@ -1579,25 +1626,28 @@ node_on_new_frame :: proc(self: ^Node) {
 		}
 	}
 
-	// Assign a default font for safety
-	if self.style.font == nil {
-		self.style.font = &kn.DEFAULT_FONT
-	}
-
 	// Create text layout
-	self.text_layout = kn.Selectable_Text {
-		text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
-	}
-
-	// Include text in content size
-	self.content_size = linalg.max(self.content_size, self.text_layout.size, self.last_text_size)
-
-	// If there's no text, just add the font line height to content size
-	if kn.text_is_empty(&self.text_layout) && self.enable_edit {
-		self.content_size.y = max(
-			self.content_size.y,
-			self.style.font.line_height * self.style.font_size,
+	if reader, ok := reader.?; ok {
+		// Assign a default font for safety
+		if self.style.font == nil {
+			self.style.font = &kn.DEFAULT_FONT
+		}
+		self.text_layout = kn.Selectable_Text {
+			text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
+		}
+		// Include text in content size
+		self.content_size = linalg.max(
+			self.content_size,
+			self.text_layout.size,
+			self.last_text_size,
 		)
+		// If there's no text, just add the font line height to content size
+		if kn.text_is_empty(&self.text_layout) && self.enable_edit {
+			self.content_size.y = max(
+				self.content_size.y,
+				self.style.font.line_height * self.style.font_size,
+			)
+		}
 	}
 
 	// Root
@@ -1627,6 +1677,10 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 		self.content_size.x += child.size.x
 		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
+	// i := int(self.vertical)
+	// j := 1 - i
+	// self.content_size[i] += child.size[i]
+	// self.content_size[j] = max(self.content_size[j], child.size[j])
 }
 
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
@@ -1640,13 +1694,13 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	}
 }
 
-node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offset: [2]f32 = {}) {
+node_solve_box_recursively :: proc(
+	self: ^Node,
+	mouse_overlap: bool = true,
+	offset: [2]f32 = {},
+	clip_box: Box = {0, INFINITY},
+) {
 	node_solve_box(self, offset)
-
-	mouse_overlap := mouse_overlap
-	if mouse_overlap {
-		mouse_overlap = node_receive_input(self)
-	}
 
 	// Update and clamp scroll
 	self.target_scroll = linalg.clamp(
@@ -1654,9 +1708,33 @@ node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offs
 		0,
 		linalg.max(self.content_size - self.size, 0),
 	)
-
 	previous_scroll := self.scroll
 	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(10)
+
+	clip_box := clip_box
+
+	if self.parent != nil {
+		clip := box_get_rounded_clip(
+			self.box,
+			clip_box,
+			max(
+				self.parent.radius.x,
+				max(self.parent.radius.y, max(self.parent.radius.z, self.parent.radius.w)),
+			),
+		)
+		self.parent.has_clipped_child |= clip != .None
+		self.is_clipped = clip == .Full
+	}
+	if self.is_clipped {
+		return
+	}
+
+	clip_box = box_clamped(clip_box, self.box)
+
+	mouse_overlap := mouse_overlap
+	if mouse_overlap {
+		mouse_overlap = node_receive_input(self)
+	}
 	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
 		draw_frames(1)
 	}
@@ -1668,11 +1746,9 @@ node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offs
 			node,
 			mouse_overlap,
 			self.box.lo - self.scroll * f32(i32(!node.is_absolute)),
+			clip_box,
 		)
-		node_receive_propagated_input(self, node)
-		if box_get_rounded_clip(node.box, self.box, 10) != .None {
-			self.has_clipped_child = true
-		}
+		// node_receive_propagated_input(self, node)
 	}
 }
 
@@ -1758,9 +1834,12 @@ node_solve_sizes :: proc(self: ^Node) {
 		} else {
 			node.position[i] =
 				offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
-			if node.grow[j] {
-				node.size[j] = max(node.size[j], available_span)
-			}
+
+			// if node.grow[j] {
+			// 	node.size[j] = max(node.size[j], available_span)
+			// }
+			node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
+
 			node.position[j] =
 				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
 			offset_along_axis += node.size[i] + self.spacing
@@ -1786,6 +1865,7 @@ node_is_scrollable :: proc(self: ^Node) -> bool {
 
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	assert(depth < 128)
+
 	ctx := global_ctx
 
 	// Receive mouse wheel input
@@ -1797,6 +1877,14 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	last_transitions := self.transitions
 	if self.on_animate != nil {
 		self.on_animate(self)
+	}
+
+	if self.is_clipped {
+		return
+	}
+
+	when ODIN_DEBUG {
+		ctx.drawn_nodes += 1
 	}
 
 	// Detect changes in transition values
@@ -1932,7 +2020,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 					&self.text_layout,
 					self.text_origin,
 					kn.fade(
-						global_ctx.selection_background_color,
+						global_ctx.colors[.Selection_Background],
 						0.5 * f32(i32(self.is_focused)),
 					),
 				)
@@ -1942,7 +2030,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 					&self.text_layout,
 					self.text_origin,
 					self.style.foreground,
-					global_ctx.selection_foreground_color,
+					global_ctx.colors[.Selection_Foreground],
 				)
 			} else {
 				kn.add_text(self.text_layout, self.text_origin, self.style.foreground)
@@ -1951,7 +2039,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				draw_text_cursor(
 					&self.text_layout,
 					self.text_origin,
-					kn.fade(global_ctx.selection_background_color, f32(i32(self.is_focused))),
+					kn.fade(global_ctx.colors[.Selection_Background], f32(i32(self.is_focused))),
 				)
 			}
 		}
@@ -1963,9 +2051,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Draw children
 	for node in self.kids {
-		if box_get_clip(self.box, node.box) == .Full {
-			continue
-		}
 		node_draw_recursively(node, depth + 1)
 	}
 
@@ -2278,13 +2363,16 @@ inspector_show :: proc(self: ^Inspector) {
 			disable_inspection = true,
 		},
 	)
+	total_nodes := len(global_ctx.node_by_id)
 	do_node(
 		&{
 			text = fmt.tprintf(
-				"Inspector\nFPS: %.0f\nFrame time: %v\nCompute time: %v",
+				"Inspector\nFPS: %.0f\navg frame time: %v\navg compute time: %v\nDrawn nodes: %i/%i",
 				kn.get_fps(),
-				global_ctx.frame_duration,
-				global_ctx.compute_duration,
+				global_ctx.frame_duration_avg,
+				global_ctx.compute_duration_avg,
+				global_ctx.drawn_nodes,
+				total_nodes,
 			),
 			fit = 1,
 			padding = 3,
