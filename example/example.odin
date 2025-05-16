@@ -56,7 +56,7 @@ main :: proc() {
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
 			lucide.load()
-			components.get_global_theme().icon_font = &lucide.font
+			components.theme.icon_font = &lucide.font
 			app.image = opal.load_image("image.png") or_else panic("Could not load image!")
 		},
 		on_frame = proc(app: ^sdl3app.App) {
@@ -117,9 +117,75 @@ main :: proc() {
 					},
 				)
 
-				begin_node(&{max_size = INFINITY, grow = true})
+				begin_node(&{max_size = INFINITY, grow = true, content_align = 0.5})
 				{
+					begin_node(
+						&{
+							fit = 1,
+							radius = 7,
+							background = tw.NEUTRAL_800,
+							padding = 8,
+							spacing = 8,
+						},
+					)
+					{
+						do_icon_button :: proc(icon: rune, loc := #caller_location) {
+							do_node(
+								&{
+									text = string_from_rune(icon),
+									font = theme.icon_font,
+									font_size = 24,
+									foreground = tw.WHITE,
+									fit = 1,
+									padding = 4,
+									radius = 4,
+									on_animate = proc(self: ^Node) {
+										node_update_transition(self, 0, self.is_hovered, 0.1)
+										self.style.background = fade(
+											tw.NEUTRAL_700,
+											self.transitions[0],
+										)
+									},
+								},
+								loc,
+							)
+						}
+						do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
+							do_node(
+								&{
+									text = string_from_rune(icon),
+									font = theme.icon_font,
+									font_size = 24,
+									foreground = tw.WHITE,
+									fit = 1,
+									padding = 4,
+									radius = 4,
+									on_animate = proc(self: ^Node) {
+										node_update_transition(self, 0, self.is_hovered, 0.1)
+										self.style.background = fade(
+											tw.NEUTRAL_700,
+											self.transitions[0],
+										)
+									},
+								},
+								loc,
+							)
+						}
+						do_icon(lucide.BOLD)
+						do_icon(lucide.ITALIC)
+						do_icon(lucide.STRIKETHROUGH)
+						do_icon(lucide.UNDERLINE)
+						do_node(
+							&{
+								size = {2, 0},
+								max_size = {0, INFINITY},
+								grow = {false, true},
+								background = tw.NEUTRAL_700,
+							},
+						)
 
+					}
+					end_node()
 				}
 				end_node()
 			}
@@ -130,4 +196,3 @@ main :: proc() {
 
 	sdl3app.run(&{width = 1000, height = 800, min_width = 500, min_height = 400, vsync = true})
 }
-

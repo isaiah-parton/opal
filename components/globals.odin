@@ -8,12 +8,6 @@ Theme :: struct {
 	base_size:    [2]f32,
 }
 
-@(private)
 theme: Theme = {
 	base_size = 16,
 }
-
-get_global_theme :: proc() -> ^Theme {
-	return &theme
-}
-

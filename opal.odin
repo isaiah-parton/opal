@@ -411,6 +411,26 @@ Node :: struct {
 	owned_data:              rawptr,
 }
 
+Scope :: struct {
+	data:      rawptr,
+	type_info: runtime.Type_Info,
+}
+
+push_scope :: proc(value: any) {
+	ctx := global_ctx
+	scope := Scope {
+		type_info = type_info_of(value.id),
+	}
+	scope.data = mem.arena_alloc(&ctx.scope_arena, scope.type_info.size)
+	mem.copy(scope.data, value.data, scope.type_info.size)
+	append(&ctx.scopes, scope)
+	append(&ctx.scope_stack, &ctx.scopes[len(ctx.scopes) - 1])
+}
+
+pop_scope :: proc() {
+	pop(&ctx.scope_stack)
+}
+
 Context_Descriptor :: struct {
 	// Platform-defined callbacks
 	on_set_cursor:      On_Set_Cursor_Proc,
@@ -500,7 +520,7 @@ Context :: struct {
 	node_by_id:                 map[Id]^Node,
 
 	// Node memory is stored contiguously for memory efficiency.
-	// TODO: Implement a dynamic arena because Opal currently crashes when there's no slots available. (Maybe `begin_node` should be able to fail?)
+	// TODO: Implement a dynamic arena because Opal currently crashes once there's no more slots available. (Maybe `begin_node` should be able to fail?)
 	nodes:                      [4096]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
@@ -511,6 +531,14 @@ Context :: struct {
 
 	// The hash stack
 	id_stack:                   [dynamic]Id,
+
+	//
+	scopes:                     [dynamic]Scope,
+
+	// Scope stack
+	scope_stack:                [dynamic]^Scope,
+	scope_arena:                mem.Arena,
+	scope_data:                 []u8,
 
 	// The top-most element of the stack
 	current_node:               ^Node,
@@ -817,6 +845,10 @@ context_init :: proc(ctx: ^Context) {
 	ctx.selection_foreground_color = kn.BLACK
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
+
+	// Scope allocation
+	ctx.scope_data = make([]u8, 2048)
+	mem.arena_init(&ctx.scope_arena, ctx.scope_data)
 }
 
 context_deinit :: proc(ctx: ^Context) {
@@ -2317,4 +2349,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-
