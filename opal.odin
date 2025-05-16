@@ -425,6 +425,14 @@ Context_Descriptor :: struct {
 Context :: struct {
 	using descriptor:           Context_Descriptor,
 
+	///
+	/// Configuration
+	///
+
+	// Prevents sub-pixel positioning to make edges appear perfectly crisp, motion however will not be as smooth
+	// TODO: Implement this
+	snap_to_pixels:             bool,
+
 	// Additional frame delay
 	frame_interval:             time.Duration,
 
@@ -668,7 +676,13 @@ box_shrink_to_fit_inside :: proc(self, other: Box) -> Box {
 	return {linalg.clamp(self.lo, other.lo, other.hi), linalg.clamp(self.hi, other.lo, other.hi)}
 }
 
-box_snapped :: proc(self: Box) -> Box {
+box_snap :: proc(self: ^Box) {
+	size := self.hi - self.lo
+	self.lo = linalg.round(self.lo)
+	self.hi = self.lo + linalg.floor(size)
+}
+
+box_floored :: proc(self: Box) -> Box {
 	return Box{linalg.floor(self.lo), linalg.floor(self.hi)}
 }
 
@@ -1543,6 +1557,9 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
 	}
 	self.box.hi = self.box.lo + self.size
+	if global_ctx.snap_to_pixels {
+		box_snap(&self.box)
+	}
 }
 
 node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offset: [2]f32 = {}) {
@@ -2007,7 +2024,7 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 				},
 		}
 		kn.add_box(
-			box,
+			box_floored(box),
 			3 *
 			{
 					f32(i32(ordered_selection[0] >= line.first_glyph)),
@@ -2104,26 +2121,64 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	return strings.to_string(b)
 }
 
-Inspector :: struct {
-	shown:          bool,
+//
+// SECTION: Builtin UI
+//
+
+_BACKGROUND :: tw.NEUTRAL_900
+_FOREGROUND :: tw.NEUTRAL_800
+_TEXT :: tw.WHITE
+
+Draggable_Node :: struct {
 	position:       [2]f32,
 	move_offset:    [2]f32,
 	is_being_moved: bool,
-	selected_id:    Id,
-	inspected_id:   Id,
 }
 
-INSPECTOR_BACKGROUND :: tw.STONE_900
-INSPECTOR_ACCENT :: tw.STONE_800
+draggable_node_update :: proc(self: ^Draggable_Node, node: ^Node) {
+	ctx := global_ctx
+	if (node.is_hovered || node.has_hovered_child) && mouse_pressed(.Left) {
+		self.is_being_moved = true
+		self.move_offset = ctx.mouse_position - self.position
+	}
+	if mouse_released(.Left) {
+		self.is_being_moved = false
+	}
+	if self.is_being_moved {
+		set_cursor(.Dragging)
+		self.position = ctx.mouse_position - self.move_offset
+	}
+}
+
+Settings_Editor :: struct {
+	using draggable_node: Draggable_Node,
+	ctx:                  ^Context,
+}
+
+settings_editor_show :: proc(self: ^Settings_Editor) {
+	begin_node(&{position = self.position, data = self, on_animate = proc(self: ^Node) {
+				draggable_node_update((^Settings_Editor)(self.data), self)
+			}})
+
+	end_node()
+}
+
+Inspector :: struct {
+	using draggable_node: Draggable_Node,
+	shown:                bool,
+	selected_id:          Id,
+	inspected_id:         Id,
+}
 
 inspector_show :: proc(self: ^Inspector) {
 	begin_node(
 		&{
 			position = self.position,
+			bounds = get_screen_box(),
 			size = {300, 500},
 			vertical = true,
 			padding = 1,
-			style = {stroke_width = 1, stroke = tw.CYAN_800, background = INSPECTOR_BACKGROUND},
+			style = {stroke_width = 1, stroke = tw.CYAN_800, background = _BACKGROUND},
 			z_index = 1,
 			disable_inspection = true,
 		},
@@ -2138,23 +2193,12 @@ inspector_show :: proc(self: ^Inspector) {
 			),
 			fit = 1,
 			padding = 3,
-			style = {font_size = 12, background = tw.NEUTRAL_950, foreground = tw.CYAN_50},
+			style = {font_size = 12, background = _FOREGROUND, foreground = _TEXT},
 			grow = {true, false},
 			max_size = INFINITY,
 			data = self,
 			on_animate = proc(self: ^Node) {
-				inspector := (^Inspector)(self.data)
-				if (self.is_hovered || self.has_hovered_child) && mouse_pressed(.Left) {
-					inspector.is_being_moved = true
-					inspector.move_offset = global_ctx.mouse_position - self.box.lo
-				}
-				if mouse_released(.Left) {
-					inspector.is_being_moved = false
-				}
-				if inspector.is_being_moved {
-					set_cursor(.Dragging)
-					inspector.position = global_ctx.mouse_position - inspector.move_offset
-				}
+				draggable_node_update((^Inspector)(self.data), self)
 			},
 		},
 	)
@@ -2170,7 +2214,7 @@ inspector_show :: proc(self: ^Inspector) {
 					text = fmt.tprintf("%#v", node),
 					clip_content = true,
 					show_scrollbars = true,
-					style = {font_size = 12, background = tw.NEUTRAL_950, foreground = tw.GRAY_50},
+					style = {font_size = 12, background = _BACKGROUND, foreground = _TEXT},
 					enable_selection = true,
 				},
 			)

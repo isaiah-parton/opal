@@ -4,6 +4,7 @@ Color :: [4]u8
 
 WHITE :: Color{255, 255, 255, 255}
 BLACK :: Color{0, 0, 0, 255}
+TRANSPARENT :: Color{0, 0, 0, 0}
 
 SLATE_50 :: Color{248, 250, 252, 255}
 SLATE_100 :: Color{241, 245, 249, 255}
@@ -579,3 +580,4 @@ COLORS := [][]Color {
 	PINK,
 	ROSE,
 }
+

@@ -72,7 +72,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 
 	assert(node != nil)
 
-	is_open := node.is_focused | node.has_focused_child | node.was_focused
+	is_open := node.is_focused | node.has_focused_child
 
 	if is_open {
 		begin_node(
