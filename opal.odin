@@ -2018,21 +2018,34 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				}
 			}
 			if !too_smol {
-				box := self.box
+				box := Box{self.box.lo - self.scroll, {}}
+				box.hi = box.lo + linalg.max(self.content_size, self.size)
 				padding_paint := kn.paint_index_from_option(kn.fade(kn.SKY_BLUE, 0.5))
 				if self.padding.x > 0 {
-					kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
+					kn.add_box(
+						box_clamped(box_cut_left(&box, self.padding.x), self.box),
+						paint = padding_paint,
+					)
 				}
 				if self.padding.y > 0 {
-					kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
+					kn.add_box(
+						box_clamped(box_cut_top(&box, self.padding.y), self.box),
+						paint = padding_paint,
+					)
 				}
 				if self.padding.z > 0 {
-					kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
+					kn.add_box(
+						box_clamped(box_cut_right(&box, self.padding.z), self.box),
+						paint = padding_paint,
+					)
 				}
 				if self.padding.w > 0 {
-					kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
+					kn.add_box(
+						box_clamped(box_cut_bottom(&box, self.padding.w), self.box),
+						paint = padding_paint,
+					)
 				}
-				kn.add_box(self.box, paint = kn.fade(kn.BLUE_VIOLET, 0.5))
+				kn.add_box(box_clamped(box, self.box), paint = kn.fade(kn.BLUE_VIOLET, 0.5))
 			}
 		}
 	}
