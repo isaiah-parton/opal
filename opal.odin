@@ -211,6 +211,26 @@ Node_Style :: struct {
 	shadow_size:      f32,
 }
 
+Node_Layout_Descriptor :: struct {
+	// Values for the node's children layout
+	padding:  [4]f32,
+
+	// The maximum size the node is allowed to grow to
+	max_size: [2]f32,
+
+	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
+	size:     [2]f32,
+
+	// If the node will grow to acommodate its contents
+	fit:      [2]f32,
+
+	// If the node will be grown to fill available space
+	grow:     [2]bool,
+
+	// Spacing added between children
+	spacing:  f32,
+}
+
 //
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
@@ -292,6 +312,9 @@ Node_Descriptor :: struct {
 	// Show/hide scrollbars when content overflows
 	show_scrollbars:         bool,
 
+	//
+	square_fit:              bool,
+
 	// Values for the node's children layout
 	padding:                 [4]f32,
 
@@ -348,8 +371,8 @@ Node :: struct {
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                     Box,
 
-	// The previous calculated size
-	last_size:               [2]f32,
+	// The content size minus the last calculated size
+	overflow:                [2]f32,
 
 	// This is known after box is calculated
 	text_origin:             [2]f32,
@@ -413,7 +436,7 @@ Node :: struct {
 
 Scope :: struct {
 	data:      rawptr,
-	type_info: runtime.Type_Info,
+	type_info: ^runtime.Type_Info,
 }
 
 push_scope :: proc(value: any) {
@@ -421,13 +444,14 @@ push_scope :: proc(value: any) {
 	scope := Scope {
 		type_info = type_info_of(value.id),
 	}
-	scope.data = mem.arena_alloc(&ctx.scope_arena, scope.type_info.size)
+	scope.data, _ = mem.arena_alloc(&ctx.scope_arena, scope.type_info.size)
 	mem.copy(scope.data, value.data, scope.type_info.size)
 	append(&ctx.scopes, scope)
 	append(&ctx.scope_stack, &ctx.scopes[len(ctx.scopes) - 1])
 }
 
 pop_scope :: proc() {
+	ctx := global_ctx
 	pop(&ctx.scope_stack)
 }
 
@@ -676,7 +700,7 @@ box_contains_other :: proc(self, other: Box) -> bool {
 	)
 }
 
-// Get the clip status of `b` inside `a`
+// Get the clip status of a box inside another
 box_get_clip :: proc(self, other: Box) -> Clip {
 	if self.lo.x >= other.lo.x &&
 	   self.hi.x <= other.hi.x &&
@@ -693,17 +717,35 @@ box_get_clip :: proc(self, other: Box) -> Clip {
 	return .Partial
 }
 
-// Updates `a` to fit `b` inside it
+// Get the clip status of a box inside a rounded box
+box_get_rounded_clip :: proc(self, other: Box, radius: f32) -> Clip {
+	if self.lo.x >= other.lo.x + radius &&
+	   self.hi.x <= other.hi.x - radius &&
+	   self.lo.y >= other.lo.y + radius &&
+	   self.hi.y <= other.hi.y - radius {
+		return .None
+	}
+	if self.lo.x > other.hi.x - radius ||
+	   self.hi.x < other.lo.x + radius ||
+	   self.lo.y > other.hi.y - radius ||
+	   self.hi.y < other.lo.y + radius {
+		return .Full
+	}
+	return .Partial
+}
+
+// Grow a box to fit another box inside it
 box_grow_to_fit :: proc(self: ^Box, other: Box) {
 	self.lo = linalg.min(self.lo, other.lo)
 	self.hi = linalg.max(self.hi, other.hi)
 }
 
-// Clamps `a` inside `b`
-box_shrink_to_fit_inside :: proc(self, other: Box) -> Box {
+// Returns the box clamped inside another
+box_clamped :: proc(self, other: Box) -> Box {
 	return {linalg.clamp(self.lo, other.lo, other.hi), linalg.clamp(self.hi, other.lo, other.hi)}
 }
 
+// Snap a box to a whole number position
 box_snap :: proc(self: ^Box) {
 	size := self.hi - self.lo
 	self.lo = linalg.round(self.lo)
@@ -1258,10 +1300,14 @@ end_node :: proc() {
 	if self == nil {
 		return
 	}
+
 	i := int(self.vertical)
 	self.content_size += self.padding.xy + self.padding.zw
 	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
 	self.size = linalg.max(self.size, self.content_size * self.fit)
+	if self.square_fit {
+		self.size = max(self.size.x, self.size.y)
+	}
 
 	// Add scrollbars
 	if self.show_scrollbars {
@@ -1269,7 +1315,7 @@ end_node :: proc() {
 		SCROLLBAR_PADDING :: 2
 		inner_box := box_shrink(self.box, 1)
 		push_id(self.id)
-		if self.content_size.y > self.last_size.y {
+		if self.overflow.y > 0 {
 			do_node(
 				&{
 					is_absolute = true,
@@ -1313,7 +1359,7 @@ end_node :: proc() {
 				},
 			)
 		}
-		if self.content_size.x > self.last_size.x {
+		if self.overflow.x > 0 {
 			do_node(
 				&{
 					is_absolute = true,
@@ -1624,7 +1670,7 @@ node_solve_box_recursively :: proc(self: ^Node, mouse_overlap: bool = true, offs
 			self.box.lo - self.scroll * f32(i32(!node.is_absolute)),
 		)
 		node_receive_propagated_input(self, node)
-		if box_get_clip(node.box, self.box) != .None {
+		if box_get_rounded_clip(node.box, self.box, 10) != .None {
 			self.has_clipped_child = true
 		}
 	}
@@ -1657,11 +1703,6 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 			self.click_count += 1
 			self.last_click_time = time.now()
 		}
-	}
-
-	// Receive mouse wheel input
-	if ctx.scrollable_node != nil && ctx.scrollable_node.id == self.id {
-		self.target_scroll -= ctx.mouse_scroll * 24
 	}
 
 	return
@@ -1715,7 +1756,8 @@ node_solve_sizes :: proc(self: ^Node) {
 			node.position += self.size * node.relative_position
 			node.size += self.size * node.relative_size
 		} else {
-			node.position[i] = offset_along_axis + remaining_space * self.content_align[i]
+			node.position[i] =
+				offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
 			if node.grow[j] {
 				node.size[j] = max(node.size[j], available_span)
 			}
@@ -1746,7 +1788,11 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	assert(depth < 128)
 	ctx := global_ctx
 
-	self.last_size = self.size
+	// Receive mouse wheel input
+	if ctx.scrollable_node != nil && ctx.scrollable_node.id == self.id {
+		self.target_scroll -= ctx.mouse_scroll * 24
+	}
+	self.overflow = linalg.max(self.content_size - self.size, 0)
 
 	last_transitions := self.transitions
 	if self.on_animate != nil {
@@ -1782,10 +1828,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.last_text_size = self.text_layout.size
 	}
 
-	overflow := linalg.max(self.content_size - self.size, 0)
-
 	enable_scissor :=
-		self.clip_content && (self.has_clipped_child || max(overflow.x, overflow.y) > 0.1)
+		self.clip_content &&
+		(self.has_clipped_child || max(self.overflow.x, self.overflow.y) > 0.1)
 
 	// Compute text selection state if enabled
 	if self.enable_selection {
@@ -1794,16 +1839,21 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			ctx.mouse_position - self.text_origin,
 			self.editor.selection,
 		)
+
 		if self.text_layout.contact.valid && self.is_hovered {
 			set_cursor(.Text)
 		}
+
 		node_update_selection(self)
+
 		cursor_box := text_get_cursor_box(&self.text_layout, self.text_origin)
+
+		// Make sure to clip the cursor
 		left := max(0, self.box.lo.x - cursor_box.lo.x)
 		right := max(0, cursor_box.hi.x - self.box.hi.x)
-		if max(left, right) > 0 {
-			enable_scissor = true
-		}
+		enable_scissor |= max(left, right) > 0
+
+		// Scroll to bring cursor into view
 		if self.is_focused && self.editor.selection != self.last_selection {
 			self.target_scroll.x += right - left
 		}
@@ -2349,3 +2399,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+

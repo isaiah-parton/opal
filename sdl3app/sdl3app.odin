@@ -15,6 +15,7 @@ state: rawptr
 App_Callback :: #type proc(app: ^App)
 
 App :: struct {
+	using descriptor:   App_Descriptor,
 	run:                bool,
 	cursors:            [sdl3.SystemCursor]^sdl3.Cursor,
 	window:             ^sdl3.Window,
@@ -27,11 +28,13 @@ App :: struct {
 }
 
 App_Descriptor :: struct {
-	width:      i32,
-	height:     i32,
-	min_width:  i32,
-	min_height: i32,
-	vsync:      bool,
+	width:            i32,
+	height:           i32,
+	min_width:        i32,
+	min_height:       i32,
+	radius:           f32,
+	customize_window: bool,
+	vsync:            bool,
 }
 
 @(private)
@@ -125,11 +128,10 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	appstate^ = state
 	app := (^App)(appstate^)
 
-	descriptor: App_Descriptor
 	if global_descriptor != nil {
-		descriptor = global_descriptor^
+		app.descriptor = global_descriptor^
 	} else {
-		descriptor = {
+		app.descriptor = {
 			width      = 800,
 			height     = 600,
 			min_width  = 500,
@@ -137,20 +139,24 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 		}
 	}
 
-	app.window = sdl3.CreateWindow(
-		"OPAL",
-		descriptor.width,
-		descriptor.height,
-		{.RESIZABLE, .BORDERLESS, .TRANSPARENT},
-	)
-	sdl3.SetWindowHitTest(app.window, hit_test_callback, app)
-	sdl3.SetWindowMinimumSize(app.window, descriptor.min_width, descriptor.min_height)
+	window_flags := sdl3.WindowFlags{.RESIZABLE}
+	if app.customize_window {
+		window_flags += {.BORDERLESS, .TRANSPARENT}
+	}
+
+	app.window = sdl3.CreateWindow("OPAL", app.width, app.height, window_flags)
+
+	// Hit test callback for modified moving/resizing hitboxes
+	if app.customize_window {
+		sdl3.SetWindowHitTest(app.window, hit_test_callback, app)
+	}
+	sdl3.SetWindowMinimumSize(app.window, app.min_width, app.min_height)
 
 	if !sdl3.StartTextInput(app.window) {
 		panic("Can't accept text input!")
 	}
 
-	platform := sdl3glue.make_platform_sdl3glue(app.window, descriptor.vsync)
+	platform := sdl3glue.make_platform_sdl3glue(app.window, app.vsync)
 	kn.start_on_platform(platform)
 
 	opal.init({
@@ -189,7 +195,6 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 			return {f32(width), f32(height)}
 		},
 	})
-
 
 	// Create system cursors
 	for cursor in sdl3.SystemCursor {
@@ -284,6 +289,12 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 run :: proc(descriptor: ^App_Descriptor = nil) {
 	global_descriptor = descriptor
 	sdl3.EnterAppMainCallbacks(0, nil, app_main, app_iter, app_event, app_quit)
+}
+
+app_use_node_for_window_grabbing :: proc(self: ^App, node: ^opal.Node) {
+	self.enable_window_grab =
+		(node.is_hovered || node.has_hovered_child) && !opal.global_ctx.widget_hovered
+	self.window_grab_box = node.box
 }
 
 detect_tiling_window_manager :: proc() -> bool {

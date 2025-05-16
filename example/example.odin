@@ -51,7 +51,8 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(My_App {
+	sdl3app.state = new_clone(
+	My_App {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -62,17 +63,19 @@ main :: proc() {
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
 			using opal, components
+			window_radius :=
+				app.radius * f32(i32(.MAXIMIZED not_in sdl3.GetWindowFlags(app.window)))
 			begin()
 			begin_node(
 				&{
 					size = kn.get_size(),
-					style = {
-						background = tw.NEUTRAL_950,
-						stroke = tw.NEUTRAL_600,
-						stroke_width = 1,
-					},
+					background = tw.NEUTRAL_950,
+					stroke = tw.NEUTRAL_800,
+					stroke_width = 1,
 					vertical = true,
 					padding = 1,
+					radius = window_radius,
+					clip_content = window_radius > 0,
 				},
 			)
 			{
@@ -83,7 +86,7 @@ main :: proc() {
 						max_size = INFINITY,
 						grow = {true, false},
 						content_align = {0, 0.5},
-						style = {background = tw.NEUTRAL_900},
+						style = {background = tw.NEUTRAL_800},
 					},
 				)
 				{
@@ -103,96 +106,116 @@ main :: proc() {
 					}
 				}
 				end_node()
-				app.enable_window_grab =
-					(title_node.is_hovered || title_node.has_hovered_child) &&
-					!global_ctx.widget_hovered
-				app.window_grab_box = title_node.box
+				sdl3app.app_use_node_for_window_grabbing(app, title_node)
 
-				do_node(
+				begin_node(
 					&{
-						size = {0, 1},
-						grow = {true, false},
-						max_size = INFINITY,
-						background = tw.NEUTRAL_600,
+						max_size        = INFINITY,
+						grow            = true,
+						// content_align = 0.5,
+						spacing         = 5,
+						padding         = 20,
+						vertical        = true,
+						clip_content    = true,
+						show_scrollbars = true,
 					},
 				)
-
-				begin_node(&{max_size = INFINITY, grow = true, content_align = 0.5})
 				{
-					begin_node(
-						&{
-							fit = 1,
-							radius = 7,
-							background = tw.NEUTRAL_800,
-							padding = 8,
-							spacing = 8,
-						},
-					)
-					{
-						do_icon_button :: proc(icon: rune, loc := #caller_location) {
-							do_node(
-								&{
-									text = string_from_rune(icon),
-									font = theme.icon_font,
-									font_size = 24,
-									foreground = tw.WHITE,
-									fit = 1,
-									padding = 4,
-									radius = 4,
-									on_animate = proc(self: ^Node) {
-										node_update_transition(self, 0, self.is_hovered, 0.1)
-										self.style.background = fade(
-											tw.NEUTRAL_700,
-											self.transitions[0],
-										)
-									},
-								},
-								loc,
-							)
-						}
-						do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
-							do_node(
-								&{
-									text = string_from_rune(icon),
-									font = theme.icon_font,
-									font_size = 24,
-									foreground = tw.WHITE,
-									fit = 1,
-									padding = 4,
-									radius = 4,
-									on_animate = proc(self: ^Node) {
-										node_update_transition(self, 0, self.is_hovered, 0.1)
-										self.style.background = fade(
-											tw.NEUTRAL_700,
-											self.transitions[0],
-										)
-									},
-								},
-								loc,
-							)
-						}
-						do_icon(lucide.BOLD)
-						do_icon(lucide.ITALIC)
-						do_icon(lucide.STRIKETHROUGH)
-						do_icon(lucide.UNDERLINE)
+					for i in 1 ..= 1000 {
+						push_id(i)
 						do_node(
 							&{
-								size = {2, 0},
-								max_size = {0, INFINITY},
-								grow = {false, true},
-								background = tw.NEUTRAL_700,
+								size = {0, 30},
+								max_size = INFINITY,
+								grow = {true, false},
+								background = tw.NEUTRAL_800,
+								foreground = tw.ROSE_500,
+								font_size = 14,
+								text = fmt.tprintf("Item #%i", i),
+								content_align = 0.5,
 							},
 						)
-
+						pop_id()
 					}
-					end_node()
 				}
 				end_node()
 			}
 			end_node()
 			end()
 		},
-	})
+	},
+	)
 
-	sdl3app.run(&{width = 1000, height = 800, min_width = 500, min_height = 400, vsync = true})
+	sdl3app.run(
+		&{
+			width = 1000,
+			height = 800,
+			min_width = 500,
+			min_height = 400,
+			vsync = true,
+			customize_window = true,
+		},
+	)
 }
+
+do_text_editor_toolbar :: proc() {
+	using opal, components
+	begin_node(&{fit = 1, radius = 7, background = tw.NEUTRAL_800, padding = 8, spacing = 8})
+	{
+		do_icon_button :: proc(icon: rune, loc := #caller_location) {
+			do_node(
+				&{
+					text = string_from_rune(icon),
+					font = theme.icon_font,
+					font_size = 24,
+					foreground = tw.WHITE,
+					fit = 1,
+					padding = 4,
+					radius = 4,
+					square_fit = true,
+					content_align = 0.5,
+					on_animate = proc(self: ^Node) {
+						node_update_transition(self, 0, self.is_hovered, 0.1)
+						self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+					},
+				},
+				loc,
+			)
+		}
+		do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
+			do_node(
+				&{
+					text = string_from_rune(icon),
+					font = theme.icon_font,
+					font_size = 24,
+					foreground = tw.WHITE,
+					fit = 1,
+					padding = 4,
+					radius = 4,
+					square_fit = true,
+					content_align = 0.5,
+					on_animate = proc(self: ^Node) {
+						node_update_transition(self, 0, self.is_hovered, 0.1)
+						self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+					},
+				},
+				loc,
+			)
+		}
+		do_icon_button(lucide.BOLD)
+		do_icon_button(lucide.ITALIC)
+		do_icon_button(lucide.STRIKETHROUGH)
+		do_icon_button(lucide.UNDERLINE)
+		do_node(
+			&{
+				size = {2, 0},
+				max_size = {0, INFINITY},
+				grow = {false, true},
+				background = tw.NEUTRAL_700,
+			},
+		)
+
+	}
+	end_node()
+}
+
