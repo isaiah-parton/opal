@@ -18,8 +18,6 @@ import "vendor:wgpu"
 
 import "../components"
 
-FILLER_TEXT :: "Algo de texto que puedes seleccionar si gusta."
-
 My_App :: struct {
 	using app:             sdl3app.App,
 	image:                 int,
@@ -124,24 +122,25 @@ main :: proc() {
 						show_scrollbars = true,
 					},
 				)
-				{
-					for i in 1 ..= 1000 {
-						push_id(i)
-						do_node(
-							&{
-								size = {0, 30},
-								max_size = INFINITY,
-								grow = {true, false},
-								background = tw.NEUTRAL_900,
-								foreground = tw.ROSE_500,
-								font_size = 14,
-								text = fmt.tprintf("Item #%i", i),
-								content_align = 0.5,
-							},
-						)
-						pop_id()
-					}
-				}
+				do_text_editor_toolbar(app)
+				// {
+				// 	for i in 1 ..= 1000 {
+				// 		push_id(i)
+				// 		do_node(
+				// 			&{
+				// 				size = {0, 30},
+				// 				max_size = INFINITY,
+				// 				grow = {true, false},
+				// 				background = tw.NEUTRAL_900,
+				// 				foreground = tw.ROSE_500,
+				// 				font_size = 14,
+				// 				text = fmt.tprintf("Item #%i", i),
+				// 				content_align = 0.5,
+				// 			},
+				// 		)
+				// 		pop_id()
+				// 	}
+				// }
 				end_node()
 			}
 			end_node()
@@ -162,7 +161,7 @@ main :: proc() {
 	)
 }
 
-do_text_editor_toolbar :: proc() {
+do_text_editor_toolbar :: proc(app: ^My_App) {
 	using opal, components
 	begin_node(&{fit = 1, radius = 7, background = tw.NEUTRAL_800, padding = 8, spacing = 8})
 	{
@@ -180,7 +179,11 @@ do_text_editor_toolbar :: proc() {
 					content_align = 0.5,
 					on_animate = proc(self: ^Node) {
 						node_update_transition(self, 0, self.is_hovered, 0.1)
-						self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+						node_update_transition(self, 1, self.is_active, 0.1)
+						self.background = fade(
+							mix(self.transitions[1], tw.NEUTRAL_700, tw.ROSE_600),
+							self.transitions[0],
+						)
 					},
 				},
 				loc,
@@ -218,6 +221,42 @@ do_text_editor_toolbar :: proc() {
 				background = tw.NEUTRAL_700,
 			},
 		)
+		do_icon_button(lucide.LIGHTBULB)
+		toggle_switch := make_toggle_switch(&app.boolean)
+		do_node(&toggle_switch)
+		node := do_node(
+			&{
+				background = tw.NEUTRAL_950,
+				stroke = tw.NEUTRAL_500,
+				stroke_width = 1,
+				clip_content = true,
+				text = app.edited_text,
+				font_size = 16,
+				padding = 4,
+				radius = 3,
+				foreground = tw.NEUTRAL_50,
+				fit = {0, 1},
+				size = {200, 0},
+				max_size = INFINITY,
+				grow = {false, true},
+				enable_edit = true,
+				enable_selection = true,
+				is_widget = true,
+				stroke_type = .Outer,
+				content_align = {0, 0.5},
+				on_animate = proc(self: ^Node) {
+					using opal
+					node_update_transition(self, 0, self.is_hovered, 0.1)
+					node_update_transition(self, 1, self.is_focused, 0.1)
+					self.style.stroke = tw.LIME_500
+					self.style.stroke_width = 3 * self.transitions[1]
+				},
+			},
+		)
+		if node.was_changed {
+			delete(app.edited_text)
+			app.edited_text = strings.clone(strings.to_string(node.builder))
+		}
 
 	}
 	end_node()

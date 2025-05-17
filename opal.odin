@@ -1337,9 +1337,11 @@ end_node :: proc() {
 	i := int(self.vertical)
 	self.content_size += self.padding.xy + self.padding.zw
 	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
-	self.size = linalg.max(self.size, self.content_size * self.fit)
-	if self.square_fit {
-		self.size = max(self.size.x, self.size.y)
+	if self.fit != {} {
+		self.size = linalg.max(self.size, self.content_size * self.fit)
+		if self.square_fit {
+			self.size = max(self.size.x, self.size.y)
+		}
 	}
 
 	// Add scrollbars
@@ -1360,7 +1362,7 @@ end_node :: proc() {
 					relative_position = {1, 0},
 					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
-					size = {SCROLLBAR_SIZE, -SCROLLBAR_PADDING * 2},
+					size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2},
 					style = scrollbar_style,
 					z_index = 1,
 					padding = 1,
@@ -1773,10 +1775,12 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 			// Set this node as the globally active one, `is_active` will be true next frame unless the active state is stolen
 			ctx.active_node = self
 			// Reset click counter if there was too much delay
-			if time.since(self.last_click_time) > time.Millisecond * 450 {
+			if time.since(self.last_click_time) > time.Millisecond * 300 {
 				self.click_count = 0
 			}
 			self.click_count += 1
+
+			// fmt.println(self.click_count)
 			self.last_click_time = time.now()
 		}
 	}
@@ -2137,6 +2141,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 }
 
 text_get_cursor_box :: proc(self: ^kn.Selectable_Text, offset: [2]f32) -> Box {
+	if len(self.glyphs) == 0 {
+		return {}
+	}
 	line_height := self.font.line_height * self.font_scale
 	top_left := offset + self.glyphs[self.selection.glyphs[0]].offset
 	return {{top_left.x - 1, top_left.y}, {top_left.x + 1, top_left.y + line_height}}
