@@ -112,17 +112,17 @@ main :: proc() {
 
 				begin_node(
 					&{
-						max_size        = INFINITY,
-						grow            = true,
-						// content_align = 0.5,
-						spacing         = 5,
-						padding         = 20,
-						vertical        = true,
-						clip_content    = true,
+						max_size = INFINITY,
+						grow = true,
+						content_align = 0.5,
+						spacing = 5,
+						padding = 20,
+						vertical = true,
+						clip_content = true,
 						show_scrollbars = true,
 					},
 				)
-				do_text_editor_toolbar(app)
+				do_text_editor(app)
 				// {
 				// 	for i in 1 ..= 1000 {
 				// 		push_id(i)
@@ -161,64 +161,102 @@ main :: proc() {
 	)
 }
 
-do_text_editor_toolbar :: proc(app: ^My_App) {
+do_text_editor :: proc(app: ^My_App) {
 	using opal, components
-	begin_node(&{fit = 1, radius = 7, background = tw.NEUTRAL_800, padding = 8, spacing = 8})
+	begin_node(
+		&{
+			fit = 1,
+			padding = 8,
+			background = tw.NEUTRAL_800,
+			radius = 7,
+			vertical = true,
+			spacing = 8,
+		},
+	)
 	{
-		do_icon_button :: proc(icon: rune, loc := #caller_location) {
-			self := add_node(
+		begin_node(&{fit = 1, spacing = 8, content_align = {0, 0.5}})
+		{
+			do_icon_button :: proc(icon: rune, loc := #caller_location) {
+				self := add_node(
+					&{
+						text = string_from_rune(icon),
+						font = theme.icon_font,
+						font_size = 24,
+						foreground = tw.WHITE,
+						fit = 1,
+						padding = 4,
+						radius = 4,
+						square_fit = true,
+						content_align = 0.5,
+					},
+					loc,
+				).?
+				node_update_transition(self, 0, self.is_hovered, 0.1)
+				node_update_transition(self, 1, self.is_active, 0.1)
+				self.background = fade(
+					mix(self.transitions[1], tw.NEUTRAL_700, tw.ROSE_600),
+					self.transitions[0],
+				)
+			}
+			do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
+				self := add_node(
+					&{
+						text = string_from_rune(icon),
+						font = theme.icon_font,
+						font_size = 24,
+						foreground = tw.WHITE,
+						fit = 1,
+						padding = 4,
+						radius = 4,
+						square_fit = true,
+						content_align = 0.5,
+					},
+					loc,
+				).?
+				node_update_transition(self, 0, self.is_hovered, 0.1)
+				self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+			}
+			//
+			// Some text editing options
+			//
+			do_icon_button(lucide.BOLD)
+			do_icon_button(lucide.ITALIC)
+			do_icon_button(lucide.STRIKETHROUGH)
+			do_icon_button(lucide.UNDERLINE)
+			//
+			// Add a visual separator
+			//
+			add_node(
 				&{
-					text = string_from_rune(icon),
-					font = theme.icon_font,
-					font_size = 24,
-					foreground = tw.WHITE,
-					fit = 1,
-					padding = 4,
-					radius = 4,
-					square_fit = true,
-					content_align = 0.5,
+					size = {2, 0},
+					max_size = {0, INFINITY},
+					grow = {false, true},
+					background = tw.NEUTRAL_700,
 				},
-				loc,
-			).?
-			node_update_transition(self, 0, self.is_hovered, 0.1)
-			node_update_transition(self, 1, self.is_active, 0.1)
-			self.background = fade(
-				mix(self.transitions[1], tw.NEUTRAL_700, tw.ROSE_600),
-				self.transitions[0],
 			)
+			//
+			// The toggle switch is a very simple component with fixed sizing so it can be added in one step
+			//
+			add_toggle_switch(&app.boolean)
 		}
-		do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
-			self := add_node(
-				&{
-					text = string_from_rune(icon),
-					font = theme.icon_font,
-					font_size = 24,
-					foreground = tw.WHITE,
-					fit = 1,
-					padding = 4,
-					radius = 4,
-					square_fit = true,
-					content_align = 0.5,
-				},
-				loc,
-			).?
-			node_update_transition(self, 0, self.is_hovered, 0.1)
-			self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+		end_node()
+		//
+		// Here I add a text field to the UI with a few steps
+		//
+		{
+			// First, create the descriptor that will define the node as an editable input
+			desc := make_field_descriptor(&app.edited_text, type_info_of(type_of(app.edited_text)))
+			// Then apply my sizing preference
+			desc.size = {300, 200}
+			desc.grow = {true, false}
+			desc.max_size = {INFINITY, 0}
+			desc.placeholder = "Once upon a time..."
+			desc.is_multiline = true
+			desc.enable_wrapping = true
+			// Then add the node to the UI and perform the input logic
+			add_field(&desc)
 		}
-		do_icon_button(lucide.BOLD)
-		do_icon_button(lucide.ITALIC)
-		do_icon_button(lucide.STRIKETHROUGH)
-		do_icon_button(lucide.UNDERLINE)
-		add_node(
-			&{
-				size = {2, 0},
-				max_size = {0, INFINITY},
-				grow = {false, true},
-				background = tw.NEUTRAL_700,
-			},
-		)
-		do_icon_button(lucide.LIGHTBULB)
-		add_toggle_switch(&app.boolean)
 	}
 	end_node()
 }
+

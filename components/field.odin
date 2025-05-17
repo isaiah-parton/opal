@@ -1,46 +1,69 @@
 package components
 
 import ".."
+import tw "../tailwind_colors"
 import "base:runtime"
+import "core:fmt"
+import "core:io"
+import "core:mem"
+import "core:strconv"
 import "core:strings"
 
-add_input_raw :: proc(data: rawptr, type_info: ^runtime.Type_Info) {
-	node := add_node(
-		&{
-			background = tw.NEUTRAL_950,
-			stroke = tw.NEUTRAL_500,
-			stroke_width = 1,
-			clip_content = true,
-			text = app.edited_text,
-			font_size = 16,
-			padding = 4,
-			radius = 3,
-			foreground = tw.NEUTRAL_50,
-			fit = {0, 1},
-			size = {200, 0},
-			max_size = INFINITY,
-			grow = {false, true},
-			enable_edit = true,
-			enable_selection = true,
-			is_widget = true,
-			stroke_type = .Outer,
-			content_align = {0, 0.5},
-		},
-	).?
-	node_update_transition(node, 0, node.is_hovered, 0.1)
-	node_update_transition(node, 1, node.is_focused, 0.1)
-	node.style.stroke = tw.LIME_500
-	node.style.stroke_width = 3 * node.transitions[1]
-	if node.was_changed {
-		replace_input_content(data, type_info, strings.to_string(node.builder))
+Field_Descriptor :: struct {
+	using base:      opal.Node_Descriptor,
+	placeholder:     string,
+	value_data:      rawptr,
+	value_type_info: ^runtime.Type_Info,
+}
+
+make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Field_Descriptor {
+	return {
+		background = tw.NEUTRAL_950,
+		stroke = tw.NEUTRAL_500,
+		stroke_width = 1,
+		font_size = 16,
+		padding = 4,
+		radius = 3,
+		clip_content = true,
+		text = fmt.tprint(any{data = data, id = type_info.id}),
+		foreground = tw.NEUTRAL_50,
+		enable_edit = true,
+		enable_selection = true,
+		is_widget = true,
+		stroke_type = .Outer,
+		value_data = data,
+		value_type_info = type_info,
 	}
 }
 
-add_input_any :: proc(value: any) {
-
+add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
+	using opal
+	self := begin_node(desc).?
+	if desc.placeholder != "" && len(desc.text) == 0 {
+		push_id(hash(loc))
+		add_node(
+			&{
+				font = desc.font,
+				font_size = desc.font_size,
+				foreground = tw.NEUTRAL_500,
+				text = desc.placeholder,
+				fit = 1,
+				inert = true,
+			},
+		)
+		pop_id()
+	}
+	end_node()
+	node_update_transition(self, 0, self.is_hovered, 0.1)
+	node_update_transition(self, 1, self.is_focused, 0.1)
+	self.style.stroke = tw.LIME_500
+	self.style.stroke_width = 3 * self.transitions[1]
+	if self.was_changed {
+		field_output(desc.value_data, desc.value_type_info, strings.to_string(self.builder))
+	}
 }
 
-replace_input_content :: proc(
+field_output :: proc(
 	data: rawptr,
 	type_info: ^runtime.Type_Info,
 	text: string,
@@ -107,3 +130,4 @@ replace_input_content :: proc(
 	}
 	return true
 }
+

@@ -58,6 +58,8 @@ translate_keycode :: proc(code: sdl3.Keycode) -> opal.Keyboard_Key {
 		return .Backspace
 	case sdl3.K_DELETE:
 		return .Delete
+	case sdl3.K_RETURN:
+		return .Enter
 	case sdl3.K_F1 ..= sdl3.K_F12:
 		return opal.Keyboard_Key(int(opal.Keyboard_Key.F1) + int(code - sdl3.K_F1))
 	case sdl3.K_A ..= sdl3.K_Z:
@@ -269,6 +271,10 @@ app_event :: proc "c" (appstate: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 		handle_text_input(event.text.text)
 	case .WINDOW_MOVED:
 		handle_window_move()
+	case .WINDOW_FOCUS_LOST:
+		handle_window_lost_focus()
+	case .WINDOW_FOCUS_GAINED:
+		handle_window_gained_focus()
 	}
 	return .CONTINUE
 }
@@ -310,3 +316,4 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
+

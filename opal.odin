@@ -1,5 +1,11 @@
 package opal
 
+//
+// TODO:
+// 	[ ] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
+//  [ ] Add inner shadows (to katana)
+//
+
 import kn "../katana"
 import "base:intrinsics"
 import "base:runtime"
@@ -215,6 +221,14 @@ Node_Style :: struct {
 }
 
 //
+// TODO: Say something here
+//
+Node_Mode :: enum {
+	Inert,
+	Interactive,
+}
+
+//
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
 Node_Descriptor :: struct {
@@ -298,6 +312,9 @@ Node_Descriptor :: struct {
 	//
 	square_fit:              bool,
 
+	//
+	inert:                   bool,
+
 	// Values for the node's children layout
 	padding:                 [4]f32,
 
@@ -312,7 +329,7 @@ Node_Descriptor :: struct {
 	//
 
 	// Called when the node is first initialized, allocate any additional state here
-	on_create:               proc(self: ^Node),
+	// on_create:               proc(self: ^Node),
 
 	// Called when the node is discarded, this is to allow the user to clean up any custom state
 	on_drop:                 proc(self: ^Node),
@@ -465,6 +482,9 @@ Context :: struct {
 	// TODO: Implement this
 	snap_to_pixels:            bool,
 
+	//
+	window_is_focused:         bool,
+
 	// Additional frame delay
 	frame_interval:            time.Duration,
 
@@ -535,7 +555,7 @@ Context :: struct {
 	node_by_id:                map[Id]^Node,
 
 	// Node memory is stored contiguously for memory efficiency.
-	// TODO: Implement a dynamic arena because Opal currently crashes once there's no more slots available. (Maybe `begin_node` should be able to fail?)
+	// TODO: Implement a dynamic array
 	nodes:                     [4096]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
@@ -972,6 +992,16 @@ deinit :: proc() {
 // Call these from your event loop to handle input
 //
 
+handle_window_lost_focus :: proc() {
+	global_ctx.window_is_focused = false
+	draw_frames(1)
+}
+
+handle_window_gained_focus :: proc() {
+	global_ctx.window_is_focused = true
+	draw_frames(1)
+}
+
 handle_mouse_motion :: proc(x, y: f32) {
 	global_ctx.mouse_position = {x, y}
 	draw_frames(2)
@@ -1115,10 +1145,12 @@ begin :: proc() {
 			node_receive_input_recursive(root)
 			node_propagate_input_recursively(root)
 		}
+
 		//
 		// Update the global interaction state
 		//
 		ctx.widget_hovered = false
+
 		if ctx.hovered_node != nil {
 			ctx.hovered_id = ctx.hovered_node.id
 			if ctx.hovered_node.is_widget {
@@ -1127,6 +1159,7 @@ begin :: proc() {
 		} else {
 			ctx.hovered_id = 0
 		}
+
 		if mouse_pressed(.Left) {
 			if ctx.hovered_node != nil {
 				ctx.focused_id = ctx.hovered_node.id
@@ -1134,10 +1167,16 @@ begin :: proc() {
 				ctx.focused_id = 0
 			}
 		}
+
 		if ctx.active_node != nil {
 			ctx.active_id = ctx.active_node.id
 		} else if mouse_released(.Left) {
 			ctx.active_id = 0
+		}
+
+		// Receive mouse wheel input
+		if ctx.scrollable_node != nil {
+			ctx.scrollable_node.target_scroll -= ctx.mouse_scroll * 24
 		}
 	}
 
@@ -1493,7 +1532,7 @@ node_update_this_frame_input :: proc(self: ^Node) {
 	self.is_active = ctx.active_id == self.id
 
 	self.was_focused = self.is_focused
-	self.is_focused = ctx.focused_id == self.id
+	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
 }
 
 node_reset_propagated_input :: proc(self: ^Node) {
@@ -1637,12 +1676,13 @@ node_on_new_frame :: proc(self: ^Node) {
 		}
 	}
 
+	// Assign a default font for safety
+	if self.style.font == nil {
+		self.style.font = &kn.DEFAULT_FONT
+	}
+
 	// Create text layout
 	if reader, ok := reader.?; ok {
-		// Assign a default font for safety
-		if self.style.font == nil {
-			self.style.font = &kn.DEFAULT_FONT
-		}
 		self.text_layout = kn.Selectable_Text {
 			text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
 		}
@@ -1652,13 +1692,14 @@ node_on_new_frame :: proc(self: ^Node) {
 			self.text_layout.size,
 			self.last_text_size,
 		)
-		// If there's no text, just add the font line height to content size
-		if kn.text_is_empty(&self.text_layout) && self.enable_edit {
-			self.content_size.y = max(
-				self.content_size.y,
-				self.style.font.line_height * self.style.font_size,
-			)
-		}
+	} else if self.enable_edit {
+		// Must be reset here to prevent overflow when the text layout is made selectable
+		self.text_layout = {}
+		// Simulate text height
+		self.content_size.y = max(
+			self.content_size.y,
+			self.style.font.line_height * self.style.font_size,
+		)
 	}
 
 	// Root
@@ -1692,7 +1733,8 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 
 node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 	ctx := global_ctx
-	if ctx.mouse_position.x >= self.box.lo.x &&
+	if !self.inert &&
+	   ctx.mouse_position.x >= self.box.lo.x &&
 	   ctx.mouse_position.x <= self.box.hi.x &&
 	   ctx.mouse_position.y >= self.box.lo.y &&
 	   ctx.mouse_position.y <= self.box.hi.y {
@@ -1706,6 +1748,7 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 			}
 		}
 	}
+
 	if self.is_hovered {
 		if mouse_pressed(.Left) {
 			ctx.active_node = self
@@ -1875,16 +1918,48 @@ node_is_scrollable :: proc(self: ^Node) -> bool {
 	return true
 }
 
+node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Paint_Index {
+	switch v in self.style.background {
+	case kn.Color:
+		return kn.paint_index_from_option(v)
+	case Image_Paint:
+		size := box_size(self.box)
+		if source, ok := use_image(v.index); ok {
+			return kn.add_paint(
+				kn.make_atlas_sample(
+					source,
+					{self.box.lo + v.offset * size, self.box.lo + v.size * size},
+					kn.WHITE,
+				),
+			)
+		}
+	case Radial_Gradient:
+		return kn.add_paint(
+			kn.make_radial_gradient(
+				self.box.lo + v.center * self.size,
+				v.radius * max(self.size.x, self.size.y),
+				v.inner,
+				v.outer,
+			),
+		)
+	case Linear_Gradient:
+		return kn.add_paint(
+			kn.make_linear_gradient(
+				self.box.lo + v.points[0] * self.size,
+				self.box.lo + v.points[1] * self.size,
+				v.colors[0],
+				v.colors[1],
+			),
+		)
+	}
+	return 0
+}
 
 node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	assert(depth < 128)
 
 	ctx := global_ctx
 
-	// Receive mouse wheel input
-	if ctx.scrollable_node != nil && ctx.scrollable_node.id == self.id {
-		self.target_scroll -= ctx.mouse_scroll * 24
-	}
 	self.overflow = linalg.max(self.content_size - self.size, 0)
 
 	if self.is_clipped {
@@ -1906,7 +1981,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		self.scroll
 
 	// Perform wrapping if enabled
-	if self.text_layout.size.x > self.size.x && self.enable_wrapping {
+	if self.enable_wrapping && self.text_layout.size.x > self.size.x {
 		assert(self.style.font != nil)
 		self.text_layout.text = kn.make_text(
 			self.text,
@@ -1920,7 +1995,9 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	enable_scissor :=
 		self.clip_content &&
-		(self.has_clipped_child || max(self.overflow.x, self.overflow.y) > 0.1)
+		(self.has_clipped_child ||
+				max(self.overflow.x, self.overflow.y) > 0.1 ||
+				max(abs(self.scroll.x), abs(self.scroll.y)) > 0.1)
 
 	// Compute text selection state if enabled
 	if self.enable_selection {
@@ -1939,13 +2016,18 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		cursor_box := text_get_cursor_box(&self.text_layout, self.text_origin)
 
 		// Make sure to clip the cursor
-		left := max(0, self.box.lo.x - cursor_box.lo.x)
-		right := max(0, cursor_box.hi.x - self.box.hi.x)
+		padded_box := node_get_padded_box(self)
+		left := max(0, padded_box.lo.x - cursor_box.lo.x)
+		top := max(0, padded_box.lo.y - cursor_box.lo.y)
+		right := max(0, cursor_box.hi.x - padded_box.hi.x)
+		bottom := max(0, cursor_box.hi.y - padded_box.hi.y)
 		enable_scissor |= max(left, right) > 0
+		enable_scissor |= max(top, bottom) > 0
 
 		// Scroll to bring cursor into view
 		if self.is_focused && self.editor.selection != self.last_selection {
 			self.target_scroll.x += right - left
+			self.target_scroll.y += bottom - top
 		}
 	}
 
@@ -1972,49 +2054,15 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	// Draw self
 	if ctx.is_active {
-		if self.style.shadow_color != {} {
-			kn.add_box_shadow(
-				self.box,
-				self.style.radius[0],
-				self.style.shadow_size,
-				self.style.shadow_color,
-			)
+		if self.shadow_color != {} {
+			kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
 		}
-		if self.style.background != {} {
-			switch v in self.style.background {
-			case kn.Color:
-				kn.set_paint(v)
-			case Image_Paint:
-				size := box_size(self.box)
-				if source, ok := use_image(v.index); ok {
-					kn.set_paint(
-						kn.make_atlas_sample(
-							source,
-							{self.box.lo + v.offset * size, self.box.lo + v.size * size},
-							kn.WHITE,
-						),
-					)
-				}
-			case Radial_Gradient:
-				kn.set_paint(
-					kn.make_radial_gradient(
-						self.box.lo + v.center * self.size,
-						v.radius * max(self.size.x, self.size.y),
-						v.inner,
-						v.outer,
-					),
-				)
-			case Linear_Gradient:
-				kn.set_paint(
-					kn.make_linear_gradient(
-						self.box.lo + v.points[0] * self.size,
-						self.box.lo + v.points[1] * self.size,
-						v.colors[0],
-						v.colors[1],
-					),
-				)
-			}
-			kn.add_box(self.box, self.style.radius)
+		if self.background != {} {
+			kn.add_box(
+				self.box,
+				self.style.radius,
+				paint = node_convert_paint_variant(self, self.background),
+			)
 		}
 		if self.style.foreground != nil && !kn.text_is_empty(&self.text_layout) {
 			if self.enable_selection {
@@ -2138,6 +2186,10 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 }
 
+node_get_padded_box :: proc(self: ^Node) -> Box {
+	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
+}
+
 text_get_cursor_box :: proc(self: ^kn.Selectable_Text, offset: [2]f32) -> Box {
 	if len(self.glyphs) == 0 {
 		return {}
@@ -2194,9 +2246,12 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 			max(ordered_selection[0], line.first_glyph),
 			min(ordered_selection[1], line.last_glyph),
 		}
-		if highlight_range.x > highlight_range.y {
+		if highlight_range.x >= highlight_range.y {
 			continue
 		}
+		assert(
+			text.glyphs[highlight_range[0]].offset.y == text.glyphs[highlight_range[1]].offset.y,
+		)
 		box := Box {
 			origin + text.glyphs[highlight_range.x].offset,
 			origin +
@@ -2498,3 +2553,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
