@@ -186,6 +186,8 @@ Paint_Option :: kn.Paint_Option
 
 Font :: kn.Font
 
+Node_Result :: Maybe(^Node)
+
 //
 // The visual description of a node, used for the default drawing procedure
 // This is abstracted out by gut feeling ✊😔
@@ -308,9 +310,6 @@ Node_Descriptor :: struct {
 	//
 	// Callbacks for custom look or behavior
 	//
-
-	// Called just before the node is drawn, gives the user a chance to modify the node's style or apply animations based on its state
-	on_animate:              proc(self: ^Node),
 
 	// Called when the node is first initialized, allocate any additional state here
 	on_create:               proc(self: ^Node),
@@ -582,7 +581,7 @@ Context :: struct {
 	queued_frames:             int,
 
 	// If the graphics backend should redraw the UI
-	requires_redraw:           bool,
+	is_active:                 bool,
 
 	// Node inspector
 	inspector:                 Inspector,
@@ -941,10 +940,14 @@ node_update_transition :: proc(self: ^Node, index: int, condition: bool, duratio
 		rate = rate_per_second(1 / duration_seconds)
 	}
 	#no_bounds_check {
+		last_value := self.transitions[index]
 		if condition {
 			self.transitions[index] = min(1, self.transitions[index] + rate)
 		} else {
 			self.transitions[index] = max(0, self.transitions[index] - rate)
+		}
+		if self.transitions[index] != last_value {
+			draw_frames(1)
 		}
 	}
 }
@@ -1070,8 +1073,8 @@ begin :: proc() {
 	ctx := global_ctx
 
 	// Update redraw state
-	ctx.requires_redraw = ctx.queued_frames > 0
-	if ctx.requires_redraw {
+	ctx.is_active = ctx.queued_frames > 0
+	if ctx.is_active {
 		ctx.last_draw_time = time.now()
 	}
 	ctx.queued_frames = max(0, ctx.queued_frames - 1)
@@ -1101,18 +1104,67 @@ begin :: proc() {
 	ctx.compute_start_time = time.now()
 
 	clear(&ctx.id_stack)
-	clear(&ctx.stack)
-	clear(&ctx.roots)
 
 	push_id(Id(FNV1A32_OFFSET_BASIS))
+
+	ctx.frame += 1
+	ctx.call_index = 0
+
+	if ctx.is_active {
+		for root in ctx.roots {
+			node_receive_input_recursive(root)
+			node_propagate_input_recursively(root)
+		}
+		//
+		// Update the global interaction state
+		//
+		ctx.widget_hovered = false
+		if ctx.hovered_node != nil {
+			ctx.hovered_id = ctx.hovered_node.id
+			if ctx.hovered_node.is_widget {
+				ctx.widget_hovered = true
+			}
+		} else {
+			ctx.hovered_id = 0
+		}
+		if mouse_pressed(.Left) {
+			if ctx.hovered_node != nil {
+				ctx.focused_id = ctx.hovered_node.id
+			} else {
+				ctx.focused_id = 0
+			}
+		}
+		if ctx.active_node != nil {
+			ctx.active_id = ctx.active_node.id
+		} else if mouse_released(.Left) {
+			ctx.active_id = 0
+		}
+	}
+
 	ctx.current_node = nil
 	ctx.hovered_node = nil
 	ctx.focused_node = nil
 	ctx.active_node = nil
 	ctx.scrollable_node = nil
 
-	ctx.frame += 1
-	ctx.call_index = 0
+	//
+	// Reset the node tree for reconstruction
+	//
+	for id, node in ctx.node_by_id {
+		if node.is_dead {
+			delete_key(&ctx.node_by_id, node.id)
+			if node.on_drop != nil {
+				node.on_drop(node)
+			}
+			node_destroy(node)
+			(^Maybe(Node))(node)^ = nil
+		} else {
+			node.is_dead = true
+		}
+	}
+
+	clear(&ctx.stack)
+	clear(&ctx.roots)
 }
 
 //
@@ -1179,50 +1231,7 @@ end :: proc() {
 				placement.exact_offset
 		}
 		node_solve_box_recursively(root)
-	}
-
-	//
-	// Update the global interaction state
-	//
-	ctx.widget_hovered = false
-	if ctx.hovered_node != nil {
-		ctx.hovered_id = ctx.hovered_node.id
-		if ctx.hovered_node.is_widget {
-			ctx.widget_hovered = true
-		}
-	} else {
-		ctx.hovered_id = 0
-	}
-	if mouse_pressed(.Left) {
-		if ctx.hovered_node != nil {
-			ctx.focused_id = ctx.hovered_node.id
-		} else {
-			ctx.focused_id = 0
-		}
-	}
-	if ctx.active_node != nil {
-		ctx.active_id = ctx.active_node.id
-	} else if mouse_released(.Left) {
-		ctx.active_id = 0
-	}
-
-	for root in ctx.roots {
-		node_propagate_input_recursively(root)
 		node_draw_recursively(root)
-	}
-
-	// Clean up unused nodes
-	for id, node in ctx.node_by_id {
-		if node.is_dead {
-			delete_key(&ctx.node_by_id, node.id)
-			if node.on_drop != nil {
-				node.on_drop(node)
-			}
-			node_destroy(node)
-			(^Maybe(Node))(node)^ = nil
-		} else {
-			node.is_dead = true
-		}
 	}
 
 	ctx.mouse_button_was_down = ctx.mouse_button_down
@@ -1241,8 +1250,8 @@ draw_frames :: proc(how_many: int) {
 	global_ctx.queued_frames = max(global_ctx.queued_frames, how_many)
 }
 
-requires_redraw :: proc() -> bool {
-	return global_ctx.requires_redraw
+is_frame_active :: proc() -> bool {
+	return global_ctx.is_active
 }
 
 //
@@ -1285,11 +1294,10 @@ text_node_style :: proc() -> Node_Style {
 //
 // Get an existing node by its id or create a new one
 //
-get_or_create_node :: proc(id: Id) -> (result: ^Node) {
+get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
 	ctx := global_ctx
-
 	if node, ok := ctx.node_by_id[id]; ok {
-		result = node
+		return node
 	} else {
 		for &slot, slot_index in ctx.nodes {
 			if slot == nil {
@@ -1297,33 +1305,34 @@ get_or_create_node :: proc(id: Id) -> (result: ^Node) {
 					id           = id,
 					time_created = time.now(),
 				}
-				result = &ctx.nodes[slot_index].?
-				ctx.node_by_id[id] = result
+				node = &ctx.nodes[slot_index].?
+				ctx.node_by_id[id] = node
 				draw_frames(1)
-				break
+				return node
 			}
 		}
-		assert(result != nil)
 	}
-
-	return
+	return nil
 }
 
-begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (self: ^Node) {
+begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
 	ctx := global_ctx
 	self = get_or_create_node(hash_loc(loc))
 
-	if descriptor != nil {
-		self.descriptor = descriptor^
+	if self, ok := self.?; ok {
+		if descriptor != nil {
+			self.descriptor = descriptor^
+		}
+
+		if !self.is_root {
+			self.parent = ctx.current_node
+			assert(self != self.parent)
+		}
+
+		node_on_new_frame(self)
+		push_node(self)
 	}
 
-	if !self.is_root {
-		self.parent = ctx.current_node
-		assert(self != self.parent)
-	}
-
-	node_on_new_frame(self)
-	push_node(self)
 	return
 }
 
@@ -1356,7 +1365,7 @@ end_node :: proc() {
 			radius     = SCROLLBAR_SIZE / 2,
 		}
 		if self.overflow.y > 0 {
-			do_node(
+			add_node(
 				&{
 					is_absolute = true,
 					relative_position = {1, 0},
@@ -1402,7 +1411,7 @@ end_node :: proc() {
 			)
 		}
 		if self.overflow.x > 0 {
-			do_node(
+			add_node(
 				&{
 					is_absolute = true,
 					relative_position = {0, 1},
@@ -1456,7 +1465,7 @@ end_node :: proc() {
 	}
 }
 
-do_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> ^Node {
+add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_Result {
 	self := begin_node(descriptor, loc)
 	end_node()
 	return self
@@ -1679,10 +1688,50 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 		self.content_size.x += child.size.x
 		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
-	// i := int(self.vertical)
-	// j := 1 - i
-	// self.content_size[i] += child.size[i]
-	// self.content_size[j] = max(self.content_size[j], child.size[j])
+}
+
+node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
+	ctx := global_ctx
+	if ctx.mouse_position.x >= self.box.lo.x &&
+	   ctx.mouse_position.x <= self.box.hi.x &&
+	   ctx.mouse_position.y >= self.box.lo.y &&
+	   ctx.mouse_position.y <= self.box.hi.y {
+		mouse_overlap = true
+		if !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
+			ctx.hovered_node = self
+
+			// Check if this node's contents can be scrolled
+			if node_is_scrollable(self) {
+				ctx.scrollable_node = self
+			}
+		}
+	}
+	if self.is_hovered {
+		if mouse_pressed(.Left) {
+			ctx.active_node = self
+			// Reset click counter if there was too much delay
+			if time.since(self.last_click_time) > time.Millisecond * 300 {
+				self.click_count = 0
+			}
+			self.click_count += 1
+			ctx.node_click_offset = ctx.mouse_position - self.box.lo
+			self.last_click_time = time.now()
+		}
+	}
+
+	return
+}
+
+node_receive_input_recursive :: proc(self: ^Node, mouse_overlap: bool = true) {
+	if !mouse_overlap {
+		return
+	}
+	mouse_overlap := node_receive_input(self)
+	if mouse_overlap {
+		for node in self.kids {
+			node_receive_input_recursive(node)
+		}
+	}
 }
 
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
@@ -1698,7 +1747,6 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 
 node_solve_box_recursively :: proc(
 	self: ^Node,
-	mouse_overlap: bool = true,
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
@@ -1733,10 +1781,6 @@ node_solve_box_recursively :: proc(
 
 	clip_box = box_clamped(clip_box, self.box)
 
-	mouse_overlap := mouse_overlap
-	if mouse_overlap {
-		mouse_overlap = node_receive_input(self)
-	}
 	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
 		draw_frames(1)
 	}
@@ -1746,47 +1790,12 @@ node_solve_box_recursively :: proc(
 		node.z_index += self.z_index
 		node_solve_box_recursively(
 			node,
-			mouse_overlap,
 			self.box.lo - self.scroll * f32(i32(!node.is_absolute)),
 			clip_box,
 		)
-		// node_receive_propagated_input(self, node)
 	}
 }
 
-node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
-	ctx := global_ctx
-	if ctx.mouse_position.x >= self.box.lo.x &&
-	   ctx.mouse_position.x <= self.box.hi.x &&
-	   ctx.mouse_position.y >= self.box.lo.y &&
-	   ctx.mouse_position.y <= self.box.hi.y {
-		mouse_overlap = true
-		if !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
-			ctx.hovered_node = self
-
-			// Check if this node's contents can be scrolled
-			if node_is_scrollable(self) {
-				ctx.scrollable_node = self
-			}
-		}
-	}
-	if self.is_hovered {
-		if mouse_pressed(.Left) {
-			// Set this node as the globally active one, `is_active` will be true next frame unless the active state is stolen
-			ctx.active_node = self
-			// Reset click counter if there was too much delay
-			if time.since(self.last_click_time) > time.Millisecond * 300 {
-				self.click_count = 0
-			}
-			self.click_count += 1
-
-			// fmt.println(self.click_count)
-			self.last_click_time = time.now()
-		}
-	}
-
-	return
-}
 
 node_solve_sizes :: proc(self: ^Node) {
 	// Axis indices
@@ -1878,23 +1887,12 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 	self.overflow = linalg.max(self.content_size - self.size, 0)
 
-	last_transitions := self.transitions
-	if self.on_animate != nil {
-		self.on_animate(self)
-	}
-
 	if self.is_clipped {
 		return
 	}
 
 	when ODIN_DEBUG {
 		ctx.drawn_nodes += 1
-	}
-
-	// Detect changes in transition values
-	if self.transitions != last_transitions &&
-	   linalg.greater_than_array(self.transitions, 0.01) != {} {
-		draw_frames(2)
 	}
 
 	// Compute text position
@@ -1973,7 +1971,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	kn.set_draw_order(int(self.z_index))
 
 	// Draw self
-	if ctx.requires_redraw {
+	if ctx.is_active {
 		if self.style.shadow_color != {} {
 			kn.add_box_shadow(
 				self.box,
@@ -2062,7 +2060,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.pop_scissor()
 	}
 
-	if ctx.requires_redraw {
+	if ctx.is_active {
 		if self.style.stroke != nil {
 			kn.add_box_lines(
 				self.box,
@@ -2316,13 +2314,14 @@ _BACKGROUND :: tw.NEUTRAL_900
 _FOREGROUND :: tw.NEUTRAL_800
 _TEXT :: tw.WHITE
 
-Draggable_Node :: struct {
+Panel :: struct {
 	position:       [2]f32,
+	size:           [2]f32,
 	move_offset:    [2]f32,
 	is_being_moved: bool,
 }
 
-draggable_node_update :: proc(self: ^Draggable_Node, node: ^Node) {
+draggable_node_update :: proc(self: ^Panel, node: ^Node) {
 	ctx := global_ctx
 	if (node.is_hovered || node.has_hovered_child) && mouse_pressed(.Left) {
 		self.is_being_moved = true
@@ -2338,20 +2337,18 @@ draggable_node_update :: proc(self: ^Draggable_Node, node: ^Node) {
 }
 
 Settings_Editor :: struct {
-	using draggable_node: Draggable_Node,
+	using draggable_node: Panel,
 	ctx:                  ^Context,
 }
 
 settings_editor_show :: proc(self: ^Settings_Editor) {
-	begin_node(&{position = self.position, data = self, on_animate = proc(self: ^Node) {
-				draggable_node_update((^Settings_Editor)(self.data), self)
-			}})
+	begin_node(&{position = self.position, data = self})
 
 	end_node()
 }
 
 Inspector :: struct {
-	using draggable_node: Draggable_Node,
+	using draggable_node: Panel,
 	shown:                bool,
 	selected_id:          Id,
 	inspected_id:         Id,
@@ -2371,7 +2368,7 @@ inspector_show :: proc(self: ^Inspector) {
 		},
 	)
 	total_nodes := len(global_ctx.node_by_id)
-	do_node(
+	handle_node := add_node(
 		&{
 			text = fmt.tprintf(
 				"Inspector\nFPS: %.0f\navg frame time: %v\navg compute time: %v\nDrawn nodes: %i/%i",
@@ -2387,16 +2384,14 @@ inspector_show :: proc(self: ^Inspector) {
 			grow = {true, false},
 			max_size = INFINITY,
 			data = self,
-			on_animate = proc(self: ^Node) {
-				draggable_node_update((^Inspector)(self.data), self)
-			},
 		},
-	)
+	).?
+	draggable_node_update(self, handle_node)
 	inspector_reset(&global_ctx.inspector)
 	inspector_build_tree(&global_ctx.inspector)
 	if self.selected_id != 0 {
 		if node, ok := global_ctx.node_by_id[self.selected_id]; ok {
-			do_node(
+			add_node(
 				&{
 					size = {0, 200},
 					grow = {true, false},
@@ -2450,25 +2445,21 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			fit = {0, 1},
 			is_widget = true,
 			inherit_state = true,
-			data = node,
-			on_animate = proc(self: ^Node) {
-				node := (^Node)(self.data)
-				node_update_transition(self, 0, self.is_toggled, 0.1)
-				self.style.background = kn.fade(
-					tw.STONE_600,
-					f32(i32(self.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.kids) > 0)),
-				)
-				if self.is_hovered && self.was_active && !self.is_active {
-					self.is_toggled = !self.is_toggled
-				}
-			},
 		},
+	).?
+	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)
+	button_node.style.background = kn.fade(
+		tw.STONE_600,
+		f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.kids) > 0)),
 	)
-	do_node(&{size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
+	if button_node.is_hovered && button_node.was_active && !button_node.is_active {
+		button_node.is_toggled = !button_node.is_toggled
+	}
+	add_node(&{size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
 				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
 			}})
-	do_node(
+	add_node(
 		&{
 			text = fmt.tprintf("%x", node.id),
 			fit = 1,
@@ -2507,4 +2498,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

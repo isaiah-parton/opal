@@ -219,7 +219,7 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	app.on_frame(app)
 
 	kn.set_clear_color({})
-	if requires_redraw() {
+	if is_frame_active() {
 		kn.present()
 	}
 
@@ -310,4 +310,3 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
-
