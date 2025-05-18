@@ -259,4 +259,3 @@ do_text_editor :: proc(app: ^My_App) {
 	}
 	end_node()
 }
-

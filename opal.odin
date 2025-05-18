@@ -22,7 +22,6 @@ import "core:strings"
 import "core:sys/windows"
 import "core:time"
 import "core:unicode"
-import "lucide"
 import tw "tailwind_colors"
 import "tedit"
 import "vendor:sdl3"
@@ -960,14 +959,13 @@ node_update_transition :: proc(self: ^Node, index: int, condition: bool, duratio
 		rate = rate_per_second(1 / duration_seconds)
 	}
 	#no_bounds_check {
-		last_value := self.transitions[index]
 		if condition {
 			self.transitions[index] = min(1, self.transitions[index] + rate)
 		} else {
 			self.transitions[index] = max(0, self.transitions[index] - rate)
 		}
-		if self.transitions[index] != last_value {
-			draw_frames(1)
+		if self.transitions[index] > 0 && self.transitions[index] < 1 {
+			draw_frames(2)
 		}
 	}
 }
@@ -1140,44 +1138,55 @@ begin :: proc() {
 	ctx.frame += 1
 	ctx.call_index = 0
 
+	//
+	// Update the global interaction state
+	//
+	ctx.widget_hovered = false
+
 	if ctx.is_active {
 		for root in ctx.roots {
 			node_receive_input_recursive(root)
-			node_propagate_input_recursively(root)
 		}
+	}
 
-		//
-		// Update the global interaction state
-		//
-		ctx.widget_hovered = false
+	if ctx.hovered_node != nil {
+		ctx.hovered_id = ctx.hovered_node.id
+		if ctx.hovered_node.is_widget {
+			ctx.widget_hovered = true
+		}
+	} else {
+		ctx.hovered_id = 0
+	}
 
+	if mouse_pressed(.Left) {
 		if ctx.hovered_node != nil {
-			ctx.hovered_id = ctx.hovered_node.id
-			if ctx.hovered_node.is_widget {
-				ctx.widget_hovered = true
+			ctx.active_node = ctx.hovered_node
+			// Reset click counter if there was too much delay
+			if time.since(ctx.hovered_node.last_click_time) > time.Millisecond * 300 {
+				ctx.hovered_node.click_count = 0
 			}
+			ctx.hovered_node.click_count += 1
+			ctx.node_click_offset = ctx.mouse_position - ctx.hovered_node.box.lo
+			ctx.hovered_node.last_click_time = time.now()
+			ctx.focused_id = ctx.hovered_node.id
 		} else {
-			ctx.hovered_id = 0
+			ctx.focused_id = 0
 		}
+	}
 
-		if mouse_pressed(.Left) {
-			if ctx.hovered_node != nil {
-				ctx.focused_id = ctx.hovered_node.id
-			} else {
-				ctx.focused_id = 0
-			}
-		}
+	if ctx.active_node != nil {
+		ctx.active_id = ctx.active_node.id
+	} else if mouse_released(.Left) {
+		ctx.active_id = 0
+	}
 
-		if ctx.active_node != nil {
-			ctx.active_id = ctx.active_node.id
-		} else if mouse_released(.Left) {
-			ctx.active_id = 0
-		}
+	// Receive mouse wheel input
+	if ctx.scrollable_node != nil {
+		ctx.scrollable_node.target_scroll -= ctx.mouse_scroll * 24
+	}
 
-		// Receive mouse wheel input
-		if ctx.scrollable_node != nil {
-			ctx.scrollable_node.target_scroll -= ctx.mouse_scroll * 24
-		}
+	for root in ctx.roots {
+		node_propagate_input_recursively(root)
 	}
 
 	ctx.current_node = nil
@@ -1206,15 +1215,6 @@ begin :: proc() {
 	clear(&ctx.roots)
 }
 
-//
-// Ends UI declaration and constructs the final layout, node boxes are only up-to-date after this is called.
-//
-// The UI computation sequence after construction is:
-// 1. Solve sizes
-// 2. Compute boxes and receive input
-// 3. Propagate input up node trees
-// 4. Draw
-//
 end :: proc() {
 	ctx := global_ctx
 
@@ -1378,6 +1378,7 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 end_node :: proc() {
 	ctx := global_ctx
 	self := ctx.current_node
+
 	if self == nil {
 		return
 	}
@@ -1522,7 +1523,7 @@ node_destroy :: proc(self: ^Node) {
 	delete(self.kids)
 }
 
-node_update_this_frame_input :: proc(self: ^Node) {
+node_update_input :: proc(self: ^Node) {
 	ctx := global_ctx
 
 	self.was_hovered = self.is_hovered
@@ -1535,7 +1536,7 @@ node_update_this_frame_input :: proc(self: ^Node) {
 	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
 }
 
-node_reset_propagated_input :: proc(self: ^Node) {
+node_update_propagated_input :: proc(self: ^Node) {
 	self.has_hovered_child = false
 	self.has_active_child = false
 
@@ -1556,8 +1557,8 @@ node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
 
 node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
 	assert(depth < 128)
-	node_reset_propagated_input(self)
-	node_update_this_frame_input(self)
+	node_update_propagated_input(self)
+	node_update_input(self)
 	for node in self.kids {
 		node_propagate_input_recursively(node)
 		node_receive_propagated_input(self, node)
@@ -1746,19 +1747,6 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 			if node_is_scrollable(self) {
 				ctx.scrollable_node = self
 			}
-		}
-	}
-
-	if self.is_hovered {
-		if mouse_pressed(.Left) {
-			ctx.active_node = self
-			// Reset click counter if there was too much delay
-			if time.since(self.last_click_time) > time.Millisecond * 300 {
-				self.click_count = 0
-			}
-			self.click_count += 1
-			ctx.node_click_offset = ctx.mouse_position - self.box.lo
-			self.last_click_time = time.now()
 		}
 	}
 
@@ -2035,6 +2023,8 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	is_transformed :=
 		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
 
+	kn.set_draw_order(int(self.z_index))
+
 	// Perform transformations
 	if is_transformed {
 		transform_origin := self.box.lo + self.size * self.style.transform_origin
@@ -2045,18 +2035,17 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		kn.translate(-transform_origin + self.style.translate)
 	}
 
+	if ctx.is_active && self.shadow_color != {} {
+		kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
+	}
+
 	// Apply clipping
 	if enable_scissor {
 		kn.push_scissor(kn.make_box(self.box, self.style.radius))
 	}
 
-	kn.set_draw_order(int(self.z_index))
-
 	// Draw self
 	if ctx.is_active {
-		if self.shadow_color != {} {
-			kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
-		}
 		if self.background != {} {
 			kn.add_box(
 				self.box,
@@ -2417,16 +2406,21 @@ inspector_show :: proc(self: ^Inspector) {
 			size = {300, 500},
 			vertical = true,
 			padding = 1,
-			style = {stroke_width = 1, stroke = tw.CYAN_800, background = _BACKGROUND},
+			shadow_size = 10,
+			shadow_color = tw.BLACK,
+			stroke_width = 2,
+			stroke = tw.CYAN_800,
+			background = _BACKGROUND,
 			z_index = 1,
 			disable_inspection = true,
+			radius = 7,
 		},
 	)
 	total_nodes := len(global_ctx.node_by_id)
 	handle_node := add_node(
 		&{
 			text = fmt.tprintf(
-				"Inspector\nFPS: %.0f\navg frame time: %v\navg compute time: %v\nDrawn nodes: %i/%i",
+				"Inspector\nFPS: %.0f\nFrame time: %v\nCompute time: %v\nNodes: %i/%i",
 				kn.get_fps(),
 				global_ctx.frame_duration_avg,
 				global_ctx.compute_duration_avg,
@@ -2434,7 +2428,7 @@ inspector_show :: proc(self: ^Inspector) {
 				total_nodes,
 			),
 			fit = 1,
-			padding = 3,
+			padding = 5,
 			style = {font_size = 12, background = _FOREGROUND, foreground = _TEXT},
 			grow = {true, false},
 			max_size = INFINITY,
@@ -2502,14 +2496,6 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			inherit_state = true,
 		},
 	).?
-	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)
-	button_node.style.background = kn.fade(
-		tw.STONE_600,
-		f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.kids) > 0)),
-	)
-	if button_node.is_hovered && button_node.was_active && !button_node.is_active {
-		button_node.is_toggled = !button_node.is_toggled
-	}
 	add_node(&{size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
 				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
@@ -2527,6 +2513,9 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	end_node()
 	if button_node.is_hovered {
 		self.inspected_id = node.id
+		if button_node.was_active && !button_node.is_active {
+			button_node.is_toggled = !button_node.is_toggled
+		}
 	}
 	if button_node.is_hovered && mouse_pressed(.Right) {
 		if self.selected_id == node.id {
@@ -2535,6 +2524,11 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			self.selected_id = node.id
 		}
 	}
+	button_node.background = kn.fade(
+		tw.STONE_600,
+		f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.kids) > 0)),
+	)
+	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)
 	if button_node.transitions[0] > 0.01 {
 		begin_node(
 			&{
@@ -2553,4 +2547,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-
