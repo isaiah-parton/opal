@@ -128,9 +128,8 @@ main :: proc() {
 				// 		push_id(i)
 				// 		add_node(
 				// 			&{
-				// 				size = {0, 30},
-				// 				max_size = INFINITY,
-				// 				grow = {true, false},
+				// 				padding = 2,
+				// 				fit = 1,
 				// 				background = tw.NEUTRAL_900,
 				// 				foreground = tw.ROSE_500,
 				// 				font_size = 14,
@@ -259,3 +258,4 @@ do_text_editor :: proc(app: ^My_App) {
 	}
 	end_node()
 }
+

@@ -1,6 +1,10 @@
 package opal
 
 //
+// The following are features and optimizations that could be necessary depending on what features I deem a priority in the future. Only to be implemented if absolutely necessary and if they don't compromise the system's simplicity and low-level control.
+// 	- Add an 'inline' layout mode to, well, layout children inline along any axis allowing for wrapping. Text layout and such could then be migrated to opal entirely. Adding nodes in between text is already possible, but there is no support for wrapping such nodes.
+// 	- Abstract away the functional components of a Node (Descriptor, Retained_State, Transient_State) to allow for transient nodes wihout hashed ids or interaction logic. Flex layouts need only a descriptor and some transient state, while inline layouts need additional retained state for caching their size. Ids will become retained state as they are only required by interactive nodes.
+//
 // TODO:
 // 	[ ] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
 //  [ ] Add inner shadows (to katana)
@@ -1251,6 +1255,9 @@ end :: proc() {
 		ctx.drawn_nodes = 0
 	}
 
+	ctx_solve_sizes(ctx)
+	ctx_solve_positions_and_draw(ctx)
+
 	clear(&ctx.runes)
 
 	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
@@ -1260,9 +1267,25 @@ end :: proc() {
 	}
 	ctx.cursor = .Normal
 
-	// Process and draw the UI
+	ctx.mouse_button_was_down = ctx.mouse_button_down
+	ctx.last_mouse_position = ctx.mouse_position
+	ctx.key_was_down = ctx.key_down
+	ctx.mouse_scroll = 0
+
+	ctx.compute_duration = time.since(ctx.compute_start_time)
+}
+
+ctx_solve_sizes :: proc(ctx: ^Context) {
 	for root in ctx.roots {
 		node_solve_sizes_recursively(root)
+	}
+	// for root in ctx.roots_that_need_resizing {
+	// 	node_solve_sizes_recursively(root)
+	// }
+}
+
+ctx_solve_positions_and_draw :: proc(ctx: ^Context) {
+	for root in ctx.roots {
 		if placement, ok := root.node_relative_placement.?; ok {
 			root.position =
 				placement.node.box.lo +
@@ -1272,13 +1295,6 @@ end :: proc() {
 		node_solve_box_recursively(root)
 		node_draw_recursively(root)
 	}
-
-	ctx.mouse_button_was_down = ctx.mouse_button_down
-	ctx.last_mouse_position = ctx.mouse_position
-	ctx.key_was_down = ctx.key_down
-	ctx.mouse_scroll = 0
-
-	ctx.compute_duration = time.since(ctx.compute_start_time)
 }
 
 set_cursor :: proc(cursor: Cursor) {
@@ -1404,6 +1420,10 @@ end_node :: proc() {
 			foreground = ctx.colors[.Scrollbar_Foreground],
 			radius     = SCROLLBAR_SIZE / 2,
 		}
+		corner_space: f32
+		if self.overflow.x > 0 && self.overflow.y > 0 {
+			corner_space = SCROLLBAR_SIZE + SCROLLBAR_PADDING
+		}
 		if self.overflow.y > 0 {
 			add_node(
 				&{
@@ -1411,7 +1431,7 @@ end_node :: proc() {
 					relative_position = {1, 0},
 					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
-					size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2},
+					size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
 					style = scrollbar_style,
 					z_index = 1,
 					padding = 1,
@@ -1457,7 +1477,7 @@ end_node :: proc() {
 					relative_position = {0, 1},
 					position = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
 					relative_size = {1, 0},
-					size = {-SCROLLBAR_PADDING * 2, SCROLLBAR_SIZE},
+					size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
 					style = scrollbar_style,
 					z_index = 1,
 					padding = 1,
@@ -2444,11 +2464,12 @@ inspector_show :: proc(self: ^Inspector) {
 				&{
 					size = {0, 200},
 					grow = {true, false},
+					padding = 4,
 					max_size = INFINITY,
 					text = fmt.tprintf("%#v", node),
 					clip_content = true,
 					show_scrollbars = true,
-					style = {font_size = 12, background = _BACKGROUND, foreground = _TEXT},
+					style = {font_size = 12, background = tw.NEUTRAL_950, foreground = _TEXT},
 					enable_selection = true,
 				},
 			)
@@ -2547,3 +2568,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
