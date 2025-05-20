@@ -70,7 +70,7 @@ main :: proc() {
 			begin()
 			begin_node(
 				&{
-					size = kn.get_size(),
+					min_size = kn.get_size(),
 					background = tw.NEUTRAL_950,
 					stroke = tw.NEUTRAL_800,
 					stroke_width = 1,
@@ -84,7 +84,7 @@ main :: proc() {
 				title_node := begin_node(
 					&{
 						fit = {0, 1},
-						size = {0, 20},
+						min_size = {0, 20},
 						max_size = INFINITY,
 						grow = {true, false},
 						content_align = {0, 0.5},
@@ -124,9 +124,7 @@ main :: proc() {
 				)
 				do_text_editor(app)
 				do_text(
-					`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis. Donec gravida hendrerit felis, eu elementum libero egestas sed. Phasellus sagittis a diam non varius.
-
-Ut eu cursus turpis. Maecenas nisl ipsum, rutrum quis bibendum sit amet, fermentum non nisl. Proin tempor lorem vitae leo venenatis imperdiet. Mauris facilisis id tortor vitae convallis. Vestibulum interdum dui eu lacus efficitur maximus. Aliquam facilisis accumsan eros et scelerisque. Aliquam in nunc mauris. Pellentesque ultrices libero sed dolor cursus elementum. Nulla sit amet laoreet lorem. Quisque rhoncus consequat egestas. Praesent mollis ligula eget felis cursus hendrerit. Sed dictum, arcu blandit dapibus gravida, lacus nulla vestibulum nisi, a elementum nisi ligula eget tortor. Ut feugiat massa nec lorem congue imperdiet. Curabitur fringilla tortor et sem sodales hendrerit blandit non mauris. Cras eget velit vulputate, dictum lectus in, fringilla dui.`,
+					`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis. Donec gravida hendrerit felis, eu elementum libero egestas sed. Phasellus sagittis a diam non varius. Ut eu cursus turpis. Maecenas nisl ipsum, rutrum quis bibendum sit amet, fermentum non nisl. Proin tempor lorem vitae leo venenatis imperdiet. Mauris facilisis id tortor vitae convallis. Vestibulum interdum dui eu lacus efficitur maximus. Aliquam facilisis accumsan eros et scelerisque. Aliquam in nunc mauris. Pellentesque ultrices libero sed dolor cursus elementum. Nulla sit amet laoreet lorem. Quisque rhoncus consequat egestas. Praesent mollis ligula eget felis cursus hendrerit. Sed dictum, arcu blandit dapibus gravida, lacus nulla vestibulum nisi, a elementum nisi ligula eget tortor. Ut feugiat massa nec lorem congue imperdiet. Curabitur fringilla tortor et sem sodales hendrerit blandit non mauris. Cras eget velit vulputate, dictum lectus in, fringilla dui.`,
 				)
 				// {
 				// 	for i in 1 ..= 1000 {
@@ -167,28 +165,22 @@ Ut eu cursus turpis. Maecenas nisl ipsum, rutrum quis bibendum sit amet, ferment
 
 do_text :: proc(text: string) {
 	using opal
-	words := strings.split(text, " ")
-	begin_node(&{max_size = INFINITY, fit = 1, vertical = true})
-	row := begin_node(
+	words := strings.split(text, " ", allocator = context.temp_allocator)
+	begin_node(
 		&{
-			fit = 1,
 			max_size = INFINITY,
 			grow = {true, false},
-			spacing = kn.DEFAULT_FONT.space_advance * 14,
+			fit = {0, 1},
+			inert = true,
 			wrap_mode = .Forward,
+			spacing = kn.DEFAULT_FONT.space_advance * 14,
 		},
-	).?
+	)
 	for word, i in words {
 		push_id(int(i))
-		if row.content_size.x + 30 >=
-		   row.size.x - row.padding.x - row.padding.z - row.spacing * f32(len(row.kids) - 1) {
-			end_node()
-			row = begin_node(&row.descriptor).?
-		}
-		add_node(&{foreground = tw.WHITE, fit = 1, text = word, font_size = 14})
+		add_node(&{foreground = tw.WHITE, fit = 1, text = word, font_size = 14, inert = true})
 		pop_id()
 	}
-	end_node()
 	end_node()
 }
 
@@ -259,7 +251,7 @@ do_text_editor :: proc(app: ^My_App) {
 			//
 			add_node(
 				&{
-					size = {2, 0},
+					min_size = {2, 0},
 					max_size = {0, INFINITY},
 					grow = {false, true},
 					background = tw.NEUTRAL_700,
@@ -278,7 +270,7 @@ do_text_editor :: proc(app: ^My_App) {
 			// First, create the descriptor that will define the node as an editable input
 			desc := make_field_descriptor(&app.edited_text, type_info_of(type_of(app.edited_text)))
 			// Then apply my sizing preference
-			desc.size = {300, 200}
+			desc.min_size = {300, 200}
 			desc.grow = {true, false}
 			desc.max_size = {INFINITY, 0}
 			desc.placeholder = "Once upon a time..."
@@ -290,3 +282,4 @@ do_text_editor :: proc(app: ^My_App) {
 	}
 	end_node()
 }
+

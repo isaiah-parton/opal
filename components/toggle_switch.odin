@@ -14,7 +14,7 @@ add_toggle_switch :: proc(value: ^bool) {
 	using opal
 	self := add_node(
 		&{
-			size = {35, 20},
+			min_size = {35, 20},
 			radius = 10,
 			background = tw.NEUTRAL_950,
 			stroke = tw.BLUE_800,
@@ -48,3 +48,4 @@ add_toggle_switch :: proc(value: ^bool) {
 	node_update_transition(self, 1, self.is_active, 0.1)
 	self.style.stroke_width = 3 * self.transitions[1]
 }
+

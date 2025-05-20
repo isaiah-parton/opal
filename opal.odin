@@ -269,11 +269,11 @@ Node_Descriptor :: struct {
 	// Added position relative to parent size
 	relative_position:       [2]f32,
 
+	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
+	min_size:                [2]f32,
+
 	// The maximum size the node is allowed to grow to
 	max_size:                [2]f32,
-
-	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	size:                    [2]f32,
 
 	// Added size relative to the parent size
 	relative_size:           [2]f32,
@@ -348,11 +348,13 @@ Node_Descriptor :: struct {
 	// Callbacks for custom look or behavior
 	//
 
+	// DEAD CODE
 	// Called when the node is first initialized, allocate any additional state here
 	// on_create:               proc(self: ^Node),
 
+	// DEAD CODE
 	// Called when the node is discarded, this is to allow the user to clean up any custom state
-	on_drop:                 proc(self: ^Node),
+	// on_drop:                 proc(self: ^Node),
 
 	// Called after the default drawing behavior
 	on_draw:                 proc(self: ^Node),
@@ -385,6 +387,9 @@ Node :: struct {
 	// Unique identifier
 	id:                      Id `fmt:"x"`,
 
+	//
+	size:                    [2]f32,
+
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                     Box,
 
@@ -396,6 +401,12 @@ Node :: struct {
 
 	// This is computed as the minimum space required to fit all children or the node's text content
 	content_size:            [2]f32,
+
+	//
+	last_wrapped_size:       [2]f32,
+
+	//
+	no_resolve:              bool,
 
 	// If this is the node with the highest z-index that the mouse overlaps
 	was_hovered:             bool,
@@ -432,9 +443,6 @@ Node :: struct {
 	// Text content
 	text_layout:             kn.Selectable_Text `fmt:"-"`,
 
-	//
-	last_content_size:       [2]f32,
-
 	// View offset of contents
 	scroll:                  [2]f32,
 	target_scroll:           [2]f32,
@@ -449,9 +457,6 @@ Node :: struct {
 
 	// Universal state transition values for smooth animations
 	transitions:             [3]f32,
-
-	// Data intended to live as long as the node does. DO NOT manually free this data.
-	owned_data:              rawptr,
 }
 
 Scope :: struct {
@@ -501,7 +506,6 @@ Context :: struct {
 	///
 
 	// Prevents sub-pixel positioning to make edges appear perfectly crisp, motion however will not be as smooth
-	// TODO: Implement this
 	snap_to_pixels:            bool,
 
 	//
@@ -603,6 +607,8 @@ Context :: struct {
 	// Profiling state
 	frame_start_time:          time.Time,
 	frame_duration:            time.Duration,
+
+	// Debug only.
 	frame_duration_sum:        time.Duration,
 	frame_duration_avg:        time.Duration,
 
@@ -613,10 +619,12 @@ Context :: struct {
 	//
 	compute_start_time:        time.Time,
 	compute_duration:          time.Duration,
+
+	// Debug only.
 	compute_duration_sum:      time.Duration,
 	compute_duration_avg:      time.Duration,
 
-	// How many nodes are hidden. (Only available in debug.)
+	// How many nodes are hidden. Debug only.
 	drawn_nodes:               int,
 
 	// How many frames are queued for drawing
@@ -1224,9 +1232,9 @@ begin :: proc() {
 	for id, node in ctx.node_by_id {
 		if node.is_dead {
 			delete_key(&ctx.node_by_id, node.id)
-			if node.on_drop != nil {
-				node.on_drop(node)
-			}
+			// if node.on_drop != nil {
+			// 	node.on_drop(node)
+			// }
 			node_destroy(node)
 			(^Maybe(Node))(node)^ = nil
 		} else {
@@ -1296,11 +1304,10 @@ end :: proc() {
 
 ctx_solve_sizes :: proc(ctx: ^Context) {
 	for root in ctx.roots {
-		node_solve_sizes_recursively(root)
+		if node_solve_sizes_recursively(root) {
+			node_solve_sizes_recursively(root)
+		}
 	}
-	// for root in ctx.roots_that_need_resizing {
-	// 	node_solve_sizes_recursively(root)
-	// }
 }
 
 ctx_solve_positions_and_draw :: proc(ctx: ^Context) {
@@ -1398,6 +1405,8 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 			self.descriptor = descriptor^
 		}
 
+		self.size = self.min_size
+
 		if !self.is_root {
 			self.parent = ctx.current_node
 			assert(self != self.parent)
@@ -1427,6 +1436,7 @@ end_node :: proc() {
 			self.size = max(self.size.x, self.size.y)
 		}
 	}
+	self.size = linalg.max(self.size, self.last_wrapped_size)
 
 	// Add scrollbars
 	if self.show_scrollbars && self.overflow != {} {
@@ -1450,7 +1460,7 @@ end_node :: proc() {
 					relative_position = {1, 0},
 					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
-					size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
 					style = scrollbar_style,
 					z_index = 1,
 					padding = 1,
@@ -1496,7 +1506,7 @@ end_node :: proc() {
 					relative_position = {0, 1},
 					position = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
 					relative_size = {1, 0},
-					size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					min_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
 					style = scrollbar_style,
 					z_index = 1,
 					padding = 1,
@@ -1627,6 +1637,7 @@ node_on_new_frame :: proc(self: ^Node) {
 	self.content_size = 0
 	self.was_changed = false
 	self.was_confirmed = false
+	self.no_resolve = false
 
 	// Initialize string reader for text construction
 	string_reader: strings.Reader
@@ -1727,11 +1738,7 @@ node_on_new_frame :: proc(self: ^Node) {
 			text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
 		}
 		// Include text in content size
-		self.content_size = linalg.max(
-			self.content_size,
-			self.last_content_size,
-			self.text_layout.size,
-		)
+		self.content_size = linalg.max(self.content_size, self.text_layout.size)
 	} else if self.enable_edit {
 		// Must be reset here to prevent overflow when the text layout is made selectable
 		self.text_layout = {}
@@ -1762,12 +1769,16 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	if child.is_absolute {
 		return
 	}
-	if self.vertical {
-		self.content_size.y += child.size.y
-		self.content_size.x = max(self.content_size.x, child.size.x)
+	if self.wrap_mode != .None {
+		self.content_size = linalg.max(self.content_size, child.size)
 	} else {
-		self.content_size.x += child.size.x
-		self.content_size.y = max(self.content_size.y, child.size.y)
+		if self.vertical {
+			self.content_size.y += child.size.y
+			self.content_size.x = max(self.content_size.x, child.size.x)
+		} else {
+			self.content_size.x += child.size.x
+			self.content_size.y = max(self.content_size.y, child.size.y)
+		}
 	}
 }
 
@@ -1867,7 +1878,7 @@ node_solve_box_recursively :: proc(
 }
 
 
-node_solve_sizes :: proc(self: ^Node) {
+node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	// Axis indices
 	i := int(self.vertical)
 	j := 1 - i
@@ -1899,51 +1910,87 @@ node_solve_sizes :: proc(self: ^Node) {
 		for node, node_index in self.growable_kids {
 			if node.size[i] == smallest {
 				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
+				// Remove the node when it's done growing
 				if size_to_add <= 0 {
 					unordered_remove(&self.growable_kids, node_index)
 					continue
 				}
+				// Grow the node
 				node.size[i] += size_to_add
+				// Add content size (this is important)
+				self.content_size[i] += size_to_add
+				// Decrease remaining space
 				remaining_space -= size_to_add
 			}
 		}
 	}
 
-	//
-
 	// Now compute each child's position within its parent
 	offset_along_axis: f32 = self.padding[i]
 	offset_across_axis: f32 = self.padding[j]
 	max_span: f32
-	for node in self.kids {
+	max_length: f32
+	total_size: f32
+	for node, node_index in self.kids {
 		if node.is_absolute {
 			node.position += self.size * node.relative_position
 			node.size += self.size * node.relative_size
+			node.relative_position = 0
+			node.relative_size = 0
 		} else {
+			//
+			// Wrapping logic
+			//
+			if self.wrap_mode != .None {
+				if offset_along_axis + node.size[i] > self.size[i] {
+					max_length = max(max_length, offset_along_axis + self.padding[i + 2])
+					offset_along_axis = 0
+					offset_across_axis += max_span
+					total_size += max_span
+					max_span = 0
+				}
+				max_span = max(max_span, node.size[j])
+			}
+
 			node.position[i] =
 				offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
-
-			// if node.size[i] < (self.size[i] - self.content_size[i]) - offset_along_axis {
-			// 	offset_along_axis = 0
-			// 	offset_across_axis += max_span
-			// }
-
 			node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
-
 			node.position[j] =
-				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
+				offset_across_axis +
+				(available_span + self.overflow[j] - node.size[j]) * self.content_align[j]
 
 			offset_along_axis += node.size[i] + self.spacing
 		}
 	}
+
+	total_size += max_span
+	if self.wrap_mode != .None {
+		if total_size != self.last_wrapped_size[j] {
+			added_size := self.size[j] - total_size
+			self.size[j] = total_size
+			if self.parent != nil {
+				self.parent.content_size[j] += added_size
+				self.parent.size[j] += added_size * self.parent.fit[j]
+			}
+			self.last_wrapped_size[j] = self.size[j]
+			needs_resolve = true
+		}
+		self.no_resolve = self.wrap_mode != .None
+	}
+
+	return
 }
 
-node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) {
+node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) -> (needs_resolve: bool) {
 	assert(depth < 128)
-	node_solve_sizes(self)
-	for node in self.kids {
-		node_solve_sizes_recursively(node, depth + 1)
+	if self.no_resolve {
+		return
 	}
+	needs_resolve |= node_solve_sizes(self)
+	for node in self.kids {
+		needs_resolve |= node_solve_sizes_recursively(node, depth + 1)
+	}
+	return
 }
 
 node_is_scrollable :: proc(self: ^Node) -> bool {
@@ -2025,7 +2072,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			wrap = .Words,
 			max_size = {self.size.x, math.F32_MAX},
 		)
-		self.last_content_size = self.text_layout.size
+		// self.last_content_size = self.text_layout.size
 	}
 
 	enable_scissor :=
@@ -2450,7 +2497,7 @@ inspector_show :: proc(self: ^Inspector) {
 		&{
 			position = self.position,
 			bounds = get_screen_box(),
-			size = {300, 500},
+			min_size = {300, 500},
 			vertical = true,
 			padding = 1,
 			shadow_size = 10,
@@ -2489,7 +2536,7 @@ inspector_show :: proc(self: ^Inspector) {
 		if node, ok := global_ctx.node_by_id[self.selected_id]; ok {
 			add_node(
 				&{
-					size = {0, 200},
+					min_size = {0, 200},
 					grow = {true, false},
 					padding = 4,
 					max_size = INFINITY,
@@ -2544,7 +2591,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			inherit_state = true,
 		},
 	).?
-	add_node(&{size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
+	add_node(&{min_size = 14, on_draw = nil if len(node.kids) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
 				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
 			}})
@@ -2595,3 +2642,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
