@@ -123,6 +123,11 @@ main :: proc() {
 					},
 				)
 				do_text_editor(app)
+				do_text(
+					`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis. Donec gravida hendrerit felis, eu elementum libero egestas sed. Phasellus sagittis a diam non varius.
+
+Ut eu cursus turpis. Maecenas nisl ipsum, rutrum quis bibendum sit amet, fermentum non nisl. Proin tempor lorem vitae leo venenatis imperdiet. Mauris facilisis id tortor vitae convallis. Vestibulum interdum dui eu lacus efficitur maximus. Aliquam facilisis accumsan eros et scelerisque. Aliquam in nunc mauris. Pellentesque ultrices libero sed dolor cursus elementum. Nulla sit amet laoreet lorem. Quisque rhoncus consequat egestas. Praesent mollis ligula eget felis cursus hendrerit. Sed dictum, arcu blandit dapibus gravida, lacus nulla vestibulum nisi, a elementum nisi ligula eget tortor. Ut feugiat massa nec lorem congue imperdiet. Curabitur fringilla tortor et sem sodales hendrerit blandit non mauris. Cras eget velit vulputate, dictum lectus in, fringilla dui.`,
+				)
 				// {
 				// 	for i in 1 ..= 1000 {
 				// 		push_id(i)
@@ -158,6 +163,33 @@ main :: proc() {
 			customize_window = true,
 		},
 	)
+}
+
+do_text :: proc(text: string) {
+	using opal
+	words := strings.split(text, " ")
+	begin_node(&{max_size = INFINITY, fit = 1, vertical = true})
+	row := begin_node(
+		&{
+			fit = 1,
+			max_size = INFINITY,
+			grow = {true, false},
+			spacing = kn.DEFAULT_FONT.space_advance * 14,
+			wrap_mode = .Forward,
+		},
+	).?
+	for word, i in words {
+		push_id(int(i))
+		if row.content_size.x + 30 >=
+		   row.size.x - row.padding.x - row.padding.z - row.spacing * f32(len(row.kids) - 1) {
+			end_node()
+			row = begin_node(&row.descriptor).?
+		}
+		add_node(&{foreground = tw.WHITE, fit = 1, text = word, font_size = 14})
+		pop_id()
+	}
+	end_node()
+	end_node()
 }
 
 do_text_editor :: proc(app: ^My_App) {
@@ -258,4 +290,3 @@ do_text_editor :: proc(app: ^My_App) {
 	}
 	end_node()
 }
-

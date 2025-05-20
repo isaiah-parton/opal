@@ -1908,8 +1908,13 @@ node_solve_sizes :: proc(self: ^Node) {
 			}
 		}
 	}
+
+	//
+
 	// Now compute each child's position within its parent
 	offset_along_axis: f32 = self.padding[i]
+	offset_across_axis: f32 = self.padding[j]
+	max_span: f32
 	for node in self.kids {
 		if node.is_absolute {
 			node.position += self.size * node.relative_position
@@ -1918,13 +1923,16 @@ node_solve_sizes :: proc(self: ^Node) {
 			node.position[i] =
 				offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
 
-			// if node.grow[j] {
-			// 	node.size[j] = max(node.size[j], available_span)
+			// if node.size[i] < (self.size[i] - self.content_size[i]) - offset_along_axis {
+			// 	offset_along_axis = 0
+			// 	offset_across_axis += max_span
 			// }
+
 			node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
 
 			node.position[j] =
 				self.padding[j] + (available_span - node.size[j]) * self.content_align[j]
+
 			offset_along_axis += node.size[i] + self.spacing
 		}
 	}
@@ -2587,4 +2595,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-
