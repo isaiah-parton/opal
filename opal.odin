@@ -1,7 +1,7 @@
 package opal
 
 //
-// The following are features and optimizations that could be necessary depending on what features I deem a priority in the future. Only to be implemented if absolutely necessary and if they don't compromise the system's simplicity and low-level control.
+// The following are features and optimizations that could be necessary depending on what features I deem a priority in the future. Only to be implemented if absolutely necessary and if they don't compromise the system's simplicity and low-level control, or add pointless overhead.
 // 	- Add an 'inline' layout mode to, well, layout children inline along any axis allowing for wrapping. Text layout and such could then be migrated to opal entirely. Adding nodes in between text is already possible, but there is no support for wrapping such nodes.
 // 	- Abstract away the functional components of a Node (Descriptor, Retained_State, Transient_State) to allow for transient nodes wihout hashed ids or interaction logic. Flex layouts need only a descriptor and some transient state, while inline layouts need additional retained state for caching their size. Ids will become retained state as they are only required by interactive nodes.
 //
@@ -232,6 +232,20 @@ Node_Mode :: enum {
 }
 
 //
+// I have an idea for a way to implement discrete layout solving using a sort of accumulated size hash
+//
+Size_Hash :: struct {
+	known:   [2]f32,
+	unknown: [2]f32,
+}
+
+Wrap_Mode :: enum {
+	None,
+	Forward,
+	Backward,
+}
+
+//
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
 Node_Descriptor :: struct {
@@ -273,8 +287,17 @@ Node_Descriptor :: struct {
 	// How the node is aligned on its origin if it is absolutely positioned
 	align:                   [2]f32,
 
+	// Values for the node's children layout
+	padding:                 [4]f32,
+
+	// How the content will be aligned if there is extra space
+	content_align:           [2]f32,
+
 	// Spacing added between children
 	spacing:                 f32,
+
+	// If the contents will wrap
+	wrap_mode:               Wrap_Mode,
 
 	// If this node will treat its children's state as its own
 	inherit_state:           bool,
@@ -317,12 +340,6 @@ Node_Descriptor :: struct {
 
 	//
 	inert:                   bool,
-
-	// Values for the node's children layout
-	padding:                 [4]f32,
-
-	// How the content will be aligned if there is extra space
-	content_align:           [2]f32,
 
 	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
 	owner:                   ^Node,
@@ -414,7 +431,9 @@ Node :: struct {
 
 	// Text content
 	text_layout:             kn.Selectable_Text `fmt:"-"`,
-	last_text_size:          [2]f32,
+
+	//
+	last_content_size:       [2]f32,
 
 	// View offset of contents
 	scroll:                  [2]f32,
@@ -1710,8 +1729,8 @@ node_on_new_frame :: proc(self: ^Node) {
 		// Include text in content size
 		self.content_size = linalg.max(
 			self.content_size,
+			self.last_content_size,
 			self.text_layout.size,
-			self.last_text_size,
 		)
 	} else if self.enable_edit {
 		// Must be reset here to prevent overflow when the text layout is made selectable
@@ -1998,7 +2017,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			wrap = .Words,
 			max_size = {self.size.x, math.F32_MAX},
 		)
-		self.last_text_size = self.text_layout.size
+		self.last_content_size = self.text_layout.size
 	}
 
 	enable_scissor :=
