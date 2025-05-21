@@ -298,8 +298,7 @@ run :: proc(descriptor: ^App_Descriptor = nil) {
 }
 
 app_use_node_for_window_grabbing :: proc(self: ^App, node: ^opal.Node) {
-	self.enable_window_grab =
-		(node.is_hovered || node.has_hovered_child) && !opal.global_ctx.widget_hovered
+	self.enable_window_grab = node.is_hovered
 	self.window_grab_box = node.box
 }
 
@@ -316,4 +315,3 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
-

@@ -190,10 +190,12 @@ do_text :: proc(text: string) {
 				radius = 4,
 				text = word,
 				font_size = 14,
+				square_fit = true,
 			},
 		)
 		pop_id()
 	}
+	add_node(&{max_size = INFINITY, grow = true, background = tw.LIME_500})
 	end_node()
 }
 

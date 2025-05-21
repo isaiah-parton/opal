@@ -568,6 +568,9 @@ Context :: struct {
 	// All nodes wihout a parent are stored here for layout solving.
 	roots:                     [dynamic]^Node,
 
+	// Nodes to be positioned after size calculation
+	absolute_nodes:            [dynamic]^Node,
+
 	// The stack of nodes being declared. May contain multiple roots, as its only a way of keeping track of the nodes currently being invoked.
 	stack:                     [dynamic]^Node,
 
@@ -1773,23 +1776,16 @@ node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 		if self.interactive &&
 		   !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
 			ctx.hovered_node = self
-
-			// Check if this node's contents can be scrolled
 			if node_is_scrollable(self) {
 				ctx.scrollable_node = self
 			}
 		}
 	}
-
 	return
 }
 
-node_receive_input_recursive :: proc(self: ^Node, mouse_overlap: bool = true) {
-	if !mouse_overlap {
-		return
-	}
-	mouse_overlap := node_receive_input(self)
-	if mouse_overlap {
+node_receive_input_recursive :: proc(self: ^Node) {
+	if node_receive_input(self) {
 		for node in self.kids {
 			node_receive_input_recursive(node)
 		}
@@ -1858,22 +1854,24 @@ node_solve_box_recursively :: proc(
 	}
 }
 
-// TODO: Go over this and optimize it
-node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+node_solve_wrapped_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+
+	return
+}
+
+node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node) {
 	// Axis indices
 	i := int(self.vertical)
-	j := 1 - i
 	// Compute available space
 	remaining_space := self.size[i] - self.content_size[i]
-	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
 	// As long as there is space remaining and children to grow
-	for remaining_space > 0 && len(self.growable_kids) > 0 {
+	for remaining_space > 0 && len(array) > 0 {
 		// Get the smallest size along the layout axis, nodes of this size will be grown first
-		smallest := self.growable_kids[0].size[i]
+		smallest := array[0].size[i]
 		// Until they reach this size
 		second_smallest := f32(math.F32_MAX)
 		size_to_add := remaining_space
-		for node in self.growable_kids {
+		for node in array {
 			if node.size[i] < smallest {
 				second_smallest = smallest
 				smallest = node.size[i]
@@ -1883,17 +1881,14 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			}
 		}
 		// Compute the smallest size to add
-		size_to_add = min(
-			second_smallest - smallest,
-			remaining_space / f32(len(self.growable_kids)),
-		)
+		size_to_add = min(second_smallest - smallest, remaining_space / f32(len(array)))
 		// Add that amount to every eligable child
-		for node, node_index in self.growable_kids {
+		for node, node_index in array {
 			if node.size[i] == smallest {
 				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
 				// Remove the node when it's done growing
 				if size_to_add <= 0 {
-					unordered_remove(&self.growable_kids, node_index)
+					unordered_remove(array, node_index)
 					continue
 				}
 				// Grow the node
@@ -1905,8 +1900,15 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			}
 		}
 	}
+}
 
-	// Now compute each child's position within its parent
+node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+	i := int(self.vertical)
+	j := 1 - i
+
+	node_grow_children(self, &self.growable_kids)
+	remaining_space := self.size[i] - self.content_size[i]
+	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
 	offset_along_axis: f32 = self.padding[i]
 	offset_across_axis: f32 = self.padding[j]
 	max_span: f32
