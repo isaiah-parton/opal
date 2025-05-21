@@ -49,8 +49,7 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(
-	My_App {
+	sdl3app.state = new_clone(My_App {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -126,34 +125,17 @@ main :: proc() {
 						show_scrollbars = true,
 					},
 				)
-				do_text_editor(app)
-				do_text(
-					`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis. Donec gravida hendrerit felis, eu elementum libero egestas sed. Phasellus sagittis a diam non varius. Ut eu cursus turpis. Maecenas nisl ipsum, rutrum quis bibendum sit amet, fermentum non nisl. Proin tempor lorem vitae leo venenatis imperdiet. Mauris facilisis id tortor vitae convallis. Vestibulum interdum dui eu lacus efficitur maximus. Aliquam facilisis accumsan eros et scelerisque. Aliquam in nunc mauris. Pellentesque ultrices libero sed dolor cursus elementum. Nulla sit amet laoreet lorem. Quisque rhoncus consequat egestas. Praesent mollis ligula eget felis cursus hendrerit. Sed dictum, arcu blandit dapibus gravida, lacus nulla vestibulum nisi, a elementum nisi ligula eget tortor. Ut feugiat massa nec lorem congue imperdiet. Curabitur fringilla tortor et sem sodales hendrerit blandit non mauris. Cras eget velit vulputate, dictum lectus in, fringilla dui.`,
-				)
-				// {
-				// 	for i in 1 ..= 1000 {
-				// 		push_id(i)
-				// 		add_node(
-				// 			&{
-				// 				padding = 2,
-				// 				fit = 1,
-				// 				background = tw.NEUTRAL_900,
-				// 				foreground = tw.ROSE_500,
-				// 				font_size = 14,
-				// 				text = fmt.tprintf("Item #%i", i),
-				// 				content_align = 0.5,
-				// 			},
-				// 		)
-				// 		pop_id()
-				// 	}
-				// }
+				{
+					do_text(
+						`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`,
+					)
+				}
 				end_node()
 			}
 			end_node()
 			end()
 		},
-	},
-	)
+	})
 
 	sdl3app.run(
 		&{
@@ -167,15 +149,19 @@ main :: proc() {
 	)
 }
 
-do_text :: proc(text: string) {
+do_text :: proc(text: string, loc := #caller_location) {
 	using opal
+	push_id(hash(loc))
+	defer pop_id()
 	words := strings.split(text, " ", allocator = context.temp_allocator)
 	begin_node(
 		&{
 			max_size = INFINITY,
-			grow = {true, false},
+			grow = {true, true},
+			padding = 10,
 			fit = {0, 1},
 			enable_wrapping = true,
+			background = tw.BLUE_900,
 			spacing = kn.DEFAULT_FONT.space_advance * 14,
 		},
 	)
@@ -183,13 +169,14 @@ do_text :: proc(text: string) {
 		push_id(int(i))
 		add_node(
 			&{
-				foreground = tw.WHITE,
-				fit = 1,
-				padding = 2,
-				background = tw.SLATE_800,
-				radius = 4,
-				text = word,
-				font_size = 14,
+				foreground  = tw.WHITE,
+				fit         = 1,
+				// padding = 2,
+				// background = tw.SLATE_800,
+				// radius = 4,
+				static_text = true,
+				text        = word,
+				font_size   = 14,
 			},
 		)
 		pop_id()
@@ -197,11 +184,15 @@ do_text :: proc(text: string) {
 	end_node()
 }
 
-do_text_editor :: proc(app: ^My_App) {
+do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	using opal, components
+	push_id(hash(loc))
+	defer pop_id()
 	begin_node(
 		&{
 			fit = 1,
+			grow = {true, false},
+			max_size = {INFINITY, 0},
 			padding = 8,
 			background = tw.NEUTRAL_800,
 			radius = 7,

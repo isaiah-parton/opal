@@ -283,6 +283,9 @@ Node_Descriptor :: struct {
 	// Spacing added between children
 	spacing:                 f32,
 
+	//
+	static_text:             bool,
+
 	// If this node will treat its children's state as its own
 	inherit_state:           bool,
 
@@ -371,20 +374,20 @@ Node :: struct {
 	//
 	size:                    [2]f32,
 
+	//
+	last_size:               [2]f32,
+
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
 	box:                     Box,
 
 	// The content size minus the last calculated size
 	overflow:                [2]f32,
 
-	// This is known after box is calculated
-	text_origin:             [2]f32,
-
 	// This is computed as the minimum space required to fit all children or the node's text content
 	content_size:            [2]f32,
 
-	//
-	last_wrapped_size:       [2]f32,
+	// The span resulting from the last inline layout calculation
+	last_wrapped_size:       f32,
 
 	//
 	no_resolve:              bool,
@@ -411,6 +414,8 @@ Node :: struct {
 
 	// Time of last mouse down event over this node
 	last_click_time:         time.Time,
+
+	// String builder for content editing
 	builder:                 strings.Builder,
 
 	// Interaction
@@ -1227,6 +1232,7 @@ begin :: proc() {
 	}
 
 	clear(&ctx.stack)
+	clear(&ctx.absolute_nodes)
 	clear(&ctx.roots)
 }
 
@@ -1267,6 +1273,12 @@ end :: proc() {
 	}
 
 	ctx_solve_sizes(ctx)
+	for node in ctx.absolute_nodes {
+		if node.parent != nil {
+			node.size += node.parent.size * node.relative_size
+			node.position += node.parent.size * node.relative_position
+		}
+	}
 	ctx_solve_positions_and_draw(ctx)
 
 	clear(&ctx.runes)
@@ -1412,15 +1424,19 @@ end_node :: proc() {
 	}
 
 	i := int(self.vertical)
+	if self.enable_wrapping {
+		j := 1 - i
+		self.content_size[j] = max(self.content_size[j], self.last_wrapped_size)
+	} else {
+		self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
+	}
 	self.content_size += self.padding.xy + self.padding.zw
-	self.content_size[i] += self.spacing * f32(max(len(self.kids) - 1, 0))
 	if self.fit != {} {
 		self.size = linalg.max(self.size, self.content_size * self.fit)
 		if self.square_fit {
 			self.size = max(self.size.x, self.size.y)
 		}
 	}
-	self.size = linalg.max(self.size, self.last_wrapped_size)
 
 	// Add scrollbars
 	if self.show_scrollbars && self.overflow != {} {
@@ -1718,8 +1734,15 @@ node_on_new_frame :: proc(self: ^Node) {
 
 	// Create text layout
 	if reader, ok := reader.?; ok {
-		self.text_layout = kn.Selectable_Text {
-			text = kn.make_text_with_reader(reader, self.style.font_size, self.style.font^),
+		if !(!kn.text_is_empty(&self.text_layout) && self.static_text) {
+			self.text_layout = kn.Selectable_Text {
+				text = kn.make_text_with_reader(
+					reader,
+					self.style.font_size,
+					self.style.font^,
+					allocator = context.allocator if self.static_text else context.temp_allocator,
+				),
+			}
 		}
 		// Include text in content size
 		self.content_size = linalg.max(self.content_size, self.text_layout.size)
@@ -1731,6 +1754,10 @@ node_on_new_frame :: proc(self: ^Node) {
 			self.content_size.y,
 			self.style.font.line_height * self.style.font_size,
 		)
+	}
+
+	if self.is_absolute {
+		append(&ctx.absolute_nodes, self)
 	}
 
 	// Root
@@ -1808,6 +1835,9 @@ node_solve_box_recursively :: proc(
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
+	// Size is final at this point (hopefully)
+	self.last_size = self.size
+
 	node_solve_box(self, offset)
 
 	// Update and clamp scroll
@@ -1854,136 +1884,115 @@ node_solve_box_recursively :: proc(
 	}
 }
 
-Inline_Layout_Builder :: struct {
-	node:               ^Node,
-	i:                  int,
-	j:                  int,
-	remaining_space:    f32,
-	available_span:     f32,
-	offset_across_axis: f32,
-	max_span:           f32,
-	max_length:         f32,
-	total_size:         f32,
-	wrap_to_index:      int,
-	trigger_resolve:    bool,
-}
+node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset: f32) {
+	i := int(self.vertical)
+	j := 1 - i
 
-inline_layout_builder_end_line :: proc(self: ^Inline_Layout_Builder, at: int) {
-	offset: f32 = self.node.padding[self.i]
-	i := self.i
-	j := self.j
+	offset: f32 = self.padding[i]
 
 	growables := make([dynamic]^Node, allocator = context.temp_allocator)
 
-	nodes := self.node.kids[self.wrap_to_index:at]
+	nodes := self.kids[from:to]
 
 	length: f32
 	for node, node_index in nodes {
-		length += node.size[i] // + self.node.spacing * f32(min(node_index, 1))
+		length += node.size[i] // + self.spacing * f32(min(node_index, 1))
 		if node.grow[i] {
 			append(&growables, node)
 		}
 	}
 
-	node_grow_children(self.node, &growables, self.node.size[i] - length)
+	length_left := self.size[i] - self.padding[i] - self.padding[i + 2] - length
 
-	equal_spacing := (self.node.size[i] - length) / f32(len(nodes) - 1)
+	node_grow_children(self, &growables, length_left)
+
+	equal_spacing := length_left / f32(len(nodes) - 1)
 
 	for node, node_index in nodes {
-		node.position[i] =
-			offset + (self.remaining_space + self.node.overflow[i]) * self.node.content_align[i]
+		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
 
-		node.size[j] = max(node.size[j], self.max_span * f32(i32(node.grow[j])))
+		node.size[j] = max(node.size[j], line_span * f32(i32(node.grow[j])))
 
 		node.position[j] =
-			self.offset_across_axis +
-			(self.max_span + self.node.overflow[j] - node.size[j]) * self.node.content_align[j]
+			self.padding[j] +
+			line_offset +
+			(line_span + self.overflow[j] - node.size[j]) * self.content_align[j]
 
 		offset += node.size[i] + equal_spacing
 	}
 }
 
-inline_layout_builder_build :: proc(self: ^Inline_Layout_Builder) {
-	i := self.i
-	j := self.j
-	offset: f32 = self.node.padding[i]
-	for child, child_index in self.node.kids {
-		if offset + child.size[i] > self.node.size[i] {
-			inline_layout_builder_end_line(self, child_index)
-			self.wrap_to_index = child_index
+node_solve_sizes_wrapped :: proc(self: ^Node) -> (trigger_resolve: bool) {
+	i := int(self.vertical)
+	j := 1 - i
 
-			self.max_length = max(self.max_length, offset + self.node.padding[i + 2])
+	offset: f32
+	max_offset := self.size[i] - self.padding[i] - self.padding[i + 2]
+	line_offset: f32
+	line_span: f32
+	line_start: int
+
+	for child, child_index in self.kids {
+		if offset + child.size[i] > max_offset {
+			node_end_layout_line(self, line_start, child_index, line_span, line_offset)
+			line_start = child_index
+
 			offset = 0
-
-			// TODO: Add a descriptor field for line spacing and clean this up
-			self.offset_across_axis += self.max_span + self.node.spacing
-			self.total_size += self.max_span + self.node.spacing
-			self.max_span = 0
+			line_offset += line_span + self.spacing
+			line_span = 0
 		}
-		self.max_span = max(self.max_span, child.size[j])
-		offset += child.size[i] + self.node.spacing
+		line_span = max(line_span, child.size[j])
+		offset += child.size[i] + self.spacing
 	}
-	inline_layout_builder_end_line(self, len(self.node.kids))
+	node_end_layout_line(self, line_start, len(self.kids), line_span, line_offset)
 
-	self.total_size += self.max_span
-	if self.total_size != self.node.last_wrapped_size[j] {
-		added_size := self.node.size[j] - self.total_size
-		self.node.size[j] = self.total_size
-		if self.node.parent != nil {
-			self.node.parent.content_size[j] += added_size
-			self.node.parent.size[j] += added_size * self.node.parent.fit[j]
+	line_offset += line_span
+
+	if line_offset != self.last_wrapped_size {
+		added_size := (line_offset + self.padding[j] + self.padding[j + 2]) - self.size[j]
+		self.size[j] += added_size * self.fit[j]
+		if self.parent != nil {
+			self.parent.content_size[j] += added_size
+			// self.parent.size[j] += added_size * self.parent.fit[j]
 		}
-		self.node.last_wrapped_size[j] = self.node.size[j]
-		self.trigger_resolve = true
+		self.last_wrapped_size = line_offset
+		trigger_resolve = true
 	}
-	self.node.no_resolve = true
+	self.no_resolve = true
+
+	return
 }
 
-node_solve_wrapped_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+node_solve_sizes_unwrapped :: proc(self: ^Node) {
 	i := int(self.vertical)
 	j := 1 - i
 
-	b := Inline_Layout_Builder {
-		node               = self,
-		i                  = i,
-		j                  = j,
-		remaining_space    = self.size[i] - self.content_size[i],
-		available_span     = self.size[j] - self.padding[j] - self.padding[j + 2],
-		offset_across_axis = self.padding[j],
+	extent_left := self.size[i]
+	for child in self.kids {
+		extent_left -= child.size[i]
 	}
+	extent_left -= self.spacing * f32(len(self.kids) - 1) + self.padding[i] + self.padding[i + 2]
 
-	inline_layout_builder_build(&b)
+	extent_left = node_grow_children(self, &self.growable_kids, extent_left)
 
-	return b.trigger_resolve
-}
+	span_left := self.size[j] - self.padding[j] - self.padding[j + 2]
+	offset: f32 = self.padding[i]
 
-node_solve_flex_sizes :: proc(self: ^Node) {
-	i := int(self.vertical)
-	j := 1 - i
-
-	remaining_space := self.size[i] - self.content_size[i]
-	node_grow_children(self, &self.growable_kids, remaining_space)
-
-	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
-	offset_along_axis: f32 = self.padding[i]
-
-	for node, node_index in self.kids {
-		node.position[i] =
-			offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
-		node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
-		node.position[j] =
+	for child, child_index in self.kids {
+		if child.is_absolute {
+			continue
+		}
+		child.position[i] = offset + (extent_left + self.overflow[i]) * self.content_align[i]
+		child.size[j] = max(child.size[j], span_left * f32(i32(child.grow[j])))
+		child.position[j] =
 			self.padding[j] +
-			(available_span + self.overflow[j] - node.size[j]) * self.content_align[j]
+			(span_left + self.overflow[j] - child.size[j]) * self.content_align[j]
 
-		offset_along_axis += node.size[i] + self.spacing
+		offset += child.size[i] + self.spacing
 	}
 }
 
-node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) {
-	if length <= 0 {
-		return
-	}
-
+node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> f32 {
 	length := length
 
 	i := int(self.vertical)
@@ -2032,13 +2041,18 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) {
 			}
 		}
 	}
+
+	return length
 }
 
 node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+	// This is where an `on_size_known()` proc would go
+	self.overflow = linalg.max(self.content_size - self.size, 0)
+
 	if self.enable_wrapping {
-		return node_solve_wrapped_sizes(self)
+		return node_solve_sizes_wrapped(self)
 	}
-	node_solve_flex_sizes(self)
+	node_solve_sizes_unwrapped(self)
 	return
 }
 
@@ -2103,8 +2117,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 	ctx := global_ctx
 
-	self.overflow = linalg.max(self.content_size - self.size, 0)
-
 	if self.is_clipped {
 		return
 	}
@@ -2114,7 +2126,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	}
 
 	// Compute text position
-	self.text_origin =
+	text_origin :=
 		linalg.lerp(
 			self.box.lo + self.padding.xy,
 			self.box.hi - self.padding.zw,
@@ -2133,7 +2145,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 	if self.enable_selection {
 		self.text_layout = kn.make_selectable(
 			self.text_layout,
-			ctx.mouse_position - self.text_origin,
+			ctx.mouse_position - text_origin,
 			self.editor.selection,
 		)
 
@@ -2143,7 +2155,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 
 		node_update_selection(self)
 
-		cursor_box := text_get_cursor_box(&self.text_layout, self.text_origin)
+		cursor_box := text_get_cursor_box(&self.text_layout, text_origin)
 
 		// Make sure to clip the cursor
 		padded_box := node_get_padded_box(self)
@@ -2199,7 +2211,7 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			if self.enable_selection {
 				draw_text_highlight(
 					&self.text_layout,
-					self.text_origin,
+					text_origin,
 					kn.fade(
 						global_ctx.colors[.Selection_Background],
 						0.5 * f32(i32(self.is_focused)),
@@ -2209,17 +2221,17 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			if self.enable_selection && self.is_focused {
 				draw_text(
 					&self.text_layout,
-					self.text_origin,
+					text_origin,
 					self.style.foreground,
 					global_ctx.colors[.Selection_Foreground],
 				)
 			} else {
-				kn.add_text(self.text_layout, self.text_origin, self.style.foreground)
+				kn.add_text(self.text_layout, text_origin, self.style.foreground)
 			}
 			if self.enable_edit {
 				draw_text_cursor(
 					&self.text_layout,
-					self.text_origin,
+					text_origin,
 					kn.fade(global_ctx.colors[.Selection_Background], f32(i32(self.is_focused))),
 				)
 			}
@@ -2575,6 +2587,7 @@ inspector_show :: proc(self: ^Inspector) {
 			grow = {true, false},
 			max_size = INFINITY,
 			data = self,
+			interactive = true,
 		},
 	).?
 	draggable_node_update(self, handle_node)
@@ -2593,6 +2606,7 @@ inspector_show :: proc(self: ^Inspector) {
 					show_scrollbars = true,
 					style = {font_size = 12, background = tw.NEUTRAL_950, foreground = _TEXT},
 					enable_selection = true,
+					interactive = true,
 				},
 			)
 		}
