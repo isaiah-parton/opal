@@ -226,23 +226,10 @@ Node_Style :: struct {
 //
 // TODO: Say something here
 //
-Node_Mode :: enum {
+Node_Tier :: enum {
 	Inert,
 	Interactive,
-}
-
-//
-// I have an idea for a way to implement discrete layout solving using a sort of accumulated size hash
-//
-Size_Hash :: struct {
-	known:   [2]f32,
-	unknown: [2]f32,
-}
-
-Wrap_Mode :: enum {
-	None,
-	Forward,
-	Backward,
+	Editable,
 }
 
 //
@@ -296,9 +283,6 @@ Node_Descriptor :: struct {
 	// Spacing added between children
 	spacing:                 f32,
 
-	// If the contents will wrap
-	wrap_mode:               Wrap_Mode,
-
 	// If this node will treat its children's state as its own
 	inherit_state:           bool,
 
@@ -308,11 +292,8 @@ Node_Descriptor :: struct {
 	// If true, the node will ignore the normal layout behavior and simply be positioned and sized relative to its parent
 	is_absolute:             bool,
 
-	// If text will be wrapped for the next frame
+	// Wraps contents like an HTML inline layout
 	enable_wrapping:         bool,
-
-	// Marks the node as a clickable widget and will steal mouse events from the native window functionality
-	is_widget:               bool,
 
 	// When true, causes the node to not be adopted by the node before it. It will instead be added as a new root.
 	is_root:                 bool,
@@ -339,7 +320,7 @@ Node_Descriptor :: struct {
 	square_fit:              bool,
 
 	//
-	inert:                   bool,
+	interactive:             bool,
 
 	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
 	owner:                   ^Node,
@@ -1182,7 +1163,7 @@ begin :: proc() {
 
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
-		if ctx.hovered_node.is_widget {
+		if ctx.hovered_node.interactive {
 			ctx.widget_hovered = true
 		}
 	} else {
@@ -1769,7 +1750,7 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	if child.is_absolute {
 		return
 	}
-	if self.wrap_mode != .None {
+	if self.enable_wrapping {
 		self.content_size = linalg.max(self.content_size, child.size)
 	} else {
 		if self.vertical {
@@ -1784,13 +1765,13 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 
 node_receive_input :: proc(self: ^Node) -> (mouse_overlap: bool) {
 	ctx := global_ctx
-	if !self.inert &&
-	   ctx.mouse_position.x >= self.box.lo.x &&
+	if ctx.mouse_position.x >= self.box.lo.x &&
 	   ctx.mouse_position.x <= self.box.hi.x &&
 	   ctx.mouse_position.y >= self.box.lo.y &&
 	   ctx.mouse_position.y <= self.box.hi.y {
 		mouse_overlap = true
-		if !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
+		if self.interactive &&
+		   !(ctx.hovered_node != nil && ctx.hovered_node.z_index > self.z_index) {
 			ctx.hovered_node = self
 
 			// Check if this node's contents can be scrolled
@@ -1877,7 +1858,7 @@ node_solve_box_recursively :: proc(
 	}
 }
 
-
+// TODO: Go over this and optimize it
 node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	// Axis indices
 	i := int(self.vertical)
@@ -1941,12 +1922,13 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			//
 			// Wrapping logic
 			//
-			if self.wrap_mode != .None {
+			if self.enable_wrapping {
 				if offset_along_axis + node.size[i] > self.size[i] {
 					max_length = max(max_length, offset_along_axis + self.padding[i + 2])
 					offset_along_axis = 0
-					offset_across_axis += max_span
-					total_size += max_span
+					// TODO: Add a descriptor field for line spacing and clean this up
+					offset_across_axis += max_span + self.spacing
+					total_size += max_span + self.spacing
 					max_span = 0
 				}
 				max_span = max(max_span, node.size[j])
@@ -1964,7 +1946,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	}
 
 	total_size += max_span
-	if self.wrap_mode != .None {
+	if self.enable_wrapping {
 		if total_size != self.last_wrapped_size[j] {
 			added_size := self.size[j] - total_size
 			self.size[j] = total_size
@@ -1975,7 +1957,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			self.last_wrapped_size[j] = self.size[j]
 			needs_resolve = true
 		}
-		self.no_resolve = self.wrap_mode != .None
+		self.no_resolve = self.enable_wrapping
 	}
 
 	return
@@ -2061,19 +2043,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 		) -
 		self.text_layout.size * self.content_align -
 		self.scroll
-
-	// Perform wrapping if enabled
-	if self.enable_wrapping && self.text_layout.size.x > self.size.x {
-		assert(self.style.font != nil)
-		self.text_layout.text = kn.make_text(
-			self.text,
-			self.style.font_size,
-			self.style.font^,
-			wrap = .Words,
-			max_size = {self.size.x, math.F32_MAX},
-		)
-		// self.last_content_size = self.text_layout.size
-	}
 
 	enable_scissor :=
 		self.clip_content &&
@@ -2587,7 +2556,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			max_size = INFINITY,
 			padding = {4, 2, 4, 2},
 			fit = {0, 1},
-			is_widget = true,
+			interactive = true,
 			inherit_state = true,
 		},
 	).?
@@ -2642,4 +2611,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

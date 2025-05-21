@@ -21,7 +21,7 @@ do_button :: proc(label: union #no_nil {
 			stroke_type = .Both,
 			font = font,
 			max_size = INFINITY,
-			is_widget = true,
+			interactive = true,
 		},
 		loc = loc,
 	).?
@@ -44,7 +44,7 @@ do_window_button :: proc(icon: rune, color: opal.Color, loc := #caller_location)
 			foreground = tw.NEUTRAL_300,
 			font = theme.icon_font,
 			max_size = INFINITY,
-			is_widget = true,
+			interactive = true,
 		},
 		loc = loc,
 	).?

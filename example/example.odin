@@ -78,10 +78,11 @@ main :: proc() {
 					padding = 1,
 					radius = window_radius,
 					clip_content = window_radius > 0,
+					interactive = true,
 				},
 			)
 			{
-				title_node := begin_node(
+				begin_node(
 					&{
 						fit = {0, 1},
 						min_size = {0, 20},
@@ -90,9 +91,12 @@ main :: proc() {
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_800},
 					},
-				).?
+				)
 				{
-					add_node(&{grow = true, max_size = INFINITY})
+					grab_node := add_node(
+						&{grow = true, max_size = INFINITY, interactive = true},
+					).?
+					sdl3app.app_use_node_for_window_grabbing(app, grab_node)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
 						sdl3.MinimizeWindow(app.window)
 					}
@@ -108,7 +112,6 @@ main :: proc() {
 					}
 				}
 				end_node()
-				sdl3app.app_use_node_for_window_grabbing(app, title_node)
 
 				begin_node(
 					&{
@@ -118,6 +121,7 @@ main :: proc() {
 						spacing = 5,
 						padding = 20,
 						vertical = true,
+						interactive = true,
 						clip_content = true,
 						show_scrollbars = true,
 					},
@@ -171,14 +175,23 @@ do_text :: proc(text: string) {
 			max_size = INFINITY,
 			grow = {true, false},
 			fit = {0, 1},
-			inert = true,
-			wrap_mode = .Forward,
+			enable_wrapping = true,
 			spacing = kn.DEFAULT_FONT.space_advance * 14,
 		},
 	)
 	for word, i in words {
 		push_id(int(i))
-		add_node(&{foreground = tw.WHITE, fit = 1, text = word, font_size = 14, inert = true})
+		add_node(
+			&{
+				foreground = tw.WHITE,
+				fit = 1,
+				padding = 2,
+				background = tw.SLATE_800,
+				radius = 4,
+				text = word,
+				font_size = 14,
+			},
+		)
 		pop_id()
 	}
 	end_node()
@@ -211,6 +224,7 @@ do_text_editor :: proc(app: ^My_App) {
 						radius = 4,
 						square_fit = true,
 						content_align = 0.5,
+						interactive = true,
 					},
 					loc,
 				).?
@@ -282,4 +296,3 @@ do_text_editor :: proc(app: ^My_App) {
 	}
 	end_node()
 }
-

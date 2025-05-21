@@ -16,7 +16,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			max_size = INFINITY,
 			grow = {true, false},
 			content_align = {0, 0.5},
-			is_widget = true,
+			interactive = true,
 			inherit_state = true,
 			style = {radius = 3},
 		},
@@ -44,7 +44,7 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	using opal
 	push_id(hash(loc))
 	node := add_node(
-		&{padding = 3, radius = 3, fit = 1, text = label, font_size = 12, is_widget = true},
+		&{padding = 3, radius = 3, fit = 1, text = label, font_size = 12, interactive = true},
 	).?
 	node.style.background = fade(tw.NEUTRAL_600, (node.transitions[0] + node.transitions[1]) * 0.3)
 	node.style.foreground =

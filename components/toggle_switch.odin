@@ -19,6 +19,7 @@ add_toggle_switch :: proc(value: ^bool) {
 			background = tw.NEUTRAL_950,
 			stroke = tw.BLUE_800,
 			stroke_type = .Outer,
+			interactive = true,
 			on_draw = proc(self: ^Node) {
 				using opal
 				inner_box := box_shrink(self.box, 2)
@@ -48,4 +49,3 @@ add_toggle_switch :: proc(value: ^bool) {
 	node_update_transition(self, 1, self.is_active, 0.1)
 	self.style.stroke_width = 3 * self.transitions[1]
 }
-

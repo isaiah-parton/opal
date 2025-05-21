@@ -29,7 +29,7 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 		foreground = tw.NEUTRAL_50,
 		enable_edit = true,
 		enable_selection = true,
-		is_widget = true,
+		interactive = true,
 		stroke_type = .Outer,
 		value_data = data,
 		value_type_info = type_info,
@@ -48,7 +48,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 				foreground = tw.NEUTRAL_500,
 				text = desc.placeholder,
 				fit = 1,
-				inert = true,
 			},
 		)
 		pop_id()
@@ -130,4 +129,3 @@ field_output :: proc(
 	}
 	return true
 }
-
