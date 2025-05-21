@@ -1854,114 +1854,191 @@ node_solve_box_recursively :: proc(
 	}
 }
 
-node_solve_wrapped_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
-
-	return
+Inline_Layout_Builder :: struct {
+	node:               ^Node,
+	i:                  int,
+	j:                  int,
+	remaining_space:    f32,
+	available_span:     f32,
+	offset_across_axis: f32,
+	max_span:           f32,
+	max_length:         f32,
+	total_size:         f32,
+	wrap_to_index:      int,
+	trigger_resolve:    bool,
 }
 
-node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node) {
-	// Axis indices
+inline_layout_builder_end_line :: proc(self: ^Inline_Layout_Builder, at: int) {
+	offset: f32 = self.node.padding[self.i]
+	i := self.i
+	j := self.j
+
+	growables := make([dynamic]^Node, allocator = context.temp_allocator)
+
+	nodes := self.node.kids[self.wrap_to_index:at]
+
+	length: f32
+	for node, node_index in nodes {
+		length += node.size[i] // + self.node.spacing * f32(min(node_index, 1))
+		if node.grow[i] {
+			append(&growables, node)
+		}
+	}
+
+	node_grow_children(self.node, &growables, self.node.size[i] - length)
+
+	equal_spacing := (self.node.size[i] - length) / f32(len(nodes) - 1)
+
+	for node, node_index in nodes {
+		node.position[i] =
+			offset + (self.remaining_space + self.node.overflow[i]) * self.node.content_align[i]
+
+		node.size[j] = max(node.size[j], self.max_span * f32(i32(node.grow[j])))
+
+		node.position[j] =
+			self.offset_across_axis +
+			(self.max_span + self.node.overflow[j] - node.size[j]) * self.node.content_align[j]
+
+		offset += node.size[i] + equal_spacing
+	}
+}
+
+inline_layout_builder_build :: proc(self: ^Inline_Layout_Builder) {
+	i := self.i
+	j := self.j
+	offset: f32 = self.node.padding[i]
+	for child, child_index in self.node.kids {
+		if offset + child.size[i] > self.node.size[i] {
+			inline_layout_builder_end_line(self, child_index)
+			self.wrap_to_index = child_index
+
+			self.max_length = max(self.max_length, offset + self.node.padding[i + 2])
+			offset = 0
+
+			// TODO: Add a descriptor field for line spacing and clean this up
+			self.offset_across_axis += self.max_span + self.node.spacing
+			self.total_size += self.max_span + self.node.spacing
+			self.max_span = 0
+		}
+		self.max_span = max(self.max_span, child.size[j])
+		offset += child.size[i] + self.node.spacing
+	}
+	inline_layout_builder_end_line(self, len(self.node.kids))
+
+	self.total_size += self.max_span
+	if self.total_size != self.node.last_wrapped_size[j] {
+		added_size := self.node.size[j] - self.total_size
+		self.node.size[j] = self.total_size
+		if self.node.parent != nil {
+			self.node.parent.content_size[j] += added_size
+			self.node.parent.size[j] += added_size * self.node.parent.fit[j]
+		}
+		self.node.last_wrapped_size[j] = self.node.size[j]
+		self.trigger_resolve = true
+	}
+	self.node.no_resolve = true
+}
+
+node_solve_wrapped_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	i := int(self.vertical)
-	// Compute available space
+	j := 1 - i
+
+	b := Inline_Layout_Builder {
+		node               = self,
+		i                  = i,
+		j                  = j,
+		remaining_space    = self.size[i] - self.content_size[i],
+		available_span     = self.size[j] - self.padding[j] - self.padding[j + 2],
+		offset_across_axis = self.padding[j],
+	}
+
+	inline_layout_builder_build(&b)
+
+	return b.trigger_resolve
+}
+
+node_solve_flex_sizes :: proc(self: ^Node) {
+	i := int(self.vertical)
+	j := 1 - i
+
 	remaining_space := self.size[i] - self.content_size[i]
-	// As long as there is space remaining and children to grow
-	for remaining_space > 0 && len(array) > 0 {
+	node_grow_children(self, &self.growable_kids, remaining_space)
+
+	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
+	offset_along_axis: f32 = self.padding[i]
+
+	for node, node_index in self.kids {
+		node.position[i] =
+			offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
+		node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
+		node.position[j] =
+			self.padding[j] +
+			(available_span + self.overflow[j] - node.size[j]) * self.content_align[j]
+
+		offset_along_axis += node.size[i] + self.spacing
+	}
+}
+
+node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) {
+	if length <= 0 {
+		return
+	}
+
+	length := length
+
+	i := int(self.vertical)
+
+	for length > 0 && len(array) > 0 {
 		// Get the smallest size along the layout axis, nodes of this size will be grown first
 		smallest := array[0].size[i]
+
 		// Until they reach this size
 		second_smallest := f32(math.F32_MAX)
-		size_to_add := remaining_space
+		size_to_add := length
+
 		for node in array {
 			if node.size[i] < smallest {
 				second_smallest = smallest
 				smallest = node.size[i]
 			}
+
 			if node.size[i] > smallest {
 				second_smallest = min(second_smallest, node.size[i])
 			}
 		}
+
 		// Compute the smallest size to add
-		size_to_add = min(second_smallest - smallest, remaining_space / f32(len(array)))
+		size_to_add = min(second_smallest - smallest, length / f32(len(array)))
+
 		// Add that amount to every eligable child
 		for node, node_index in array {
 			if node.size[i] == smallest {
 				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
+
 				// Remove the node when it's done growing
 				if size_to_add <= 0 {
 					unordered_remove(array, node_index)
 					continue
 				}
+
 				// Grow the node
 				node.size[i] += size_to_add
+
 				// Add content size (this is important)
 				self.content_size[i] += size_to_add
+
 				// Decrease remaining space
-				remaining_space -= size_to_add
+				length -= size_to_add
 			}
 		}
 	}
 }
 
 node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
-	i := int(self.vertical)
-	j := 1 - i
-
-	node_grow_children(self, &self.growable_kids)
-	remaining_space := self.size[i] - self.content_size[i]
-	available_span := self.size[j] - self.padding[j] - self.padding[j + 2]
-	offset_along_axis: f32 = self.padding[i]
-	offset_across_axis: f32 = self.padding[j]
-	max_span: f32
-	max_length: f32
-	total_size: f32
-	for node, node_index in self.kids {
-		if node.is_absolute {
-			node.position += self.size * node.relative_position
-			node.size += self.size * node.relative_size
-			node.relative_position = 0
-			node.relative_size = 0
-		} else {
-			//
-			// Wrapping logic
-			//
-			if self.enable_wrapping {
-				if offset_along_axis + node.size[i] > self.size[i] {
-					max_length = max(max_length, offset_along_axis + self.padding[i + 2])
-					offset_along_axis = 0
-					// TODO: Add a descriptor field for line spacing and clean this up
-					offset_across_axis += max_span + self.spacing
-					total_size += max_span + self.spacing
-					max_span = 0
-				}
-				max_span = max(max_span, node.size[j])
-			}
-
-			node.position[i] =
-				offset_along_axis + (remaining_space + self.overflow[i]) * self.content_align[i]
-			node.size[j] = max(node.size[j], available_span * f32(i32(node.grow[j])))
-			node.position[j] =
-				offset_across_axis +
-				(available_span + self.overflow[j] - node.size[j]) * self.content_align[j]
-
-			offset_along_axis += node.size[i] + self.spacing
-		}
-	}
-
-	total_size += max_span
 	if self.enable_wrapping {
-		if total_size != self.last_wrapped_size[j] {
-			added_size := self.size[j] - total_size
-			self.size[j] = total_size
-			if self.parent != nil {
-				self.parent.content_size[j] += added_size
-				self.parent.size[j] += added_size * self.parent.fit[j]
-			}
-			self.last_wrapped_size[j] = self.size[j]
-			needs_resolve = true
-		}
-		self.no_resolve = self.enable_wrapping
+		return node_solve_wrapped_sizes(self)
 	}
-
+	node_solve_flex_sizes(self)
 	return
 }
 
@@ -2532,6 +2609,7 @@ inspector_build_tree :: proc(self: ^Inspector) {
 			grow = true,
 			clip_content = true,
 			show_scrollbars = true,
+			interactive = true,
 		},
 	)
 	for root in global_ctx.roots {
@@ -2613,3 +2691,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
