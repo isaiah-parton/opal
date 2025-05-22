@@ -18,6 +18,8 @@ import "vendor:wgpu"
 
 import "../components"
 
+FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
+
 My_App :: struct {
 	using app:             sdl3app.App,
 	image:                 int,
@@ -126,14 +128,17 @@ main :: proc() {
 				)
 				{
 					do_text(
-						`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`,
-						true,
-						0,
-					)
-					do_text(
-						`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`,
-						{true, false},
-						1,
+						&{
+							grow = {true, false},
+							max_size = INFINITY,
+							fit = 1,
+							stroke = tw.WHITE,
+							stroke_width = 1,
+						},
+						FILLER_TEXT,
+						20,
+						&kn.DEFAULT_FONT,
+						tw.WHITE,
 					)
 				}
 				end_node()
@@ -155,28 +160,29 @@ main :: proc() {
 	)
 }
 
-do_text :: proc(text: string, grow: [2]bool, fit: [2]f32, loc := #caller_location) {
+do_text :: proc(
+	desc: ^opal.Node_Descriptor,
+	text: string,
+	size: f32,
+	font: ^opal.Font,
+	paint: opal.Paint_Option,
+	loc := #caller_location,
+) {
 	using opal
+	if font == nil {
+		return
+	}
 	push_id(hash(loc))
 	defer pop_id()
+	desc.clip_content = true
+	desc.enable_wrapping = true
+	desc.spacing = font.space_advance * size
 	words := strings.split(text, " ", allocator = context.temp_allocator)
-	begin_node(
-		&{
-			max_size = {500, 500},
-			grow = grow,
-			padding = 10,
-			fit = fit,
-			enable_wrapping = true,
-			stroke = tw.WHITE,
-			stroke_width = 2,
-			clip_content = true,
-			spacing = kn.DEFAULT_FONT.space_advance * 14,
-		},
-	)
+	begin_node(desc)
 	for word, i in words {
 		push_id(int(i))
 		add_node(
-			&{foreground = tw.WHITE, fit = 1, static_text = true, text = word, font_size = 14},
+			&{foreground = paint, fit = 1, text = word, font = font, font_size = size},
 			loc = loc,
 		)
 		pop_id()
@@ -287,4 +293,3 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	}
 	end_node()
 }
-

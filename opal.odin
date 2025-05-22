@@ -284,7 +284,7 @@ Node_Descriptor :: struct {
 	spacing:                 f32,
 
 	//
-	static_text:             bool,
+	justify_between:         bool,
 
 	// If this node will treat its children's state as its own
 	inherit_state:           bool,
@@ -295,7 +295,7 @@ Node_Descriptor :: struct {
 	// If true, the node will ignore the normal layout behavior and simply be positioned and sized relative to its parent
 	is_absolute:             bool,
 
-	// Wraps contents like an HTML inline layout
+	// Wraps contents
 	enable_wrapping:         bool,
 
 	// When true, causes the node to not be adopted by the node before it. It will instead be added as a new root.
@@ -345,6 +345,12 @@ Node_Descriptor :: struct {
 
 	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
 	data:                    rawptr,
+}
+
+Glyph :: struct {
+	using glyph:    kn.Font_Glyph,
+	offset:         [2]f32,
+	is_placeholder: bool,
 }
 
 //
@@ -427,7 +433,7 @@ Node :: struct {
 	time_created:            time.Time,
 
 	// Text content
-	text_layout:             kn.Selectable_Text `fmt:"-"`,
+	glyphs:                  []Glyph `fmt:"-"`,
 
 	// View offset of contents
 	scroll:                  [2]f32,
@@ -445,25 +451,11 @@ Node :: struct {
 	transitions:             [3]f32,
 }
 
-Scope :: struct {
-	data:      rawptr,
-	type_info: ^runtime.Type_Info,
-}
-
-push_scope :: proc(value: any) {
-	ctx := global_ctx
-	scope := Scope {
-		type_info = type_info_of(value.id),
-	}
-	scope.data, _ = mem.arena_alloc(&ctx.scope_arena, scope.type_info.size)
-	mem.copy(scope.data, value.data, scope.type_info.size)
-	append(&ctx.scopes, scope)
-	append(&ctx.scope_stack, &ctx.scopes[len(ctx.scopes) - 1])
-}
-
-pop_scope :: proc() {
-	ctx := global_ctx
-	pop(&ctx.scope_stack)
+Rune :: struct {
+	box:     Box,
+	index:   int,
+	code:    rune,
+	node_id: Id,
 }
 
 Context_Color :: enum {
@@ -555,7 +547,7 @@ Context :: struct {
 	frame:                     int,
 
 	// Native text input
-	runes:                     [dynamic]rune,
+	text_input:                [dynamic]rune,
 
 	// User images
 	images:                    [dynamic]Maybe(User_Image),
@@ -582,13 +574,8 @@ Context :: struct {
 	// The hash stack
 	id_stack:                  [dynamic]Id,
 
-	//
-	scopes:                    [dynamic]Scope,
-
-	// Scope stack
-	scope_stack:               [dynamic]^Scope,
-	scope_arena:               mem.Arena,
-	scope_data:                []u8,
+	// Runes
+	runes:                     [dynamic]Rune,
 
 	// The top-most element of the stack
 	current_node:              ^Node,
@@ -933,10 +920,6 @@ context_init :: proc(ctx: ^Context) {
 
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
-
-	// Scope allocation
-	ctx.scope_data = make([]u8, 2048)
-	mem.arena_init(&ctx.scope_arena, ctx.scope_data)
 }
 
 context_deinit :: proc(ctx: ^Context) {
@@ -1035,7 +1018,7 @@ handle_mouse_scroll :: proc(x, y: f32) {
 
 handle_text_input :: proc(text: cstring) {
 	for c in string(text) {
-		append(&global_ctx.runes, c)
+		append(&global_ctx.text_input, c)
 	}
 	draw_frames(1)
 }
@@ -1440,7 +1423,7 @@ end_node :: proc() {
 
 	// Add scrollbars
 	if self.show_scrollbars && self.overflow != {} {
-		SCROLLBAR_SIZE :: 8
+		SCROLLBAR_SIZE :: 5
 		SCROLLBAR_PADDING :: 2
 		inner_box := box_shrink(self.box, 1)
 		push_id(self.id)
@@ -1454,7 +1437,7 @@ end_node :: proc() {
 			corner_space = SCROLLBAR_SIZE + SCROLLBAR_PADDING
 		}
 		if self.overflow.y > 0 {
-			add_node(
+			node := add_node(
 				&{
 					is_absolute = true,
 					relative_position = {1, 0},
@@ -1463,15 +1446,20 @@ end_node :: proc() {
 					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
 					style = scrollbar_style,
 					z_index = 1,
-					padding = 1,
+					// padding = 1,
 					data = self,
+					interactive = true,
 					on_draw = proc(self: ^Node) {
+						node_update_transition(self, 0, self.is_hovered || self.is_active, 0.1)
 						parent := (^Node)(self.data)
 						inner_box := Box {
 							self.box.lo + self.padding.xy,
 							self.box.hi - self.padding.zw,
 						}
-						length := box_height(inner_box) * parent.size.y / parent.content_size.y
+						length := max(
+							box_height(inner_box) * parent.size.y / parent.content_size.y,
+							30,
+						)
 						scroll_travel := max(parent.content_size.y - parent.size.y, 0)
 						scroll_time := parent.scroll.y / scroll_travel
 						thumb_travel := box_height(inner_box) - length
@@ -1486,9 +1474,19 @@ end_node :: proc() {
 							paint = self.style.foreground,
 						)
 						if self.is_active {
+							if !self.was_active {
+								if point_in_box(global_ctx.mouse_position, thumb_box) {
+									global_ctx.node_click_offset =
+										global_ctx.mouse_position - thumb_box.lo
+								} else {
+									global_ctx.node_click_offset = box_size(thumb_box) / 2
+								}
+							}
 							parent.scroll.y =
 								clamp(
-									(global_ctx.mouse_position.y - inner_box.lo.y) / thumb_travel,
+									(global_ctx.mouse_position.y -
+										(inner_box.lo.y + global_ctx.node_click_offset.y)) /
+									thumb_travel,
 									0,
 									1,
 								) *
@@ -1497,7 +1495,10 @@ end_node :: proc() {
 						}
 					},
 				},
-			)
+			).?
+			node.position.x -= node.size.x * f32(node.transitions[0])
+			node.size.x *= (1 + f32(node.transitions[0]))
+			node.radius = node.size.x / 2
 		}
 		if self.overflow.x > 0 {
 			add_node(
@@ -1511,6 +1512,7 @@ end_node :: proc() {
 					z_index = 1,
 					padding = 1,
 					data = self,
+					interactive = true,
 					on_draw = proc(self: ^Node) {
 						parent := (^Node)(self.data)
 						inner_box := Box {
@@ -1672,8 +1674,8 @@ node_on_new_frame :: proc(self: ^Node) {
 				if key_pressed(.Z) do cmd = .Undo
 				if key_pressed(.Y) do cmd = .Redo
 			}
-			if len(ctx.runes) > 0 {
-				for char, c in ctx.runes {
+			if len(ctx.text_input) > 0 {
+				for char, c in ctx.text_input {
 					tedit.input_runes(&self.editor, {char})
 					draw_frames(1)
 					self.was_changed = true
@@ -1734,21 +1736,39 @@ node_on_new_frame :: proc(self: ^Node) {
 
 	// Create text layout
 	if reader, ok := reader.?; ok {
-		if !(!kn.text_is_empty(&self.text_layout) && self.static_text) {
-			self.text_layout = kn.Selectable_Text {
-				text = kn.make_text_with_reader(
-					reader,
-					self.style.font_size,
-					self.style.font^,
-					allocator = context.allocator if self.static_text else context.temp_allocator,
-				),
+		width: f32
+		glyphs := make([dynamic]Glyph, allocator = context.temp_allocator)
+		for {
+			char, size, err := io.read_rune(reader)
+			if err == .EOF {
+				break
+			}
+			if char == '\t' {
+				append(&glyphs, Glyph{offset = {width, 0}})
+				width += self.font.space_advance * self.font_size * 2
+			} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+				append(&glyphs, Glyph{glyph = glyph, offset = {width, 0}})
+				width += glyph.advance * self.font_size
+			} else {
+				for char in fmt.tprintf("<0x%x>", char) {
+					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+						append(
+							&glyphs,
+							Glyph{glyph = glyph, offset = {width, 0}, is_placeholder = true},
+						)
+						width += glyph.advance * self.font_size
+					}
+				}
 			}
 		}
+		width += f32(len(glyphs) - 1) * self.spacing
+		self.glyphs = glyphs[:]
 		// Include text in content size
-		self.content_size = linalg.max(self.content_size, self.text_layout.size)
+		self.content_size = linalg.max(
+			self.content_size,
+			[2]f32{width, self.font.line_height * self.font_size},
+		)
 	} else if self.enable_edit {
-		// Must be reset here to prevent overflow when the text layout is made selectable
-		self.text_layout = {}
 		// Simulate text height
 		self.content_size.y = max(
 			self.content_size.y,
@@ -2133,7 +2153,6 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 			self.box.hi - self.padding.zw,
 			self.content_align,
 		) -
-		self.text_layout.size * self.content_align -
 		self.scroll
 
 	enable_scissor :=
@@ -2143,36 +2162,24 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				max(abs(self.scroll.x), abs(self.scroll.y)) > 0.1)
 
 	// Compute text selection state if enabled
-	if self.enable_selection {
-		self.text_layout = kn.make_selectable(
-			self.text_layout,
-			ctx.mouse_position - text_origin,
-			self.editor.selection,
-		)
+	// if self.enable_selection {
+	// 	cursor_box := text_get_cursor_box(&self.text_layout, text_origin)
 
-		if self.text_layout.contact.valid && self.is_hovered {
-			set_cursor(.Text)
-		}
+	// 	// Make sure to clip the cursor
+	// 	padded_box := node_get_padded_box(self)
+	// 	left := max(0, padded_box.lo.x - cursor_box.lo.x)
+	// 	top := max(0, padded_box.lo.y - cursor_box.lo.y)
+	// 	right := max(0, cursor_box.hi.x - padded_box.hi.x)
+	// 	bottom := max(0, cursor_box.hi.y - padded_box.hi.y)
+	// 	enable_scissor |= max(left, right) > 0
+	// 	enable_scissor |= max(top, bottom) > 0
 
-		node_update_selection(self)
-
-		cursor_box := text_get_cursor_box(&self.text_layout, text_origin)
-
-		// Make sure to clip the cursor
-		padded_box := node_get_padded_box(self)
-		left := max(0, padded_box.lo.x - cursor_box.lo.x)
-		top := max(0, padded_box.lo.y - cursor_box.lo.y)
-		right := max(0, cursor_box.hi.x - padded_box.hi.x)
-		bottom := max(0, cursor_box.hi.y - padded_box.hi.y)
-		enable_scissor |= max(left, right) > 0
-		enable_scissor |= max(top, bottom) > 0
-
-		// Scroll to bring cursor into view
-		if self.is_focused && self.editor.selection != self.last_selection {
-			self.target_scroll.x += right - left
-			self.target_scroll.y += bottom - top
-		}
-	}
+	// 	// Scroll to bring cursor into view
+	// 	if self.is_focused && self.editor.selection != self.last_selection {
+	// 		self.target_scroll.x += right - left
+	// 		self.target_scroll.y += bottom - top
+	// 	}
+	// }
 
 	// Is transformation necessary?
 	is_transformed :=
@@ -2208,34 +2215,34 @@ node_draw_recursively :: proc(self: ^Node, depth := 0) {
 				paint = node_convert_paint_variant(self, self.background),
 			)
 		}
-		if self.style.foreground != nil && !kn.text_is_empty(&self.text_layout) {
-			if self.enable_selection {
-				draw_text_highlight(
-					&self.text_layout,
-					text_origin,
-					kn.fade(
-						global_ctx.colors[.Selection_Background],
-						0.5 * f32(i32(self.is_focused)),
-					),
+		if self.style.foreground != nil {
+			// if self.enable_selection {
+			// 	draw_text_highlight(
+			// 		&self.text_layout,
+			// 		text_origin,
+			// 		kn.fade(
+			// 			global_ctx.colors[.Selection_Background],
+			// 			0.5 * f32(i32(self.is_focused)),
+			// 		),
+			// 	)
+			// }
+			default_paint := kn.paint_index_from_option(self.foreground)
+			placeholder_paint := kn.paint_index_from_option(Color{255, 50, 50, 128})
+			for &glyph in self.glyphs {
+				kn.add_glyph(
+					glyph,
+					self.font_size,
+					self.box.lo + self.padding.xy + glyph.offset,
+					placeholder_paint if glyph.is_placeholder else default_paint,
 				)
 			}
-			if self.enable_selection && self.is_focused {
-				draw_text(
-					&self.text_layout,
-					text_origin,
-					self.style.foreground,
-					global_ctx.colors[.Selection_Foreground],
-				)
-			} else {
-				kn.add_text(self.text_layout, text_origin, self.style.foreground)
-			}
-			if self.enable_edit {
-				draw_text_cursor(
-					&self.text_layout,
-					text_origin,
-					kn.fade(global_ctx.colors[.Selection_Background], f32(i32(self.is_focused))),
-				)
-			}
+			// if self.enable_edit {
+			// 	draw_text_cursor(
+			// 		&self.text_layout,
+			// 		text_origin,
+			// 		kn.fade(global_ctx.colors[.Selection_Background], f32(i32(self.is_focused))),
+			// 	)
+			// }
 		}
 
 		if self.on_draw != nil {
@@ -2421,55 +2428,55 @@ draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn
 }
 
 node_update_selection :: proc(self: ^Node) {
-	is_separator :: proc(r: rune) -> bool {
-		return !unicode.is_alpha(r) && !unicode.is_number(r)
-	}
+	// is_separator :: proc(r: rune) -> bool {
+	// 	return !unicode.is_alpha(r) && !unicode.is_number(r)
+	// }
 
-	if self.is_active && self.text_layout.contact.index >= 0 {
-		if !self.was_active {
-			self.editor.anchor = self.text_layout.contact.index
-			if self.click_count == 3 {
-				self.editor.selection = {len(self.text), 0}
-			} else {
-				self.editor.selection = {
-					self.text_layout.contact.index,
-					self.text_layout.contact.index,
-				}
-			}
-		}
-		switch self.click_count {
-		case 2:
-			allow_precision := self.text_layout.contact.index != self.editor.anchor
-			if self.text_layout.contact.index <= self.editor.anchor {
-				self.editor.selection[0] =
-					self.text_layout.contact.index if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index]))) else max(0, strings.last_index_proc(self.text[:min(self.text_layout.contact.index, len(self.text))], is_separator) + 1)
-				self.editor.selection[1] = strings.index_proc(
-					self.text[self.editor.anchor:],
-					is_separator,
-				)
-				if self.editor.selection[1] == -1 {
-					self.editor.selection[1] = len(self.text)
-				} else {
-					self.editor.selection[1] += self.editor.anchor
-				}
-			} else {
-				self.editor.selection[1] = max(
-					0,
-					strings.last_index_proc(self.text[:self.editor.anchor], is_separator) + 1,
-				)
-				// `self.text_layout.selection.index - 1` is safe as long as `self.text_layout.selection.index > self.editor.anchor`
-				self.editor.selection[0] =
-					0 if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index - 1]))) else strings.index_proc(self.text[self.text_layout.contact.index:], is_separator)
-				if self.editor.selection[0] == -1 {
-					self.editor.selection[0] = len(self.text)
-				} else {
-					self.editor.selection[0] += self.text_layout.contact.index
-				}
-			}
-		case 1:
-			self.editor.selection[0] = self.text_layout.contact.index
-		}
-	}
+	// if self.is_active && self.text_layout.contact.index >= 0 {
+	// 	if !self.was_active {
+	// 		self.editor.anchor = self.text_layout.contact.index
+	// 		if self.click_count == 3 {
+	// 			self.editor.selection = {len(self.text), 0}
+	// 		} else {
+	// 			self.editor.selection = {
+	// 				self.text_layout.contact.index,
+	// 				self.text_layout.contact.index,
+	// 			}
+	// 		}
+	// 	}
+	// 	switch self.click_count {
+	// 	case 2:
+	// 		allow_precision := self.text_layout.contact.index != self.editor.anchor
+	// 		if self.text_layout.contact.index <= self.editor.anchor {
+	// 			self.editor.selection[0] =
+	// 				self.text_layout.contact.index if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index]))) else max(0, strings.last_index_proc(self.text[:min(self.text_layout.contact.index, len(self.text))], is_separator) + 1)
+	// 			self.editor.selection[1] = strings.index_proc(
+	// 				self.text[self.editor.anchor:],
+	// 				is_separator,
+	// 			)
+	// 			if self.editor.selection[1] == -1 {
+	// 				self.editor.selection[1] = len(self.text)
+	// 			} else {
+	// 				self.editor.selection[1] += self.editor.anchor
+	// 			}
+	// 		} else {
+	// 			self.editor.selection[1] = max(
+	// 				0,
+	// 				strings.last_index_proc(self.text[:self.editor.anchor], is_separator) + 1,
+	// 			)
+	// 			// `self.text_layout.selection.index - 1` is safe as long as `self.text_layout.selection.index > self.editor.anchor`
+	// 			self.editor.selection[0] =
+	// 				0 if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index - 1]))) else strings.index_proc(self.text[self.text_layout.contact.index:], is_separator)
+	// 			if self.editor.selection[0] == -1 {
+	// 				self.editor.selection[0] = len(self.text)
+	// 			} else {
+	// 				self.editor.selection[0] += self.text_layout.contact.index
+	// 			}
+	// 		}
+	// 	case 1:
+	// 		self.editor.selection[0] = self.text_layout.contact.index
+	// 	}
+	// }
 }
 
 to_obfuscated_reader :: proc(reader: ^strings.Reader) -> io.Reader {
@@ -2572,44 +2579,79 @@ inspector_show :: proc(self: ^Inspector) {
 		},
 	)
 	total_nodes := len(global_ctx.node_by_id)
-	handle_node := add_node(
+	handle_node := begin_node(
 		&{
-			text = fmt.tprintf(
-				"Inspector\nFPS: %.0f\nFrame time: %v\nCompute time: %v\nNodes: %i/%i",
-				kn.get_fps(),
-				global_ctx.frame_duration_avg,
-				global_ctx.compute_duration_avg,
-				global_ctx.drawn_nodes,
-				total_nodes,
-			),
 			fit = 1,
 			padding = 5,
-			style = {font_size = 12, background = _FOREGROUND, foreground = _TEXT},
+			style = {background = _FOREGROUND},
 			grow = {true, false},
 			max_size = INFINITY,
-			data = self,
 			interactive = true,
+			vertical = true,
 		},
 	).?
+	add_node(
+		&{
+			fit = 1,
+			font_size = 12,
+			foreground = _TEXT,
+			text = fmt.tprintf("FPS: %.0f", kn.get_fps()),
+		},
+	)
+	add_node(
+		&{
+			fit = 1,
+			font_size = 12,
+			foreground = _TEXT,
+			text = fmt.tprintf("Frame time: %v", global_ctx.frame_duration_avg),
+		},
+	)
+	add_node(
+		&{
+			fit = 1,
+			font_size = 12,
+			foreground = _TEXT,
+			text = fmt.tprintf("Compute time: %v", global_ctx.compute_duration_avg),
+		},
+	)
+	add_node(
+		&{
+			fit = 1,
+			font_size = 12,
+			foreground = _TEXT,
+			text = fmt.tprintf("Nodes: %i/%i", global_ctx.drawn_nodes, len(global_ctx.node_by_id)),
+		},
+	)
+	end_node()
 	draggable_node_update(self, handle_node)
 	inspector_reset(&global_ctx.inspector)
 	inspector_build_tree(&global_ctx.inspector)
 	if self.selected_id != 0 {
 		if node, ok := global_ctx.node_by_id[self.selected_id]; ok {
-			add_node(
+			begin_node(
 				&{
 					min_size = {0, 200},
 					grow = {true, false},
 					padding = 4,
 					max_size = INFINITY,
-					text = fmt.tprintf("%#v", node),
 					clip_content = true,
 					show_scrollbars = true,
-					style = {font_size = 12, background = tw.NEUTRAL_950, foreground = _TEXT},
-					enable_selection = true,
+					style = {background = tw.NEUTRAL_950},
 					interactive = true,
+					vertical = true,
 				},
 			)
+			lines := strings.split(
+				fmt.tprintf("%#v", node),
+				"\n",
+				allocator = context.temp_allocator,
+			)
+			for line, i in lines {
+				push_id(int(i))
+				add_node(&{foreground = _TEXT, font_size = 12, fit = 1, text = line})
+				pop_id()
+			}
+			end_node()
 		}
 	}
 	end_node()
@@ -2661,7 +2703,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			}})
 	add_node(
 		&{
-			text = fmt.tprintf("%x", node.id),
+			text = node.text if len(node.text) > 0 else fmt.tprintf("%x", node.id),
 			fit = 1,
 			style = {
 				font_size = 14,
@@ -2706,4 +2748,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-
