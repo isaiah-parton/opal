@@ -1906,7 +1906,7 @@ node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset:
 
 	node_grow_children(self, &growables, length_left)
 
-	equal_spacing := length_left / f32(len(nodes) - 1)
+	equal_spacing := self.spacing //length_left / f32(len(nodes) - 1)
 
 	for node, node_index in nodes {
 		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
@@ -1949,11 +1949,12 @@ node_solve_sizes_wrapped :: proc(self: ^Node) -> (trigger_resolve: bool) {
 	line_offset += line_span
 
 	if line_offset != self.last_wrapped_size {
-		added_size := (line_offset + self.padding[j] + self.padding[j + 2]) - self.size[j]
-		self.size[j] += added_size * self.fit[j]
+		added_size :=
+			((line_offset + self.padding[j] + self.padding[j + 2]) - self.size[j]) * self.fit[j]
+		self.size[j] += added_size
 		if self.parent != nil {
 			self.parent.content_size[j] += added_size
-			// self.parent.size[j] += added_size * self.parent.fit[j]
+			self.parent.size[j] += added_size * self.parent.fit[j]
 		}
 		self.last_wrapped_size = line_offset
 		trigger_resolve = true

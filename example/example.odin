@@ -119,7 +119,6 @@ main :: proc() {
 						content_align = 0.5,
 						spacing = 5,
 						padding = 20,
-						vertical = true,
 						interactive = true,
 						clip_content = true,
 						show_scrollbars = true,
@@ -128,6 +127,13 @@ main :: proc() {
 				{
 					do_text(
 						`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`,
+						true,
+						0,
+					)
+					do_text(
+						`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`,
+						{true, false},
+						1,
 					)
 				}
 				end_node()
@@ -149,35 +155,29 @@ main :: proc() {
 	)
 }
 
-do_text :: proc(text: string, loc := #caller_location) {
+do_text :: proc(text: string, grow: [2]bool, fit: [2]f32, loc := #caller_location) {
 	using opal
 	push_id(hash(loc))
 	defer pop_id()
 	words := strings.split(text, " ", allocator = context.temp_allocator)
 	begin_node(
 		&{
-			max_size = INFINITY,
-			grow = {true, true},
+			max_size = {500, 500},
+			grow = grow,
 			padding = 10,
-			fit = {0, 1},
+			fit = fit,
 			enable_wrapping = true,
-			background = tw.BLUE_900,
+			stroke = tw.WHITE,
+			stroke_width = 2,
+			clip_content = true,
 			spacing = kn.DEFAULT_FONT.space_advance * 14,
 		},
 	)
 	for word, i in words {
 		push_id(int(i))
 		add_node(
-			&{
-				foreground  = tw.WHITE,
-				fit         = 1,
-				// padding = 2,
-				// background = tw.SLATE_800,
-				// radius = 4,
-				static_text = true,
-				text        = word,
-				font_size   = 14,
-			},
+			&{foreground = tw.WHITE, fit = 1, static_text = true, text = word, font_size = 14},
+			loc = loc,
 		)
 		pop_id()
 	}
