@@ -1283,7 +1283,7 @@ end :: proc() {
 
 ctx_solve_sizes :: proc(ctx: ^Context) {
 	for root in ctx.roots {
-		if node_solve_sizes_recursively(root) {
+		if _, needs_resolve := node_solve_sizes_recursively(root); needs_resolve {
 			node_solve_sizes_recursively(root)
 		}
 	}
@@ -1423,7 +1423,7 @@ end_node :: proc() {
 
 	// Add scrollbars
 	if self.show_scrollbars && self.overflow != {} {
-		SCROLLBAR_SIZE :: 5
+		SCROLLBAR_SIZE :: 3
 		SCROLLBAR_PADDING :: 2
 		inner_box := box_shrink(self.box, 1)
 		push_id(self.id)
@@ -1439,113 +1439,46 @@ end_node :: proc() {
 		if self.overflow.y > 0 {
 			node := add_node(
 				&{
-					is_absolute = true,
+					owner = self,
+					is_root = true,
 					relative_position = {1, 0},
 					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
 					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
-					style = scrollbar_style,
-					z_index = 1,
-					// padding = 1,
-					data = self,
 					interactive = true,
-					on_draw = proc(self: ^Node) {
-						node_update_transition(self, 0, self.is_hovered || self.is_active, 0.1)
-						parent := (^Node)(self.data)
-						inner_box := Box {
-							self.box.lo + self.padding.xy,
-							self.box.hi - self.padding.zw,
-						}
-						length := max(
-							box_height(inner_box) * parent.size.y / parent.content_size.y,
-							30,
-						)
-						scroll_travel := max(parent.content_size.y - parent.size.y, 0)
-						scroll_time := parent.scroll.y / scroll_travel
-						thumb_travel := box_height(inner_box) - length
-						thumb_box := Box {
-							{inner_box.lo.x, inner_box.lo.y + thumb_travel * scroll_time},
-							{inner_box.hi.x, 0},
-						}
-						thumb_box.hi.y = thumb_box.lo.y + length
-						kn.add_box(
-							thumb_box,
-							box_width(thumb_box) / 2,
-							paint = self.style.foreground,
-						)
-						if self.is_active {
-							if !self.was_active {
-								if point_in_box(global_ctx.mouse_position, thumb_box) {
-									global_ctx.node_click_offset =
-										global_ctx.mouse_position - thumb_box.lo
-								} else {
-									global_ctx.node_click_offset = box_size(thumb_box) / 2
-								}
-							}
-							parent.scroll.y =
-								clamp(
-									(global_ctx.mouse_position.y -
-										(inner_box.lo.y + global_ctx.node_click_offset.y)) /
-									thumb_travel,
-									0,
-									1,
-								) *
-								scroll_travel
-							parent.target_scroll.y = parent.scroll.y
-						}
-					},
+					style = scrollbar_style,
+					on_draw = scrollbar_on_draw,
+					vertical = true,
 				},
 			).?
-			node.position.x -= node.size.x * f32(node.transitions[0])
-			node.size.x *= (1 + f32(node.transitions[0]))
+			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
+			node.size.x += added_size
+			node.position.x -= added_size
 			node.radius = node.size.x / 2
 		}
 		if self.overflow.x > 0 {
-			add_node(
+			node := add_node(
 				&{
-					is_absolute = true,
+					owner = self,
+					node_relative_placement = Node_Relative_Placement {
+						node = self,
+						relative_offset = {0, 1},
+						exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
+					},
+					is_root = true,
 					relative_position = {0, 1},
-					position = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
+					position = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
 					relative_size = {1, 0},
 					min_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
-					style = scrollbar_style,
-					z_index = 1,
-					padding = 1,
-					data = self,
 					interactive = true,
-					on_draw = proc(self: ^Node) {
-						parent := (^Node)(self.data)
-						inner_box := Box {
-							self.box.lo + self.padding.xy,
-							self.box.hi - self.padding.zw,
-						}
-						length := box_width(inner_box) * parent.size.x / parent.content_size.x
-						scroll_travel := max(parent.content_size.x - parent.size.x, 0)
-						scroll_time := parent.scroll.x / scroll_travel
-						thumb_travel := box_width(inner_box) - length
-						thumb_box := Box {
-							{inner_box.lo.x + thumb_travel * scroll_time, inner_box.lo.y},
-							{0, inner_box.hi.y},
-						}
-						thumb_box.hi.x = thumb_box.lo.x + length
-						kn.add_box(
-							thumb_box,
-							box_height(thumb_box) / 2,
-							paint = self.style.foreground,
-						)
-						if self.is_active {
-							parent.scroll.x =
-								clamp(
-									(global_ctx.mouse_position.x - inner_box.lo.x) / thumb_travel,
-									0,
-									1,
-								) *
-								scroll_travel
-							parent.target_scroll.x = parent.scroll.x
-						}
-					},
+					style = scrollbar_style,
+					on_draw = scrollbar_on_draw,
 				},
-			)
+			).?
+			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
+			node.size.y += added_size
+			node.position.y -= added_size
+			node.radius = node.size.y / 2
 		}
 		pop_id()
 	}
@@ -1560,6 +1493,60 @@ add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_
 	self := begin_node(descriptor, loc)
 	end_node()
 	return self
+}
+
+scrollbar_on_draw :: proc(self: ^Node) {
+	assert(self.owner != nil)
+
+	node_update_transition(self, 0, true, 0.1)
+	node_update_transition(self, 1, self.is_hovered || self.is_active, 0.1)
+
+	i := int(self.vertical)
+	j := 1 - i
+
+	inner_box := Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
+	length := max(
+		(inner_box.hi[i] - inner_box.lo[i]) * self.owner.size[i] / self.owner.content_size[i],
+		30,
+	)
+
+	scroll_travel := max(self.owner.content_size[i] - self.owner.size[i], 0)
+	scroll_time := self.owner.scroll[i] / scroll_travel
+
+	thumb_travel := (inner_box.hi[i] - inner_box.lo[i]) - length
+
+	thumb_box := Box{inner_box.lo, {}}
+	thumb_box.lo[i] += thumb_travel * scroll_time
+	thumb_box.hi[i] = thumb_box.lo[i] + length
+	thumb_box.hi[j] = inner_box.hi[j]
+
+	kn.add_box(
+		box_clamped(thumb_box, self.box),
+		(thumb_box.hi[j] - thumb_box.lo[j]) / 2,
+		paint = self.style.foreground,
+	)
+
+	if self.is_active {
+		if !self.was_active {
+			if point_in_box(global_ctx.mouse_position, thumb_box) {
+				global_ctx.node_click_offset = global_ctx.mouse_position - thumb_box.lo
+			} else {
+				global_ctx.node_click_offset = box_size(thumb_box) / 2
+			}
+		}
+
+		self.owner.scroll[i] =
+			clamp(
+				(global_ctx.mouse_position[i] -
+					(inner_box.lo[i] + global_ctx.node_click_offset[i])) /
+				thumb_travel,
+				0,
+				1,
+			) *
+			scroll_travel
+
+		self.owner.target_scroll[i] = self.owner.scroll[i]
+	}
 }
 
 //
@@ -1942,7 +1929,7 @@ node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset:
 	}
 }
 
-node_solve_sizes_wrapped :: proc(self: ^Node) -> (trigger_resolve: bool) {
+node_solve_sizes_wrapped :: proc(self: ^Node) -> (added_size: f32) {
 	i := int(self.vertical)
 	j := 1 - i
 
@@ -1969,15 +1956,15 @@ node_solve_sizes_wrapped :: proc(self: ^Node) -> (trigger_resolve: bool) {
 	line_offset += line_span
 
 	if line_offset != self.last_wrapped_size {
-		added_size :=
+		added_size =
 			((line_offset + self.padding[j] + self.padding[j + 2]) - self.size[j]) * self.fit[j]
 		self.size[j] += added_size
-		if self.parent != nil {
-			self.parent.content_size[j] += added_size
-			self.parent.size[j] += added_size * self.parent.fit[j]
-		}
-		self.last_wrapped_size = line_offset
-		trigger_resolve = true
+		// if self.parent != nil {
+		// 	self.parent.content_size[j] += added_size
+		// 	self.parent.size[j] += added_size * self.parent.fit[j]
+		// }
+		// self.last_wrapped_size = line_offset
+		// trigger_resolve = true
 	}
 	self.no_resolve = true
 
@@ -2066,7 +2053,7 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 	return length
 }
 
-node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+node_solve_sizes :: proc(self: ^Node) -> (delta_size: f32) {
 	// This is where an `on_size_known()` proc would go
 	self.overflow = linalg.max(self.content_size - self.size, 0)
 
@@ -2077,15 +2064,28 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	return
 }
 
-node_solve_sizes_recursively :: proc(self: ^Node, depth := 1) -> (needs_resolve: bool) {
+node_solve_sizes_recursively :: proc(
+	self: ^Node,
+	depth := 1,
+) -> (
+	delta_size: f32,
+	needs_resolve: bool,
+) {
 	assert(depth < 128)
 	if self.no_resolve {
 		return
 	}
-	needs_resolve |= node_solve_sizes(self)
+	delta_size = node_solve_sizes(self)
+	needs_resolve = delta_size != 0
+	max_delta_size: f32
 	for node in self.kids {
-		needs_resolve |= node_solve_sizes_recursively(node, depth + 1)
+		child_delta_size, child_needs_resolve := node_solve_sizes_recursively(node, depth + 1)
+		max_delta_size = max(max_delta_size, child_delta_size)
+		needs_resolve |= child_needs_resolve
 	}
+	j := 1 - int(self.vertical)
+	self.size[j] += max_delta_size * self.fit[j]
+	self.content_size[j] += max_delta_size
 	return
 }
 
@@ -2748,3 +2748,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+

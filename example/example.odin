@@ -140,6 +140,32 @@ main :: proc() {
 						&kn.DEFAULT_FONT,
 						tw.WHITE,
 					)
+					do_text(
+						&{
+							grow = {true, false},
+							max_size = INFINITY,
+							fit = 1,
+							stroke = tw.WHITE,
+							stroke_width = 1,
+						},
+						FILLER_TEXT,
+						20,
+						&kn.DEFAULT_FONT,
+						tw.WHITE,
+					)
+					do_text(
+						&{
+							grow = {true, false},
+							max_size = INFINITY,
+							fit = 1,
+							stroke = tw.WHITE,
+							stroke_width = 1,
+						},
+						FILLER_TEXT,
+						20,
+						&kn.DEFAULT_FONT,
+						tw.WHITE,
+					)
 				}
 				end_node()
 			}
@@ -176,16 +202,31 @@ do_text :: proc(
 	defer pop_id()
 	desc.clip_content = true
 	desc.enable_wrapping = true
-	desc.spacing = font.space_advance * size
-	words := strings.split(text, " ", allocator = context.temp_allocator)
 	begin_node(desc)
-	for word, i in words {
+	s := text
+	i := 0
+	for len(s) > 0 {
+		until := strings.index_byte(s, ' ')
+		if until == -1 {
+			until = len(s)
+		} else {
+			until += 1
+		}
 		push_id(int(i))
 		add_node(
-			&{foreground = paint, fit = 1, text = word, font = font, font_size = size},
+			&{
+				foreground = paint,
+				fit        = 1,
+				text       = s[:until],
+				font       = font,
+				font_size  = size,
+				// static_text = true,
+			},
 			loc = loc,
 		)
 		pop_id()
+		s = s[until:]
+		i += 1
 	}
 	end_node()
 }
@@ -293,3 +334,4 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	}
 	end_node()
 }
+
