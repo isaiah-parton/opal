@@ -127,45 +127,60 @@ main :: proc() {
 					},
 				)
 				{
-					do_text(
+					begin_node(
 						&{
-							grow = {true, false},
-							max_size = INFINITY,
 							fit = 1,
-							stroke = tw.WHITE,
-							stroke_width = 1,
-						},
-						FILLER_TEXT,
-						20,
-						&kn.DEFAULT_FONT,
-						tw.WHITE,
-					)
-					do_text(
-						&{
-							grow = {true, false},
+							grow = true,
 							max_size = INFINITY,
-							fit = 1,
-							stroke = tw.WHITE,
+							stroke = tw.ROSE_500,
 							stroke_width = 1,
+							vertical = true,
 						},
-						FILLER_TEXT,
-						20,
-						&kn.DEFAULT_FONT,
-						tw.WHITE,
 					)
-					do_text(
-						&{
-							grow = {true, false},
-							max_size = INFINITY,
-							fit = 1,
-							stroke = tw.WHITE,
-							stroke_width = 1,
-						},
-						FILLER_TEXT,
-						20,
-						&kn.DEFAULT_FONT,
-						tw.WHITE,
-					)
+					{
+						do_text(
+							&{
+								grow = {true, false},
+								max_size = INFINITY,
+								min_size = {700, 0},
+								fit = 1,
+								stroke = tw.WHITE,
+								stroke_width = 1,
+							},
+							FILLER_TEXT,
+							20,
+							&kn.DEFAULT_FONT,
+							tw.SLATE_600,
+						)
+						do_text(
+							&{
+								grow = {false, true},
+								max_size = INFINITY,
+								fit = 1,
+								stroke = tw.WHITE,
+								stroke_width = 1,
+								vertical = true,
+							},
+							FILLER_TEXT,
+							20,
+							&kn.DEFAULT_FONT,
+							tw.SLATE_600,
+						)
+						do_text(
+							&{
+								grow = {true, false},
+								max_size = INFINITY,
+								fit = 1,
+								stroke = tw.WHITE,
+								stroke_width = 1,
+							},
+							FILLER_TEXT,
+							20,
+							&kn.DEFAULT_FONT,
+							tw.SLATE_600,
+						)
+					}
+					end_node()
 				}
 				end_node()
 			}

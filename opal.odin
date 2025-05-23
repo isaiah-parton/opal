@@ -395,9 +395,6 @@ Node :: struct {
 	// The span resulting from the last inline layout calculation
 	last_wrapped_size:       f32,
 
-	//
-	no_resolve:              bool,
-
 	// If this is the node with the highest z-index that the mouse overlaps
 	was_hovered:             bool,
 	is_hovered:              bool,
@@ -1283,8 +1280,8 @@ end :: proc() {
 
 ctx_solve_sizes :: proc(ctx: ^Context) {
 	for root in ctx.roots {
-		if _, needs_resolve := node_solve_sizes_recursively(root); needs_resolve {
-			node_solve_sizes_recursively(root)
+		if _, needs_resolve := node_solve_sizes_and_wrap_recursive(root); needs_resolve {
+			node_solve_sizes_recursive(root)
 		}
 	}
 }
@@ -1439,16 +1436,17 @@ end_node :: proc() {
 		if self.overflow.y > 0 {
 			node := add_node(
 				&{
-					owner = self,
-					is_root = true,
+					owner             = self,
+					// is_root = true,
 					relative_position = {1, 0},
-					position = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
-					relative_size = {0, 1},
-					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
-					interactive = true,
-					style = scrollbar_style,
-					on_draw = scrollbar_on_draw,
-					vertical = true,
+					position          = {-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
+					relative_size     = {0, 1},
+					min_size          = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+					interactive       = true,
+					style             = scrollbar_style,
+					on_draw           = scrollbar_on_draw,
+					vertical          = true,
+					is_absolute       = true,
 				},
 			).?
 			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
@@ -1465,7 +1463,8 @@ end_node :: proc() {
 						relative_offset = {0, 1},
 						exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
 					},
-					is_root = true,
+					is_absolute = true,
+					// is_root = true,
 					relative_position = {0, 1},
 					position = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
 					relative_size = {1, 0},
@@ -1626,7 +1625,6 @@ node_on_new_frame :: proc(self: ^Node) {
 	self.content_size = 0
 	self.was_changed = false
 	self.was_confirmed = false
-	self.no_resolve = false
 
 	// Initialize string reader for text construction
 	string_reader: strings.Reader
@@ -1903,7 +1901,7 @@ node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset:
 
 	length: f32
 	for node, node_index in nodes {
-		length += node.size[i] // + self.spacing * f32(min(node_index, 1))
+		length += node.size[i] + self.spacing * f32(min(node_index, 1))
 		if node.grow[i] {
 			append(&growables, node)
 		}
@@ -1913,7 +1911,7 @@ node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset:
 
 	node_grow_children(self, &growables, length_left)
 
-	equal_spacing := self.spacing //length_left / f32(len(nodes) - 1)
+	spacing := (length_left / f32(len(nodes) - 1)) if self.justify_between else self.spacing
 
 	for node, node_index in nodes {
 		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
@@ -1925,11 +1923,11 @@ node_end_layout_line :: proc(self: ^Node, from, to: int, line_span, line_offset:
 			line_offset +
 			(line_span + self.overflow[j] - node.size[j]) * self.content_align[j]
 
-		offset += node.size[i] + equal_spacing
+		offset += node.size[i] + spacing
 	}
 }
 
-node_solve_sizes_wrapped :: proc(self: ^Node) -> (added_size: f32) {
+node_solve_sizes_wrapped :: proc(self: ^Node) -> (delta_size: [2]f32) {
 	i := int(self.vertical)
 	j := 1 - i
 
@@ -1956,17 +1954,11 @@ node_solve_sizes_wrapped :: proc(self: ^Node) -> (added_size: f32) {
 	line_offset += line_span
 
 	if line_offset != self.last_wrapped_size {
-		added_size =
-			((line_offset + self.padding[j] + self.padding[j + 2]) - self.size[j]) * self.fit[j]
-		self.size[j] += added_size
-		// if self.parent != nil {
-		// 	self.parent.content_size[j] += added_size
-		// 	self.parent.size[j] += added_size * self.parent.fit[j]
-		// }
-		// self.last_wrapped_size = line_offset
-		// trigger_resolve = true
+		delta_size[j] =
+			(line_offset + self.padding[j] + self.padding[j + 2]) - self.content_size[j]
+		self.content_size[j] += delta_size[j]
+		self.last_wrapped_size = line_offset
 	}
-	self.no_resolve = true
 
 	return
 }
@@ -2053,10 +2045,7 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 	return length
 }
 
-node_solve_sizes :: proc(self: ^Node) -> (delta_size: f32) {
-	// This is where an `on_size_known()` proc would go
-	self.overflow = linalg.max(self.content_size - self.size, 0)
-
+node_solve_sizes :: proc(self: ^Node) -> (delta_size: [2]f32) {
 	if self.enable_wrapping {
 		return node_solve_sizes_wrapped(self)
 	}
@@ -2064,28 +2053,80 @@ node_solve_sizes :: proc(self: ^Node) -> (delta_size: f32) {
 	return
 }
 
-node_solve_sizes_recursively :: proc(
+//
+// Walks down the tree, calculating node sizes, wrapping contents and then propagating size changes back up the tree for an optional second pass
+//
+node_solve_sizes_and_wrap_recursive :: proc(
 	self: ^Node,
 	depth := 1,
 ) -> (
-	delta_size: f32,
+	delta_size: [2]f32,
 	needs_resolve: bool,
 ) {
 	assert(depth < 128)
-	if self.no_resolve {
+
+	self.overflow = linalg.max(self.content_size - self.size, 0)
+
+	delta_size = node_solve_sizes(self)
+	// children_delta_size: [2]f32
+	for node in self.kids {
+		child_delta_size, child_needs_resolve := node_solve_sizes_and_wrap_recursive(
+			node,
+			depth + 1,
+		)
+
+		needs_resolve |= child_needs_resolve
+
+		if self.vertical {
+			delta_size.y += child_delta_size.y
+			// child_delta_size.x = max(
+			// 	(node.size.x + child_delta_size.x) -
+			// 	(self.size.x - self.padding.x - self.padding.z),
+			// 	0,
+			// )
+			// if abs(child_delta_size.x) > abs(delta_size.x) {
+			// 	delta_size.x = child_delta_size.x
+			// }
+		} else {
+			delta_size.x += child_delta_size.x
+			// child_delta_size.y = max(
+			// 	(node.size.y + child_delta_size.y) -
+			// 	(self.size.y - self.padding.y - self.padding.w),
+			// 	0,
+			// )
+			// if abs(child_delta_size.y) > abs(delta_size.y) {
+			// 	delta_size.y = child_delta_size.y
+			// }
+		}
+	}
+
+	if delta_size != 0 {
+		needs_resolve = true
+		self.size = linalg.max(self.size, self.content_size * self.fit)
+		self.overflow = linalg.max(self.content_size - self.size, 0)
+	}
+
+	return
+}
+
+//
+// Second pass
+//
+node_solve_sizes_recursive :: proc(self: ^Node, depth := 1) {
+	assert(depth < 128)
+
+	if self.enable_wrapping {
 		return
 	}
-	delta_size = node_solve_sizes(self)
-	needs_resolve = delta_size != 0
-	max_delta_size: f32
+
+	// self.overflow = linalg.max(self.content_size - self.size, 0)
+
+	node_solve_sizes_unwrapped(self)
+
 	for node in self.kids {
-		child_delta_size, child_needs_resolve := node_solve_sizes_recursively(node, depth + 1)
-		max_delta_size = max(max_delta_size, child_delta_size)
-		needs_resolve |= child_needs_resolve
+		node_solve_sizes_recursive(node, depth + 1)
 	}
-	j := 1 - int(self.vertical)
-	self.size[j] += max_delta_size * self.fit[j]
-	self.content_size[j] += max_delta_size
+
 	return
 }
 
