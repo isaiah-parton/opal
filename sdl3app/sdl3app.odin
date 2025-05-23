@@ -315,3 +315,4 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
+

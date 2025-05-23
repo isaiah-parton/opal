@@ -51,7 +51,8 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(My_App {
+	sdl3app.state = new_clone(
+	My_App {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -71,7 +72,7 @@ main :: proc() {
 			begin()
 			begin_node(
 				&{
-					min_size = kn.get_size(),
+					min_size = global_ctx.screen_size,
 					background = tw.NEUTRAL_950,
 					stroke = tw.NEUTRAL_800,
 					stroke_width = 1,
@@ -114,7 +115,7 @@ main :: proc() {
 				}
 				end_node()
 
-				begin_node(
+				node := begin_node(
 					&{
 						max_size = INFINITY,
 						grow = true,
@@ -125,59 +126,95 @@ main :: proc() {
 						clip_content = true,
 						show_scrollbars = true,
 					},
-				)
+				).?
 				{
 					begin_node(
 						&{
-							fit = 1,
-							grow = true,
+							fit = {0, 1},
+							grow = {true, false},
 							max_size = INFINITY,
-							stroke = tw.ROSE_500,
-							stroke_width = 1,
+							background = tw.SLATE_900,
 							vertical = true,
+							padding = 10,
+							spacing = 5,
 						},
 					)
 					{
-						do_text(
+						begin_node(
 							&{
-								grow = {true, false},
+								fit      = 1,
+								spacing  = 5,
+								grow     = true,
 								max_size = INFINITY,
-								min_size = {700, 0},
-								fit = 1,
-								stroke = tw.WHITE,
-								stroke_width = 1,
+								// padding  = 10,
+								// stroke = tw.INDIGO_500,
+								// stroke_width = 2,
+								// radius = 5,
 							},
-							FILLER_TEXT,
-							20,
-							&kn.DEFAULT_FONT,
-							tw.SLATE_600,
 						)
+						{
+							do_text(
+								&{
+									grow = {true, false},
+									max_size = INFINITY,
+									fit = {0, 1},
+									stroke = tw.EMERALD_700,
+									stroke_width = 2,
+									radius = 5,
+									padding = 10,
+								},
+								FILLER_TEXT,
+								14,
+								&kn.DEFAULT_FONT,
+								tw.EMERALD_700,
+							)
+							do_text(
+								&{
+									grow = {true, false},
+									max_size = INFINITY,
+									fit = {0, 1},
+									stroke = tw.EMERALD_700,
+									stroke_width = 2,
+									radius = 5,
+									padding = 10,
+								},
+								FILLER_TEXT,
+								14,
+								&kn.DEFAULT_FONT,
+								tw.EMERALD_700,
+							)
+						}
+						end_node()
+						// do_text(
+						// 	&{
+						// 		fit          = 1,
+						// 		grow         = {false, true},
+						// 		max_size     = INFINITY,
+						// 		stroke       = tw.EMERALD_700,
+						// 		stroke_width = 2,
+						// radius = 5,
+						// 		vertical     = true,
+						// 		// min_size = {0, 500},
+						// 	},
+						// 	FILLER_TEXT,
+						// 	20,
+						// 	&kn.DEFAULT_FONT,
+						// 	tw.EMERALD_700,
+						// )
 						do_text(
 							&{
-								grow = {false, true},
+								grow = {true, true},
 								max_size = INFINITY,
-								fit = 1,
-								stroke = tw.WHITE,
-								stroke_width = 1,
-								vertical = true,
+								fit = {0, 1},
+								stroke = tw.EMERALD_700,
+								stroke_width = 2,
+								radius = 5,
+								padding = 10,
 							},
 							FILLER_TEXT,
 							20,
 							&kn.DEFAULT_FONT,
-							tw.SLATE_600,
-						)
-						do_text(
-							&{
-								grow = {true, false},
-								max_size = INFINITY,
-								fit = 1,
-								stroke = tw.WHITE,
-								stroke_width = 1,
-							},
-							FILLER_TEXT,
-							20,
-							&kn.DEFAULT_FONT,
-							tw.SLATE_600,
+							tw.EMERALD_700,
 						)
 					}
 					end_node()
@@ -187,15 +224,16 @@ main :: proc() {
 			end_node()
 			end()
 		},
-	})
+	},
+	)
 
 	sdl3app.run(
 		&{
-			width = 1000,
-			height = 800,
-			min_width = 500,
-			min_height = 400,
-			vsync = true,
+			width            = 1000,
+			height           = 800,
+			min_width        = 500,
+			min_height       = 400,
+			// vsync = true,
 			customize_window = true,
 		},
 	)
@@ -216,7 +254,7 @@ do_text :: proc(
 	push_id(hash(loc))
 	defer pop_id()
 	desc.clip_content = true
-	desc.enable_wrapping = true
+	desc.wrapped = true
 	begin_node(desc)
 	s := text
 	i := 0
@@ -341,8 +379,8 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			desc.grow = {true, false}
 			desc.max_size = {INFINITY, 0}
 			desc.placeholder = "Once upon a time..."
-			desc.is_multiline = true
-			desc.enable_wrapping = true
+			// desc.is_multiline = true
+			desc.wrapped = true
 			// Then add the node to the UI and perform the input logic
 			add_field(&desc)
 		}
