@@ -8,6 +8,9 @@ package opal
 // TODO:
 // 	[ ] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
 //  [ ] Add inner shadows (to katana)
+//  [X] Wrapped wrapped layouts
+// 	[ ] Make the `Node` struct smalllerrr
+// 		- Maybe by separating nodes from their style (yes definitely, there's no reason to duplicate that data for 100s of nodes)
 //
 
 import kn "../katana"
@@ -222,7 +225,7 @@ Node_Style :: struct {
 	stroke:           Paint_Option,
 	background:       Paint_Variant,
 	foreground:       Paint_Option,
-	font:             ^Font,
+	font:             ^Font `fmt:"-"`,
 	shadow_color:     Color,
 	stroke_width:     f32,
 	font_size:        f32,
@@ -327,7 +330,7 @@ Node_Descriptor :: struct {
 	interactive:             bool,
 
 	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
-	owner:                   ^Node,
+	owner:                   ^Node `fmt:"-"`,
 
 	// Called after the default drawing behavior
 	on_draw:                 proc(self: ^Node),
@@ -557,7 +560,7 @@ Context :: struct {
 
 	// Node memory is stored contiguously for memory efficiency.
 	// TODO: Implement a dynamic array
-	nodes:                     [4096]Maybe(Node),
+	nodes:                     [8192]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
 	roots:                     [dynamic]^Node,
@@ -1079,7 +1082,7 @@ handle_mouse_up :: proc(button: Mouse_Button) {
 handle_window_resize :: proc(width, height: i32) {
 	kn.set_size(width, height)
 	global_ctx.screen_size = {f32(width), f32(height)}
-	draw_frames(1)
+	draw_frames(2)
 }
 
 handle_window_move :: proc() {
@@ -1148,7 +1151,7 @@ begin :: proc() {
 	}
 
 	// Sleep to limit framerate
-	time.sleep(max(0, frame_interval - ctx.frame_duration))
+	time.sleep(max(0, frame_interval - ctx.interval_duration))
 
 	ctx.frame_start_time = time.now()
 
@@ -1536,7 +1539,9 @@ end_node :: proc() {
 
 add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_Result {
 	self := begin_node(descriptor, loc)
-	end_node()
+	if self != nil {
+		end_node()
+	}
 	return self
 }
 
@@ -2071,13 +2076,14 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_resolve: bool) {
 	assert(depth < MAX_TREE_DEPTH)
 
-	self.overflow = linalg.max(self.content_size - self.size, 0)
-
 	needs_resolve = node_solve_sizes(self)
 
 	if self.wrapped {
 		for child in self.children {
 			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
+		}
+		if needs_resolve {
+			node_solve_sizes(self)
 		}
 	} else {
 		i := int(self.vertical)
@@ -2099,9 +2105,9 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 		if self.content_size != content_size {
 			self.content_size = content_size
 			self.size = linalg.max(self.size, self.content_size * self.fit)
+			self.overflow = linalg.max(self.content_size - self.size, 0)
 		}
 	}
-	self.overflow = linalg.max(self.content_size - self.size, 0)
 
 	return
 }
@@ -2109,7 +2115,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 //
 // Second pass
 //
-node_solve_sizes_recursive :: proc(self: ^Node, depth := 1) {
+node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
 
 	if self.wrapped {
@@ -2744,7 +2750,7 @@ inspector_show :: proc(self: ^Inspector) {
 		begin_node(
 			&{
 				min_size = {0, 200},
-				grow = {true, false},
+				grow = {true, true},
 				padding = 4,
 				max_size = INFINITY,
 				clip_content = true,
@@ -2754,25 +2760,133 @@ inspector_show :: proc(self: ^Inspector) {
 				vertical = true,
 			},
 		)
-		lines := strings.split(
-			fmt.tprintf("%#v", self.inspected_node),
-			"\n",
-			allocator = context.temp_allocator,
-		)
-		for line, i in lines {
-			push_id(int(i))
-			add_node(&{foreground = _TEXT, font_size = 12, fit = 1, text = line})
-			pop_id()
-		}
+		begin_node(&{grow = {true, false}, fit = 1, max_size = INFINITY, vertical = true})
+		add_value_node("Node", &self.inspected_node, type_info_of(Node))
+		end_node()
 		end_node()
 	}
-	end_node()
+
+	add_value_node :: proc(name: string, data: rawptr, type_info: ^runtime.Type_Info) {
+		expandable: bool
+		text: string
+		base_type_info := runtime.type_info_base(type_info)
+		#partial switch v in base_type_info.variant {
+		case (runtime.Type_Info_Struct),
+		     (runtime.Type_Info_Dynamic_Array),
+		     (runtime.Type_Info_Slice),
+		     (runtime.Type_Info_Multi_Pointer):
+			expandable = true
+		case (runtime.Type_Info_Array):
+			if v.count > 4 {
+				expandable = true
+			} else {
+				text = fmt.tprint(any{data = data, id = type_info.id})
+			}
+		case (runtime.Type_Info_Pointer):
+			text = fmt.tprint((^rawptr)(data)^)
+		case:
+			text = fmt.tprint(any{data = data, id = type_info.id})
+		}
+
+		push_id(hash_uintptr(uintptr(data)))
+		defer pop_id()
+
+		node := begin_node(
+			&{
+				max_size = INFINITY,
+				grow = {true, false},
+				fit = 1,
+				padding = 2,
+				interactive = true,
+				justify_between = true,
+			},
+		).?
+		if expandable {
+			add_node(
+				&{
+					foreground = tw.ORANGE_500,
+					font_size = 12,
+					text = fmt.tprintf("%c%s", '-' if node.is_toggled else '+', name),
+					fit = 1,
+				},
+			)
+		} else {
+			add_node(&{foreground = _TEXT, font_size = 12, text = name, fit = 1})
+			if text != "" {
+				add_node(&{text = text, foreground = tw.INDIGO_600, font_size = 12, fit = 1})
+			}
+		}
+		end_node()
+		node.background = fade(tw.NEUTRAL_900, f32(i32(node.is_hovered)))
+		if expandable {
+			node_update_transition(node, 0, node.is_toggled, 0.2)
+			if node.was_active && node.is_hovered && !node.is_active {
+				node.is_toggled = !node.is_toggled
+			}
+			if node.transitions[0] > 0.01 {
+				begin_node(
+					&{
+						padding = {10, 0, 0, 0},
+						grow = {true, false},
+						max_size = INFINITY,
+						fit = {0, ease.quadratic_in_out(node.transitions[0])},
+						clip_content = true,
+						vertical = true,
+					},
+				)
+				#partial switch v in base_type_info.variant {
+				case (runtime.Type_Info_Struct):
+					for i in 0 ..< v.field_count {
+						push_id(int(i + 1))
+						add_value_node(
+							v.names[i],
+							rawptr(uintptr(data) + v.offsets[i]),
+							v.types[i],
+						)
+						pop_id()
+					}
+				case (runtime.Type_Info_Dynamic_Array):
+					ra := (^runtime.Raw_Dynamic_Array)(data)
+					for i in 0 ..< ra.len {
+						push_id(int(i + 1))
+						add_value_node(
+							fmt.tprint(i),
+							rawptr(uintptr(data) + uintptr(v.elem_size * i)),
+							v.elem,
+						)
+						pop_id()
+					}
+				case (runtime.Type_Info_Array):
+					for i in 0 ..< v.count {
+						push_id(int(i + 1))
+						add_value_node(
+							fmt.tprint(i),
+							rawptr(uintptr(data) + uintptr(v.elem_size * i)),
+							v.elem,
+						)
+						pop_id()
+					}
+				case (runtime.Type_Info_Slice):
+					rs := (^runtime.Raw_Slice)(data)
+					for i in 0 ..< rs.len {
+						push_id(int(i + 1))
+						add_value_node(
+							fmt.tprint(i),
+							rawptr(uintptr(data) + uintptr(v.elem_size * i)),
+							v.elem,
+						)
+						pop_id()
+					}
+				}
+				end_node()
+			}
+		}
+	}
 }
 
 inspector_build_tree :: proc(self: ^Inspector) {
 	begin_node(
 		&{
-			padding = 4,
 			vertical = true,
 			max_size = INFINITY,
 			grow = true,
@@ -2860,3 +2974,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
