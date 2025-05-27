@@ -236,6 +236,7 @@ main :: proc() {
 							&kn.DEFAULT_FONT,
 							TEXT_COLOR,
 						)
+						do_text_editor(app)
 					}
 					end_node()
 				}
@@ -261,6 +262,9 @@ main :: proc() {
 	free(sdl3app.state)
 }
 
+//
+//
+//
 do_text :: proc(
 	desc: ^opal.Node_Descriptor,
 	text: string,
@@ -306,6 +310,9 @@ do_text :: proc(
 	end_node()
 }
 
+//
+//
+//
 do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	using opal, components
 	push_id(hash(loc))
@@ -314,7 +321,7 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		&{
 			fit = 1,
 			grow = {true, false},
-			max_size = {INFINITY, 0},
+			max_size = {INFINITY, INFINITY},
 			padding = 8,
 			background = tw.NEUTRAL_800,
 			radius = 7,
@@ -325,47 +332,6 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	{
 		begin_node(&{fit = 1, gap = 8, content_align = {0, 0.5}})
 		{
-			do_icon_button :: proc(icon: rune, loc := #caller_location) {
-				self := add_node(
-					&{
-						text = string_from_rune(icon),
-						font = theme.icon_font,
-						font_size = 24,
-						foreground = tw.WHITE,
-						fit = 1,
-						padding = 4,
-						radius = 4,
-						square_fit = true,
-						content_align = 0.5,
-						interactive = true,
-					},
-					loc,
-				).?
-				node_update_transition(self, 0, self.is_hovered, 0.1)
-				node_update_transition(self, 1, self.is_active, 0.1)
-				self.background = fade(
-					mix(self.transitions[1], tw.NEUTRAL_700, tw.ROSE_600),
-					self.transitions[0],
-				)
-			}
-			do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
-				self := add_node(
-					&{
-						text = string_from_rune(icon),
-						font = theme.icon_font,
-						font_size = 24,
-						foreground = tw.WHITE,
-						fit = 1,
-						padding = 4,
-						radius = 4,
-						square_fit = true,
-						content_align = 0.5,
-					},
-					loc,
-				).?
-				node_update_transition(self, 0, self.is_hovered, 0.1)
-				self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
-			}
 			//
 			// Some text editing options
 			//
@@ -408,5 +374,48 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		}
 	}
 	end_node()
+
+
+	do_icon_button :: proc(icon: rune, loc := #caller_location) {
+		self := add_node(
+			&{
+				text = string_from_rune(icon),
+				font = theme.icon_font,
+				font_size = 24,
+				foreground = tw.WHITE,
+				fit = 1,
+				padding = 4,
+				radius = 4,
+				square_fit = true,
+				content_align = 0.5,
+				interactive = true,
+			},
+			loc,
+		).?
+		node_update_transition(self, 0, self.is_hovered, 0.1)
+		node_update_transition(self, 1, self.is_active, 0.1)
+		self.background = fade(
+			mix(self.transitions[1], tw.NEUTRAL_700, tw.ROSE_600),
+			self.transitions[0],
+		)
+	}
+	do_toggle_icon_button :: proc(icon: rune, loc := #caller_location) {
+		self := add_node(
+			&{
+				text = string_from_rune(icon),
+				font = theme.icon_font,
+				font_size = 24,
+				foreground = tw.WHITE,
+				fit = 1,
+				padding = 4,
+				radius = 4,
+				square_fit = true,
+				content_align = 0.5,
+			},
+			loc,
+		).?
+		node_update_transition(self, 0, self.is_hovered, 0.1)
+		self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
+	}
 }
 

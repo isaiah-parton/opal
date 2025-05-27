@@ -2285,11 +2285,11 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 					placeholder_paint if glyph.is_placeholder else default_paint,
 				)
 			}
-			if self.enable_edit && self.is_focused {
+			if self.enable_edit && self.is_focused && len(self.glyphs) > 0 {
 				line_height := self.font.line_height * self.font_size
 				top_left := text_origin + self.glyphs[self.editor.selection[0]].offset
 				kn.add_box(
-					{{top_left.x - 1, top_left.y}, {top_left.x + 1, top_left.y + line_height}},
+					{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
 					paint = ctx.colors[.Selection_Background],
 				)
 			}
