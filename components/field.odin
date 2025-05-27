@@ -57,9 +57,9 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 	node_update_transition(self, 1, self.is_focused, 0.1)
 	self.style.stroke = tw.LIME_500
 	self.style.stroke_width = 3 * self.transitions[1]
-	if self.was_changed {
-		field_output(desc.value_data, desc.value_type_info, strings.to_string(self.builder))
-	}
+	// if self.was_changed {
+	// 	field_output(desc.value_data, desc.value_type_info, strings.to_string(self.builder))
+	// }
 }
 
 field_output :: proc(

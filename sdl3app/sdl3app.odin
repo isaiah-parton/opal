@@ -105,7 +105,7 @@ hit_test_callback :: proc "c" (
 	) {
 		return .RESIZE_BOTTOMRIGHT
 	}
-	SIZE :: 3
+	SIZE :: 4
 	if sdl3.PointInRect(point^, {0, 0, SIZE, height}) {
 		return .RESIZE_LEFT
 	}
@@ -172,8 +172,16 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 				return sdl3.SetCursor(app.cursors[.POINTER])
 			case .Text:
 				return sdl3.SetCursor(app.cursors[.TEXT])
-			case .Dragging:
+			case .Move:
 				return sdl3.SetCursor(app.cursors[.MOVE])
+			case .Resize_EW:
+				return sdl3.SetCursor(app.cursors[.EW_RESIZE])
+			case .Resize_NS:
+				return sdl3.SetCursor(app.cursors[.NS_RESIZE])
+			case .Resize_NWSE:
+				return sdl3.SetCursor(app.cursors[.NWSE_RESIZE])
+			case .Resize_NESW:
+				return sdl3.SetCursor(app.cursors[.NESW_RESIZE])
 			}
 			return false
 		},
@@ -315,4 +323,3 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
-

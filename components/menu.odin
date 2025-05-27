@@ -12,7 +12,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		&{
 			padding = {3, 3, 12, 3},
 			fit = 1,
-			spacing = 6,
+			gap = 6,
 			max_size = INFINITY,
 			grow = {true, false},
 			content_align = {0, 0.5},

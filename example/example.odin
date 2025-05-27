@@ -74,7 +74,7 @@ main :: proc() {
 				&{
 					min_size = global_ctx.screen_size,
 					background = tw.NEUTRAL_950,
-					stroke = tw.NEUTRAL_800,
+					stroke = tw.NEUTRAL_200,
 					stroke_width = 1,
 					vertical = true,
 					padding = 1,
@@ -84,66 +84,66 @@ main :: proc() {
 				},
 			)
 			{
-				begin_node(
-					&{
-						fit = {0, 1},
-						min_size = {0, 20},
-						max_size = INFINITY,
-						grow = {true, false},
-						content_align = {0, 0.5},
-						style = {background = tw.NEUTRAL_800},
-					},
-				)
-				{
-					grab_node := add_node(
-						&{grow = true, max_size = INFINITY, interactive = true},
-					).?
-					sdl3app.app_use_node_for_window_grabbing(app, grab_node)
-					if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
-						sdl3.MinimizeWindow(app.window)
-					}
-					if do_window_button(lucide.CHEVRON_UP, tw.ROSE_500) {
-						if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
-							sdl3.RestoreWindow(app.window)
-						} else {
-							sdl3.MaximizeWindow(app.window)
-						}
-					}
-					if do_window_button(lucide.X, tw.ROSE_500) {
-						app.run = false
-					}
-				}
-				end_node()
+				// begin_node(
+				// 	&{
+				// 		fit = {0, 1},
+				// 		min_size = {0, 20},
+				// 		max_size = INFINITY,
+				// 		grow = {true, false},
+				// 		content_align = {0, 0.5},
+				// 		style = {background = tw.NEUTRAL_800},
+				// 	},
+				// )
+				// {
+				// 	grab_node := add_node(
+				// 		&{grow = true, max_size = INFINITY, interactive = true},
+				// 	).?
+				// 	sdl3app.app_use_node_for_window_grabbing(app, grab_node)
+				// 	if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
+				// 		sdl3.MinimizeWindow(app.window)
+				// 	}
+				// 	if do_window_button(lucide.CHEVRON_UP, tw.ROSE_500) {
+				// 		if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
+				// 			sdl3.RestoreWindow(app.window)
+				// 		} else {
+				// 			sdl3.MaximizeWindow(app.window)
+				// 		}
+				// 	}
+				// 	if do_window_button(lucide.X, tw.ROSE_500) {
+				// 		app.run = false
+				// 	}
+				// }
+				// end_node()
 
 				node := begin_node(
 					&{
 						max_size = INFINITY,
 						grow = true,
-						content_align = 0.5,
-						spacing = 5,
+						gap = 5,
 						padding = 20,
 						interactive = true,
 						clip_content = true,
 						show_scrollbars = true,
+						vertical = true,
 					},
 				).?
 				{
 					begin_node(
 						&{
 							fit = {0, 1},
-							grow = {true, false},
+							grow = {true, true},
 							max_size = INFINITY,
-							background = tw.SLATE_900,
+							background = tw.NEUTRAL_800,
 							vertical = true,
 							padding = 10,
-							spacing = 5,
+							gap = 5,
 						},
 					)
 					{
 						begin_node(
 							&{
 								fit      = 1,
-								spacing  = 5,
+								gap      = 5,
 								grow     = true,
 								max_size = INFINITY,
 								// padding  = 10,
@@ -155,10 +155,10 @@ main :: proc() {
 						{
 							do_text(
 								&{
-									grow = {true, false},
+									grow = {true, true},
 									max_size = INFINITY,
 									fit = {0, 1},
-									stroke = tw.EMERALD_700,
+									stroke = tw.NEUTRAL_500,
 									stroke_width = 2,
 									radius = 5,
 									padding = 10,
@@ -166,14 +166,14 @@ main :: proc() {
 								FILLER_TEXT,
 								14,
 								&kn.DEFAULT_FONT,
-								tw.EMERALD_700,
+								tw.NEUTRAL_500,
 							)
 							do_text(
 								&{
-									grow = {true, false},
+									grow = {true, true},
 									max_size = INFINITY,
 									fit = {0, 1},
-									stroke = tw.EMERALD_700,
+									stroke = tw.NEUTRAL_500,
 									stroke_width = 2,
 									radius = 5,
 									padding = 10,
@@ -181,40 +181,44 @@ main :: proc() {
 								FILLER_TEXT,
 								14,
 								&kn.DEFAULT_FONT,
-								tw.EMERALD_700,
+								tw.NEUTRAL_500,
 							)
 						}
 						end_node()
-						// do_text(
-						// 	&{
-						// 		fit          = 1,
-						// 		grow         = {false, true},
-						// 		max_size     = INFINITY,
-						// 		stroke       = tw.EMERALD_700,
-						// 		stroke_width = 2,
-						// radius = 5,
-						// 		vertical     = true,
-						// 		// min_size = {0, 500},
-						// 	},
-						// 	FILLER_TEXT,
-						// 	20,
-						// 	&kn.DEFAULT_FONT,
-						// 	tw.EMERALD_700,
-						// )
+						do_text(
+							&{
+								fit           = {1, 1},
+								grow          = {true, true},
+								max_size      = INFINITY,
+								stroke        = tw.NEUTRAL_500,
+								stroke_width  = 2,
+								radius        = 5,
+								// vertical      = true,
+								content_align = 0.5,
+								padding       = 10,
+								gap           = 5,
+								// min_size = {0, 500},
+							},
+							FILLER_TEXT,
+							12,
+							&kn.DEFAULT_FONT,
+							tw.NEUTRAL_500,
+						)
 						do_text(
 							&{
 								grow = {true, true},
 								max_size = INFINITY,
 								fit = {0, 1},
-								stroke = tw.EMERALD_700,
+								stroke = tw.NEUTRAL_500,
 								stroke_width = 2,
 								radius = 5,
+								justify_between = true,
 								padding = 10,
 							},
 							FILLER_TEXT,
 							20,
 							&kn.DEFAULT_FONT,
-							tw.EMERALD_700,
+							tw.NEUTRAL_500,
 						)
 					}
 					end_node()
@@ -229,14 +233,16 @@ main :: proc() {
 
 	sdl3app.run(
 		&{
-			width            = 1000,
-			height           = 800,
-			min_width        = 500,
-			min_height       = 400,
+			width      = 1000,
+			height     = 800,
+			min_width  = 500,
+			min_height = 400,
+			// customize_window = true,
 			// vsync = true,
-			customize_window = true,
 		},
 	)
+
+	free(sdl3app.state)
 }
 
 do_text :: proc(
@@ -297,11 +303,11 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			background = tw.NEUTRAL_800,
 			radius = 7,
 			vertical = true,
-			spacing = 8,
+			gap = 8,
 		},
 	)
 	{
-		begin_node(&{fit = 1, spacing = 8, content_align = {0, 0.5}})
+		begin_node(&{fit = 1, gap = 8, content_align = {0, 0.5}})
 		{
 			do_icon_button :: proc(icon: rune, loc := #caller_location) {
 				self := add_node(
@@ -387,4 +393,3 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 	}
 	end_node()
 }
-
