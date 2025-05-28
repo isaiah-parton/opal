@@ -154,6 +154,8 @@ Node_Relative_Placement :: struct {
 	node:            ^Node,
 	relative_offset: [2]f32,
 	exact_offset:    [2]f32,
+	relative_size:   [2]f32,
+	exact_size:      [2]f32,
 }
 
 Color :: kn.Color
@@ -206,6 +208,52 @@ Font :: kn.Font
 
 Node_Result :: Maybe(^Node)
 
+Rule_Background :: distinct Paint_Variant
+Rule_Foreground :: distinct Paint_Option
+Rule_Stroke :: distinct Paint_Option
+Rule_Stroke_Width :: distinct f32
+Rule_Radius :: distinct [4]f32
+Rule_Transform_Origin :: distinct [2]f32
+Rule_Scale :: distinct [2]f32
+Rule_Translate :: distinct [2]f32
+Rule_Rotate :: distinct f32
+Rule_Font :: distinct ^Font
+Rule_Font_Size :: distinct f32
+Rule_Shadow_Color :: distinct Color
+Rule_Shadow_Size :: distinct f32
+
+Rule :: union #no_nil {
+	Rule_Background,
+	Rule_Foreground,
+	Rule_Stroke,
+	Rule_Stroke_Width,
+	Rule_Radius,
+	Rule_Transform_Origin,
+	Rule_Scale,
+	Rule_Translate,
+	Rule_Rotate,
+	Rule_Font,
+	Rule_Font_Size,
+	Rule_Shadow_Color,
+	Rule_Shadow_Size,
+}
+
+Rules :: struct {
+	background:       Rule_Background,
+	foreground:       Rule_Foreground,
+	stroke:           Rule_Stroke,
+	stroke_width:     Rule_Stroke_Width,
+	radius:           Rule_Radius,
+	transform_origin: Rule_Transform_Origin,
+	scale:            Rule_Scale,
+	translate:        Rule_Translate,
+	rotate:           Rule_Rotate,
+	font:             Rule_Font,
+	font_size:        Rule_Font_Size,
+	shadow_color:     Rule_Shadow_Color,
+	shadow_size:      Rule_Shadow_Size,
+}
+
 //
 // The visual description of a node, used for the default drawing procedure
 // This is abstracted out by gut feeling ✊😔
@@ -233,21 +281,12 @@ Node_Style :: struct {
 }
 
 //
-// TODO: Say something here
-//
-Node_Tier :: enum {
-	Inert,
-	Interactive,
-	Editable,
-}
-
-//
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
 Node_Descriptor :: struct {
 	using style:             Node_Style,
 
-	// The text content to be displayed in place of children
+	// Text
 	text:                    string,
 
 	// Z index (higher values appear in front of lower ones), this value stacks down the tree
@@ -261,18 +300,15 @@ Node_Descriptor :: struct {
 
 	//
 	exact_position:          Maybe([2]f32),
-
-	// Added position relative to parent size
+	exact_size:              [2]f32,
 	relative_position:       [2]f32,
+	relative_size:           [2]f32,
 
 	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
 	min_size:                [2]f32,
 
 	// The maximum size the node is allowed to grow to
 	max_size:                [2]f32,
-
-	// Added size relative to the parent size
-	relative_size:           [2]f32,
 
 	// If the node will be grown to fill available space
 	grow:                    [2]bool,
@@ -413,9 +449,6 @@ Node :: struct {
 	// Time of last mouse down event over this node
 	last_click_time:         time.Time,
 
-	// String builder for content editing
-	builder:                 strings.Builder `fmt:"-"`,
-
 	// Interaction
 	is_toggled:              bool,
 
@@ -432,10 +465,6 @@ Node :: struct {
 	// Needs scissor
 	has_clipped_child:       bool,
 	is_clipped:              bool,
-
-	// Text editing state
-	editor:                  tedit.Editor,
-	last_selection:          [2]int,
 
 	// Universal state transition values for smooth animations
 	transitions:             [3]f32,
@@ -565,6 +594,9 @@ Context :: struct {
 	// All nodes wihout a parent are stored here for layout solving.
 	roots:                     [dynamic]^Node,
 
+	// The layout tree
+	layout_roots:              [dynamic]^Node,
+
 	// The stack of nodes being declared. May contain multiple roots, as its only a way of keeping track of the nodes currently being invoked.
 	node_stack:                [dynamic]^Node,
 
@@ -577,6 +609,12 @@ Context :: struct {
 	text_stack:                [dynamic]^Text,
 	text_map:                  map[Id]^Text,
 	text_array:                [dynamic]Text,
+
+	//
+	// Styles
+	//
+	style_stack:               [dynamic]^Node_Style,
+	style_array:               [dynamic]Node_Style,
 
 	// The top-most element of the stack
 	current_node:              ^Node,
@@ -616,6 +654,21 @@ Context :: struct {
 
 // @(private)
 global_ctx: ^Context
+
+push_style :: proc(style: Node_Style) {
+	ctx := global_ctx
+	append(&ctx.style_array, style)
+}
+
+pop_style :: proc() {
+
+}
+
+add_style :: proc(style: Node_Style) -> ^Node_Style {
+	ctx := global_ctx
+	append(&ctx.style_array, style)
+	return &ctx.style_array[len(ctx.style_array) - 1]
+}
 
 set_color :: proc(which: Context_Color, value: Color) {
 	global_ctx.colors[which] = value
@@ -1007,6 +1060,7 @@ init :: proc(descriptor: Context_Descriptor) {
 	global_ctx = new(Context)
 	global_ctx.descriptor = descriptor
 	context_init(global_ctx)
+	fmt.println(size_of(Node))
 }
 
 deinit :: proc() {
@@ -1151,7 +1205,7 @@ begin :: proc() {
 	}
 
 	// Sleep to limit framerate
-	time.sleep(max(0, frame_interval - ctx.interval_duration))
+	time.sleep(max(0, frame_interval - ctx.frame_duration))
 
 	ctx.frame_start_time = time.now()
 
@@ -1239,8 +1293,10 @@ begin :: proc() {
 		}
 	}
 
-	clear(&ctx.node_stack)
+	assert(len(ctx.style_stack) == 0)
+	assert(len(ctx.node_stack) == 0)
 	clear(&ctx.roots)
+	clear(&ctx.style_array)
 }
 
 end :: proc() {
@@ -1283,7 +1339,9 @@ end :: proc() {
 
 	ctx.compute_start_time = time.now()
 	ctx_solve_sizes(ctx)
-	ctx_solve_positions_and_draw(ctx)
+	if ctx.active {
+		ctx_solve_positions_and_draw(ctx)
+	}
 
 	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
 		if ctx.on_set_cursor(ctx.cursor, ctx.callback_data) {
@@ -1322,9 +1380,11 @@ ctx_solve_positions_and_draw :: proc(self: ^Context) {
 		node_solve_box_recursively(root, root.dirty)
 	}
 
+	t := time.now()
 	for root in self.roots {
 		node_draw_recursive(root)
 	}
+	fmt.println(time.since(t))
 }
 
 node_update_scroll :: proc(self: ^Node) {
@@ -1680,7 +1740,6 @@ node_on_new_frame :: proc(self: ^Node) {
 	if len(self.text) > 0 {
 		reader = strings.to_reader(&string_reader, self.text)
 	}
-	self.last_selection = self.editor.selection
 
 	// Perform text editing
 	// TODO: Implement up/down movement
@@ -1902,9 +1961,9 @@ node_solve_box_recursively :: proc(
 		)
 		self.parent.has_clipped_child |= clip != .None
 		self.is_clipped = clip == .Full
-	}
-	if self.is_clipped {
-		return
+		when ODIN_DEBUG {
+			global_ctx.drawn_nodes += int(!self.is_clipped)
+		}
 	}
 
 	clip_box = box_clamped(clip_box, self.box)
@@ -2191,14 +2250,8 @@ node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Pa
 node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
 
-	ctx := global_ctx
-
 	if self.is_clipped {
 		return
-	}
-
-	when ODIN_DEBUG {
-		ctx.drawn_nodes += 1
 	}
 
 	// Compute text position
@@ -2255,7 +2308,7 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 		kn.translate(-transform_origin + self.style.translate)
 	}
 
-	if ctx.active && self.shadow_color != {} {
+	if self.shadow_color != {} {
 		kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
 	}
 
@@ -2265,39 +2318,37 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 	}
 
 	// Draw self
-	if ctx.active {
-		if self.background != {} {
-			kn.add_box(
-				self.box,
-				self.style.radius,
-				paint = node_convert_paint_variant(self, self.background),
+	if self.background != {} {
+		kn.add_box(
+			self.box,
+			self.style.radius,
+			paint = node_convert_paint_variant(self, self.background),
+		)
+	}
+	if self.style.foreground != nil {
+		default_paint := kn.paint_index_from_option(self.foreground)
+		placeholder_paint := kn.paint_index_from_option(Color{255, 50, 50, 128})
+		text_origin := self.box.lo + self.padding.xy
+		for &glyph in self.glyphs {
+			kn.add_glyph(
+				glyph,
+				self.font_size,
+				text_origin + glyph.offset,
+				placeholder_paint if glyph.is_placeholder else default_paint,
 			)
 		}
-		if self.style.foreground != nil {
-			default_paint := kn.paint_index_from_option(self.foreground)
-			placeholder_paint := kn.paint_index_from_option(Color{255, 50, 50, 128})
-			text_origin := self.box.lo + self.padding.xy
-			for &glyph in self.glyphs {
-				kn.add_glyph(
-					glyph,
-					self.font_size,
-					text_origin + glyph.offset,
-					placeholder_paint if glyph.is_placeholder else default_paint,
-				)
-			}
-			if self.enable_edit && self.is_focused && len(self.glyphs) > 0 {
-				line_height := self.font.line_height * self.font_size
-				top_left := text_origin + self.glyphs[self.editor.selection[0]].offset
-				kn.add_box(
-					{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
-					paint = ctx.colors[.Selection_Background],
-				)
-			}
-		}
+		// if self.enable_edit && self.is_focused && len(self.glyphs) > 0 {
+		// 	line_height := self.font.line_height * self.font_size
+		// 	top_left := text_origin + self.glyphs[self.editor.selection[0]].offset
+		// 	kn.add_box(
+		// 		{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
+		// 		paint = ctx.colors[.Selection_Background],
+		// 	)
+		// }
+	}
 
-		if self.on_draw != nil {
-			self.on_draw(self)
-		}
+	if self.on_draw != nil {
+		self.on_draw(self)
 	}
 
 	// Draw children
@@ -2309,18 +2360,16 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 		kn.pop_scissor()
 	}
 
-	if ctx.active {
-		if self.style.stroke != nil {
-			kn.add_box_lines(
-				self.box,
-				self.style.stroke_width,
-				self.style.radius,
-				paint = self.style.stroke,
-				outline = kn.Shape_Outline(
-					int(self.style.stroke_type) + int(kn.Shape_Outline.Inner_Stroke),
-				),
-			)
-		}
+	if self.style.stroke != nil {
+		kn.add_box_lines(
+			self.box,
+			self.style.stroke_width,
+			self.style.radius,
+			paint = self.style.stroke,
+			outline = kn.Shape_Outline(
+				int(self.style.stroke_type) + int(kn.Shape_Outline.Inner_Stroke),
+			),
+		)
 	}
 
 	if is_transformed {
@@ -2329,6 +2378,7 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 	// Draw debug lines
 	if ODIN_DEBUG {
+		ctx := global_ctx
 		if ctx.inspector.inspected_id == self.id {
 			too_smol: bool
 			if self.parent != nil {
@@ -2765,6 +2815,7 @@ inspector_show :: proc(self: ^Inspector) {
 		end_node()
 		end_node()
 	}
+	end_node()
 
 	add_value_node :: proc(name: string, data: rawptr, type_info: ^runtime.Type_Info) {
 		expandable: bool
@@ -2974,4 +3025,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

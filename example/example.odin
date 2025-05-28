@@ -256,6 +256,7 @@ main :: proc() {
 			min_height = 400,
 			customize_window = true,
 			vsync = true,
+			min_frame_interval = time.Second / 120,
 		},
 	)
 
@@ -418,4 +419,3 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
 	}
 }
-

@@ -28,13 +28,14 @@ App :: struct {
 }
 
 App_Descriptor :: struct {
-	width:            i32,
-	height:           i32,
-	min_width:        i32,
-	min_height:       i32,
-	radius:           f32,
-	customize_window: bool,
-	vsync:            bool,
+	width:              i32,
+	height:             i32,
+	min_width:          i32,
+	min_height:         i32,
+	radius:             f32,
+	customize_window:   bool,
+	vsync:              bool,
+	min_frame_interval: time.Duration,
 }
 
 @(private)
@@ -240,7 +241,10 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	display_mode := sdl3.GetCurrentDisplayMode(display_id)
 
 	// TODO: Add a setter proc to opal
-	ctx.frame_interval = time.Duration(f32(time.Second) / display_mode.refresh_rate)
+	ctx.frame_interval = max(
+		time.Duration(f32(time.Second) / display_mode.refresh_rate),
+		app.min_frame_interval,
+	)
 
 	if !app.run {
 		return .SUCCESS
