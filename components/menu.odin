@@ -62,11 +62,6 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 			&{
 				owner = node,
 				is_root = true,
-				node_relative_placement = Node_Relative_Placement {
-					node = node,
-					relative_offset = {0, 1},
-					exact_offset = {-5, 0},
-				},
 				shadow_size = 5,
 				shadow_color = {0, 0, 0, 128},
 				bounds = get_screen_box(),
@@ -94,3 +89,4 @@ __do_menu :: proc(is_open: bool) {
 		end_node()
 	}
 }
+

@@ -284,101 +284,98 @@ Node_Style :: struct {
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
 //
 Node_Descriptor :: struct {
-	using style:             Node_Style,
+	using style:        Node_Style,
 
 	// Text
-	text:                    string,
+	text:               string,
 
 	// Z index (higher values appear in front of lower ones), this value stacks down the tree
-	z_index:                 u32,
+	z_index:            u32,
 
 	// The node's final box will be loosely bound within this box, maintaining its size
-	bounds:                  Maybe(Box),
-
-	// Relative placement
-	node_relative_placement: Maybe(Node_Relative_Placement),
+	bounds:             Maybe(Box),
 
 	//
-	exact_position:          Maybe([2]f32),
-	exact_size:              [2]f32,
-	relative_position:       [2]f32,
-	relative_size:           [2]f32,
+	cursor:             Cursor,
+
+	// Absolute nodes aren't affected by layout, they just get positioned and sized relative to their parent after its layout is known and then treated as roots
+	absolute:           bool,
+
+	//
+	exact_offset:       [2]f32,
+	exact_size:         [2]f32,
+	relative_offset:    [2]f32,
+	relative_size:      [2]f32,
 
 	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	min_size:                [2]f32,
+	min_size:           [2]f32,
 
 	// The maximum size the node is allowed to grow to
-	max_size:                [2]f32,
+	max_size:           [2]f32,
 
 	// If the node will be grown to fill available space
-	grow:                    [2]bool,
+	grow:               [2]bool,
 
 	// If the node will grow to acommodate its contents
-	fit:                     [2]f32,
+	fit:                [2]f32,
 
 	// Values for the node's children layout
-	padding:                 [4]f32,
+	padding:            [4]f32,
 
 	// How the content will be aligned if there is extra space
-	content_align:           [2]f32,
+	content_align:      [2]f32,
 
 	// Spacing added between children
-	gap:                     f32,
+	gap:                f32,
 
 	//
-	justify_between:         bool,
+	justify_between:    bool,
 
 	// If this node will inherit the combined state of its children
-	inherit_state:           bool,
+	inherit_state:      bool,
 
 	// If the node's children are arranged vertically
-	vertical:                bool,
-
-	// TODO: Try remove this. It complicates the layout code and its purpose can be achieved by creating a new root
-	// If true, the node will ignore the normal layout behavior and simply be positioned and sized relative to its parent
-	// is_absolute:             bool,
+	vertical:           bool,
 
 	// Wraps contents
-	wrapped:                 bool,
+	wrapped:            bool,
 
 	// Prevents the node from being adopted and instead adds it as a new root.
-	is_root:                 bool,
+	is_root:            bool,
 
 	// If overflowing content is clipped
-	clip_content:            bool,
+	clip_content:       bool,
 
 	// If text content can be selected
-	enable_selection:        bool,
-
-	// If text content can be edited
-	enable_edit:             bool,
+	enable_selection:   bool,
 
 	// Disallows inspection in the debug inspector
-	disable_inspection:      bool,
+	disable_inspection: bool,
 
 	// Show/hide scrollbars when content overflows
-	show_scrollbars:         bool,
+	show_scrollbars:    bool,
 
 	// Forces equal width and height when fitting to content size
-	square_fit:              bool,
+	square_fit:         bool,
 
 	//
-	interactive:             bool,
+	interactive:        bool,
 
 	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
-	owner:                   ^Node `fmt:"-"`,
+	owner:              ^Node `fmt:"-"`,
 
 	// Called after the default drawing behavior
-	on_draw:                 proc(self: ^Node),
+	on_draw:            proc(self: ^Node),
 
 	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
-	data:                    rawptr,
+	data:               rawptr,
 }
 
 Glyph :: struct {
-	using glyph:    kn.Font_Glyph,
-	offset:         [2]f32,
-	is_placeholder: bool,
+	using glyph: kn.Font_Glyph,
+	offset:      [2]f32,
+	index:       int,
+	node:        ^Node,
 }
 
 //
@@ -389,14 +386,16 @@ Node :: struct {
 
 	// Node tree references
 	parent:                  ^Node,
-
-	// All nodes invoked between `begin_node` and `end_node`
 	children:                [dynamic]^Node `fmt:"-"`,
+
+	// Layout tree references
+	layout_parent:           ^Node,
+	layout_children:         [dynamic]^Node `fmt:"-"`,
 
 	// A simple kill switch that causes the node to be discarded
 	is_dead:                 bool,
 
-	//
+	// The node's size has changed and a sizing pass will be triggered
 	dirty:                   bool,
 
 	// Last frame on which this node was invoked
@@ -411,16 +410,16 @@ Node :: struct {
 	//
 	size:                    [2]f32,
 
-	//
-	cached_size:             [2]f32,
-
-	//
+	// The last size known at invocation
 	last_size:               [2]f32,
+
+	// Cached size to reuse when no sizing pass occurs
+	cached_size:             [2]f32,
 
 	// The content size minus the last calculated size
 	overflow:                [2]f32,
 
-	// This is computed as the minimum space required to fit all children or the node's text content
+	// This is computed as the minimum space required to fit all children or the node's text content with padding
 	content_size:            [2]f32,
 
 	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
@@ -455,7 +454,11 @@ Node :: struct {
 	// The timestamp of the node's initialization in the context's arena
 	time_created:            time.Time,
 
-	// Text content
+	// Text stuff
+	text_origin:             [2]f32,
+	text_size:               [2]f32,
+	text_view:               ^Text_View,
+	text_byte_index:         int,
 	glyphs:                  []Glyph `fmt:"-"`,
 
 	// View offset of contents
@@ -468,13 +471,6 @@ Node :: struct {
 
 	// Universal state transition values for smooth animations
 	transitions:             [3]f32,
-}
-
-Rune :: struct {
-	box:     Box,
-	index:   int,
-	code:    rune,
-	node_id: Id,
 }
 
 Context_Color :: enum {
@@ -500,9 +496,14 @@ Context_Descriptor :: struct {
 //
 // Any interactive node with text will be included in only the top text on the stack at the time.
 //
-Text :: struct {
-	builder: strings.Builder,
-	editor:  tedit.Editor,
+Text_View :: struct {
+	id:          Id,
+	byte_length: int,
+	hover_index: int,
+	selection:   [2]int,
+	nodes:       [dynamic]^Node,
+	glyphs:      [dynamic]Glyph,
+	dead:        bool,
 }
 
 Context :: struct {
@@ -606,9 +607,14 @@ Context :: struct {
 	// Runes
 	// runes:                     [dynamic]Rune,
 	//
-	text_stack:                [dynamic]^Text,
-	text_map:                  map[Id]^Text,
-	text_array:                [dynamic]Text,
+	text_stack:                [dynamic]^Text_View,
+	text_map:                  map[Id]^Text_View,
+	text_array:                [dynamic]Text_View,
+	active_text_id:            Id,
+	last_active_text_id:       Id,
+	hovered_text_context:      ^Text_View,
+	active_text_context:       ^Text_View,
+	editor:                    tedit.Editor,
 
 	//
 	// Styles
@@ -724,29 +730,43 @@ get_screen_box :: proc() -> Box {
 	return {0, global_ctx.screen_size}
 }
 
-begin_text :: proc(loc := #caller_location) {
+begin_text :: proc(id: Id) -> Maybe(^Text_View) {
 	ctx := global_ctx
-	id := hash_loc(loc)
 	text, ok := ctx.text_map[id]
 	if !ok {
-		append(&ctx.text_array, Text{})
+		append(&ctx.text_array, Text_View{id = id})
 		text = &ctx.text_array[len(ctx.text_array) - 1]
+		ctx.text_map[id] = text
 	}
 	append(&ctx.text_stack, text)
+
+	if ctx.active_text_id == id {
+		ctx.active_text_context = text
+	}
+
+	text.byte_length = 0
+	text.dead = false
+	clear(&text.glyphs)
+	clear(&text.nodes)
+
+	return text
 }
 
-end_text :: proc() -> Maybe(^Text) {
+end_text :: proc() {
 	ctx := global_ctx
+	// if text, ok := get_current_text(); ok {
+	// 	last_glyph := &text.glyphs[len(text.glyphs) - 1]
+	// 	append(&text.glyphs, Glyph{offset = last_glyph.offset + last_glyph.offset})
+	// }
 	pop(&ctx.text_stack)
-	return nil
 }
 
-current_text :: proc() -> (text: ^Text, ok: bool) {
+get_current_text :: proc() -> (text: ^Text_View, ok: bool) {
 	ctx := global_ctx
-	if len(ctx.text_array) == 0 {
+	if len(ctx.text_stack) == 0 {
 		return
 	}
-	return &ctx.text_array[len(ctx.text_array) - 1], true
+	return ctx.text_stack[len(ctx.text_stack) - 1], true
 }
 
 //
@@ -859,7 +879,7 @@ box_clamped :: proc(self, other: Box) -> Box {
 // Snap a box to a whole number position
 box_snap :: proc(self: ^Box) {
 	size := self.hi - self.lo
-	self.lo = linalg.round(self.lo)
+	self.lo = linalg.floor(self.lo)
 	self.hi = self.lo + linalg.floor(size)
 }
 
@@ -1226,6 +1246,8 @@ begin :: proc() {
 		ctx.active_node = nil
 		ctx.scrollable_node = nil
 		ctx.hovered_node = nil
+		ctx.hovered_text_context = nil
+
 		for root in ctx.roots {
 			node_receive_input_recursive(root)
 		}
@@ -1233,6 +1255,7 @@ begin :: proc() {
 
 	if ctx.hovered_node != nil {
 		ctx.hovered_id = ctx.hovered_node.id
+
 		if ctx.hovered_node.interactive {
 			ctx.widget_hovered = true
 		}
@@ -1240,7 +1263,10 @@ begin :: proc() {
 		ctx.hovered_id = 0
 	}
 
+	ctx.last_active_text_id = ctx.active_text_id
+
 	if mouse_pressed(.Left) {
+		// Individual node interaction
 		if ctx.hovered_node != nil {
 			ctx.active_node = ctx.hovered_node
 			// Reset click counter if there was too much delay
@@ -1254,12 +1280,17 @@ begin :: proc() {
 		} else {
 			ctx.focused_id = 0
 		}
+
+		if ctx.hovered_text_context != nil {
+			ctx.active_text_id = ctx.hovered_text_context.id
+		}
 	}
 
 	if ctx.active_node != nil {
 		ctx.active_id = ctx.active_node.id
 	} else if mouse_released(.Left) {
 		ctx.active_id = 0
+		ctx.active_text_id = 0
 	}
 
 	// Receive mouse wheel input
@@ -1279,9 +1310,6 @@ begin :: proc() {
 	for id, node in ctx.node_by_id {
 		if node.is_dead {
 			delete_key(&ctx.node_by_id, node.id)
-			// if node.on_drop != nil {
-			// 	node.on_drop(node)
-			// }
 			node_destroy(node)
 			(^Maybe(Node))(node)^ = nil
 		} else {
@@ -1293,6 +1321,24 @@ begin :: proc() {
 		}
 	}
 
+	//
+	// Purge text
+	//
+	for &text, i in ctx.text_array {
+		if text.dead {
+			delete(text.glyphs)
+			delete(text.nodes)
+			delete_key(&ctx.text_map, text.id)
+			unordered_remove(&ctx.text_array, i)
+		} else {
+			text.dead = true
+			if text.id == ctx.active_text_id {
+				text_view_update_selection(&text, ctx)
+			}
+		}
+	}
+
+	assert(len(ctx.text_stack) == 0)
 	assert(len(ctx.style_stack) == 0)
 	assert(len(ctx.node_stack) == 0)
 	clear(&ctx.roots)
@@ -1371,20 +1417,91 @@ ctx_solve_sizes :: proc(self: ^Context) {
 
 ctx_solve_positions_and_draw :: proc(self: ^Context) {
 	for root in self.roots {
-		if placement, ok := root.node_relative_placement.?; ok {
-			root.position =
-				placement.node.box.lo +
-				placement.node.size * placement.relative_offset +
-				placement.exact_offset
-		}
 		node_solve_box_recursively(root, root.dirty)
 	}
 
-	t := time.now()
 	for root in self.roots {
 		node_draw_recursive(root)
 	}
-	fmt.println(time.since(t))
+}
+
+text_view_update_selection :: proc(self: ^Text_View, ctx: ^Context) {
+	self.hover_index = -1
+
+	min_dist: f32 = INFINITY
+	glyph_index: int
+	for node, node_index in self.nodes {
+		line_height := node.font_size * node.font.line_height
+
+		for glyph in node.glyphs {
+			position := glyph.offset + node.text_origin + {0, line_height / 2}
+			dist := linalg.distance(position, ctx.mouse_position)
+
+			if dist < min_dist {
+				min_dist = dist
+				self.hover_index = glyph_index
+			}
+
+			glyph_index += 1
+		}
+
+		if len(node.glyphs) > 0 {
+			position := node.text_origin + {node.text_size.x, line_height / 2}
+			dist := linalg.distance(position, ctx.mouse_position)
+
+			if dist < min_dist {
+				min_dist = dist
+				self.hover_index = glyph_index
+			}
+		}
+	}
+
+	if ctx.last_active_text_id != ctx.active_text_id {
+		self.selection = self.hover_index
+	} else {
+		self.selection[1] = self.hover_index
+	}
+}
+
+text_view_get_ordered_selection :: proc(self: ^Text_View) -> [2]int {
+	if self.selection[0] > self.selection[1] {
+		return self.selection.yx
+	}
+	return self.selection
+}
+
+text_view_collect_range :: proc(self: ^Text_View, from, to: int, w: io.Writer) {
+	if from >= to {
+		return
+	}
+
+	for node in self.nodes {
+		indices := [2]int {
+			clamp(from - node.text_byte_index, 0, len(node.text) - 1),
+			clamp(to - node.text_byte_index, 0, len(node.text) - 1),
+		}
+
+		if indices[0] == indices[1] {
+			continue
+		}
+
+		io.write_string(w, node.text[indices[0]:indices[1]])
+	}
+}
+
+text_view_get_string :: proc(self: ^Text_View, allocator := context.allocator) -> string {
+	selection := text_view_get_ordered_selection(self)
+
+	b := strings.builder_make(allocator = allocator)
+
+	text_view_collect_range(
+		self,
+		self.glyphs[selection[0]].index if selection[0] < len(self.glyphs) else self.byte_length,
+		self.glyphs[selection[1]].index if selection[1] < len(self.glyphs) else self.byte_length,
+		strings.to_writer(&b),
+	)
+
+	return strings.to_string(b)
 }
 
 node_update_scroll :: proc(self: ^Node) {
@@ -1479,14 +1596,18 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 			self.descriptor = descriptor^
 		}
 
-		if position, ok := self.exact_position.?; ok {
-			self.position = position
+		if self.absolute || ctx.current_node == nil {
+			self.position = self.exact_offset
 		}
 		self.size = self.min_size
 
 		if !self.is_root {
 			self.parent = ctx.current_node
 			assert(self != self.parent)
+		}
+
+		if self.parent == nil {
+			begin_text(self.id)
 		}
 
 		node_on_new_frame(self)
@@ -1505,10 +1626,13 @@ end_node :: proc() {
 	}
 
 	i := int(self.vertical)
+
 	if !self.wrapped {
 		self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
 	}
+
 	self.content_size += self.padding.xy + self.padding.zw
+
 	if self.fit != {} {
 		self.size = linalg.max(self.size, self.content_size * self.fit)
 		if self.square_fit {
@@ -1543,11 +1667,8 @@ end_node :: proc() {
 				&{
 					is_root = true,
 					owner = self,
-					relative_position = {1, 0},
-					exact_position = [2]f32 {
-						-SCROLLBAR_SIZE - SCROLLBAR_PADDING,
-						SCROLLBAR_PADDING,
-					},
+					relative_offset = {1, 0},
+					exact_offset = [2]f32{-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
 					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
 					interactive = true,
@@ -1566,18 +1687,10 @@ end_node :: proc() {
 				&{
 					is_root = true,
 					owner = self,
-					node_relative_placement = Node_Relative_Placement {
-						node = self,
-						relative_offset = {0, 1},
-						exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_PADDING - SCROLLBAR_SIZE},
-					},
-					relative_position = {0, 1},
-					exact_position = [2]f32 {
-						SCROLLBAR_PADDING,
-						-SCROLLBAR_SIZE - SCROLLBAR_PADDING,
-					},
+					relative_offset = {0, 1},
+					exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
 					relative_size = {1, 0},
-					min_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					exact_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
 					interactive = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
@@ -1592,7 +1705,9 @@ end_node :: proc() {
 	}
 
 	pop_node()
-	if self.parent != nil {
+	if self.parent == nil {
+		end_text()
+	} else {
 		node_on_child_end(self.parent, self)
 	}
 }
@@ -1682,6 +1797,10 @@ node_update_input :: proc(self: ^Node) {
 
 	self.was_focused = self.is_focused
 	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
+
+	if self.is_hovered {
+		set_cursor(self.cursor)
+	}
 }
 
 node_update_propagated_input :: proc(self: ^Node) {
@@ -1831,44 +1950,79 @@ node_on_new_frame :: proc(self: ^Node) {
 
 	// Create text layout
 	if reader, ok := reader.?; ok {
-		width: f32
-		glyphs := make([dynamic]Glyph, allocator = context.temp_allocator)
+		self.text_view = get_current_text() or_else panic("No text context initialized!")
+
+		self.text_size = 0
+		first_glyph := len(self.text_view.glyphs)
+		self.text_byte_index = self.text_view.byte_length
+
+		append(&self.text_view.nodes, self)
+
 		for {
-			char, size, err := io.read_rune(reader)
+			char, length, err := io.read_rune(reader)
+
 			if err == .EOF {
 				break
 			}
+
 			if char == '\t' {
-				append(&glyphs, Glyph{offset = {width, 0}})
-				width += self.font.space_advance * self.font_size * 2
+				append(
+					&self.text_view.glyphs,
+					Glyph {
+						node = self,
+						index = self.text_view.byte_length,
+						offset = {self.text_size.x, 0},
+					},
+				)
+				self.text_size.x += self.font.space_advance * self.font_size * 2
+			} else if char == '\n' {
+				append(
+					&self.text_view.glyphs,
+					Glyph {
+						node = self,
+						index = self.text_view.byte_length,
+						offset = {self.text_size.x, 0},
+						glyph = {advance = self.font.space_advance},
+					},
+				)
+				self.text_size.x += self.font.space_advance * self.font_size
 			} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-				append(&glyphs, Glyph{glyph = glyph, offset = {width, 0}})
-				width += glyph.advance * self.font_size
+				append(
+					&self.text_view.glyphs,
+					Glyph {
+						node = self,
+						index = self.text_view.byte_length,
+						glyph = glyph,
+						offset = {self.text_size.x, 0},
+					},
+				)
+				self.text_size.x += glyph.advance * self.font_size
 			} else {
 				for char in fmt.tprintf("<0x%x>", char) {
 					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
 						append(
-							&glyphs,
-							Glyph{glyph = glyph, offset = {width, 0}, is_placeholder = true},
+							&self.text_view.glyphs,
+							Glyph {
+								node = self,
+								index = self.text_view.byte_length,
+								glyph = glyph,
+								offset = {self.text_size.x, 0},
+							},
 						)
-						width += glyph.advance * self.font_size
+						self.text_size.x += glyph.advance * self.font_size
 					}
 				}
 			}
+
+			self.text_view.byte_length += length
 		}
-		width += f32(len(glyphs) - 1) * self.gap
-		self.glyphs = glyphs[:]
-		// Include text in content size
-		self.content_size = linalg.max(
-			self.content_size,
-			[2]f32{width, self.font.line_height * self.font_size},
-		)
-	} else if self.enable_edit {
-		// Simulate text height
-		self.content_size.y = max(
-			self.content_size.y,
-			self.style.font.line_height * self.style.font_size,
-		)
+
+		self.text_size.x += f32(len(self.text_view.glyphs) - 1) * self.gap
+		self.text_size.y = self.font.line_height * self.font_size
+
+		self.glyphs = self.text_view.glyphs[first_glyph:]
+
+		self.content_size = linalg.max(self.content_size, self.text_size)
 	}
 
 	// Root
@@ -1909,6 +2063,15 @@ node_receive_input :: proc(self: ^Node, z_index: u32) -> (mouse_overlap: bool) {
 			ctx.hovered_node = self
 			if node_is_scrollable(self) {
 				ctx.scrollable_node = self
+			}
+
+			if self.enable_selection && self.text_view != nil && len(self.glyphs) > 0 {
+				if point_in_box(
+					ctx.mouse_position,
+					{self.text_origin, self.text_origin + self.text_size},
+				) {
+					ctx.hovered_text_context = self.text_view
+				}
 			}
 		}
 	}
@@ -2199,13 +2362,6 @@ node_get_content_span :: proc(self: ^Node) -> f32 {
 	}
 }
 
-//
-// Determine node positions
-//
-// node_solve_positions_recursive :: proc(self: ^Node, depth := 1) {
-// 	assert(depth < MAX_TREE_DEPTH)
-// }
-
 node_is_scrollable :: proc(self: ^Node) -> bool {
 	return self.overflow != {}
 }
@@ -2253,15 +2409,6 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 	if self.is_clipped {
 		return
 	}
-
-	// Compute text position
-	text_origin :=
-		linalg.lerp(
-			self.box.lo + self.padding.xy,
-			self.box.hi - self.padding.zw,
-			self.content_align,
-		) -
-		self.scroll
 
 	enable_scissor :=
 		self.clip_content &&
@@ -2325,26 +2472,52 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 			paint = node_convert_paint_variant(self, self.background),
 		)
 	}
-	if self.style.foreground != nil {
-		default_paint := kn.paint_index_from_option(self.foreground)
-		placeholder_paint := kn.paint_index_from_option(Color{255, 50, 50, 128})
-		text_origin := self.box.lo + self.padding.xy
+	if self.style.foreground != nil && len(self.glyphs) > 0 {
+		self.text_origin =
+			linalg.lerp(
+				self.box.lo + self.padding.xy,
+				self.box.hi - self.padding.zw,
+				self.content_align,
+			) -
+			self.text_size * self.content_align -
+			self.scroll
+
+		paint := kn.paint_index_from_option(self.foreground)
+
 		for &glyph in self.glyphs {
-			kn.add_glyph(
-				glyph,
-				self.font_size,
-				text_origin + glyph.offset,
-				placeholder_paint if glyph.is_placeholder else default_paint,
-			)
+			kn.add_glyph(glyph, self.font_size, self.text_origin + glyph.offset, paint)
 		}
-		// if self.enable_edit && self.is_focused && len(self.glyphs) > 0 {
-		// 	line_height := self.font.line_height * self.font_size
-		// 	top_left := text_origin + self.glyphs[self.editor.selection[0]].offset
-		// 	kn.add_box(
-		// 		{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
-		// 		paint = ctx.colors[.Selection_Background],
-		// 	)
-		// }
+
+		cursor_index := self.text_view.selection[1] - self.text_byte_index
+
+		if self.enable_selection {
+			line_height := self.font.line_height * self.font_size
+			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
+				top_left := node_get_glyph_position(self, cursor_index)
+				kn.add_box(
+					{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
+					paint = global_ctx.colors[.Selection_Background],
+				)
+			}
+			selection := [2]int {
+				clamp(self.text_view.selection[0] - self.text_byte_index, 0, len(self.glyphs)),
+				clamp(self.text_view.selection[1] - self.text_byte_index, 0, len(self.glyphs)),
+			}
+			ordered_selection := selection
+			if ordered_selection[0] != ordered_selection[1] {
+				if ordered_selection[0] > ordered_selection[1] {
+					ordered_selection = ordered_selection.yx
+				}
+				kn.add_box(
+					{
+						node_get_glyph_position(self, ordered_selection[0]),
+						node_get_glyph_position(self, ordered_selection[1]) +
+						{0, math.floor(line_height)},
+					},
+					paint = fade(global_ctx.colors[.Selection_Background], 0.5),
+				)
+			}
+		}
 	}
 
 	if self.on_draw != nil {
@@ -2439,178 +2612,18 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 	}
 }
 
+node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
+	if index == 0 {
+		return linalg.floor(self.text_origin)
+	}
+	if index == len(self.glyphs) {
+		return linalg.floor(self.text_origin + {self.text_size.x, 0})
+	}
+	return linalg.floor(self.text_origin + self.glyphs[index].offset)
+}
+
 node_get_padded_box :: proc(self: ^Node) -> Box {
 	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
-}
-
-text_get_cursor_box :: proc(self: ^kn.Selectable_Text, offset: [2]f32) -> Box {
-	if len(self.glyphs) == 0 {
-		return {}
-	}
-	line_height := self.font.line_height * self.font_scale
-	top_left := offset + self.glyphs[self.selection.glyphs[0]].offset
-	return {{top_left.x - 1, top_left.y}, {top_left.x + 1, top_left.y + line_height}}
-}
-
-draw_text_cursor :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
-	if len(text.glyphs) == 0 {
-		return
-	}
-	kn.add_box(text_get_cursor_box(text, origin), paint = color)
-}
-
-draw_text :: proc(
-	text: ^kn.Selectable_Text,
-	origin: [2]f32,
-	paint: kn.Paint_Option,
-	selected_color: kn.Color,
-) {
-	ordered_selection := text.selection.glyphs
-	if ordered_selection.x > ordered_selection.y {
-		ordered_selection = ordered_selection.yx
-	}
-	default_paint := kn.paint_index_from_option(paint)
-	selected_paint := kn.paint_index_from_option(selected_color)
-	for &glyph, glyph_index in text.glyphs {
-		if glyph.source.lo == glyph.source.hi {
-			continue
-		}
-		kn.add_glyph(
-			glyph,
-			text.font_scale,
-			origin + glyph.offset,
-			selected_paint if glyph_index >= ordered_selection[0] && glyph_index < ordered_selection[1] else default_paint,
-		)
-	}
-}
-
-draw_text_highlight :: proc(text: ^kn.Selectable_Text, origin: [2]f32, color: kn.Color) {
-	if text.selection.glyphs[0] == text.selection.glyphs[1] {
-		return
-	}
-	line_height := text.font.line_height * text.font_scale
-	ordered_selection := text.selection.glyphs
-	if ordered_selection[0] > ordered_selection[1] {
-		ordered_selection = ordered_selection.yx
-	}
-	kn.set_paint(color)
-	for &line in text.lines {
-		highlight_range := [2]int {
-			max(ordered_selection[0], line.first_glyph),
-			min(ordered_selection[1], line.last_glyph),
-		}
-		if highlight_range.x >= highlight_range.y {
-			continue
-		}
-		assert(
-			text.glyphs[highlight_range[0]].offset.y == text.glyphs[highlight_range[1]].offset.y,
-		)
-		box := Box {
-			origin + text.glyphs[highlight_range.x].offset,
-			origin +
-			text.glyphs[highlight_range.y].offset +
-			{
-					text.font.space_advance *
-					text.font_scale *
-					f32(i32(ordered_selection[1] > line.last_glyph)),
-					line_height,
-				},
-		}
-		kn.add_box(
-			box_floored(box),
-			3 *
-			{
-					f32(i32(ordered_selection[0] >= line.first_glyph)),
-					0,
-					0,
-					f32(i32(ordered_selection[1] <= line.last_glyph)),
-				},
-		)
-	}
-}
-
-// node_update_selection :: proc(self: ^Node) {
-// 	is_separator :: proc(r: rune) -> bool {
-// 		return !unicode.is_alpha(r) && !unicode.is_number(r)
-// 	}
-
-
-// 	for glyph in self.glyphs {
-
-// 	}
-
-// 	if self.is_active && self.text_layout.contact.index >= 0 {
-// 		if !self.was_active {
-// 			self.editor.anchor = self.text_layout.contact.index
-// 			if self.click_count == 3 {
-// 				self.editor.selection = {len(self.text), 0}
-// 			} else {
-// 				self.editor.selection = {
-// 					self.text_layout.contact.index,
-// 					self.text_layout.contact.index,
-// 				}
-// 			}
-// 		}
-// 		switch self.click_count {
-// 		case 2:
-// 			allow_precision := self.text_layout.contact.index != self.editor.anchor
-// 			if self.text_layout.contact.index <= self.editor.anchor {
-// 				self.editor.selection[0] =
-// 					self.text_layout.contact.index if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index]))) else max(0, strings.last_index_proc(self.text[:min(self.text_layout.contact.index, len(self.text))], is_separator) + 1)
-// 				self.editor.selection[1] = strings.index_proc(
-// 					self.text[self.editor.anchor:],
-// 					is_separator,
-// 				)
-// 				if self.editor.selection[1] == -1 {
-// 					self.editor.selection[1] = len(self.text)
-// 				} else {
-// 					self.editor.selection[1] += self.editor.anchor
-// 				}
-// 			} else {
-// 				self.editor.selection[1] = max(
-// 					0,
-// 					strings.last_index_proc(self.text[:self.editor.anchor], is_separator) + 1,
-// 				)
-// 				// `self.text_layout.selection.index - 1` is safe as long as `self.text_layout.selection.index > self.editor.anchor`
-// 				self.editor.selection[0] =
-// 					0 if (allow_precision && is_separator(rune(self.text[self.text_layout.contact.index - 1]))) else strings.index_proc(self.text[self.text_layout.contact.index:], is_separator)
-// 				if self.editor.selection[0] == -1 {
-// 					self.editor.selection[0] = len(self.text)
-// 				} else {
-// 					self.editor.selection[0] += self.text_layout.contact.index
-// 				}
-// 			}
-// 		case 1:
-// 			self.editor.selection[0] = self.text_layout.contact.index
-// 		}
-// 	}
-// }
-
-to_obfuscated_reader :: proc(reader: ^strings.Reader) -> io.Reader {
-	return io.Reader(io.Stream {
-		procedure = proc(
-			data: rawptr,
-			mode: io.Stream_Mode,
-			p: []byte,
-			_: i64,
-			_: io.Seek_From,
-		) -> (
-			n: i64,
-			err: io.Error,
-		) {
-			if mode == .Read {
-				r := (^strings.Reader)(data)
-				nn: int
-				nn, err = strings.reader_read(r, p)
-				if len(p) > 0 {
-					p[0] = '*'
-				}
-				n = i64(min(nn, 1))
-			}
-			return
-		},
-		data = reader,
-	})
 }
 
 string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> string {
@@ -2744,7 +2757,7 @@ inspector_show :: proc(self: ^Inspector) {
 	self.size = linalg.max(self.size, self.min_size)
 	base_node := begin_node(
 		&{
-			exact_position = self.position,
+			exact_offset = self.position,
 			min_size = self.size,
 			bounds = get_screen_box(),
 			vertical = true,
@@ -2769,6 +2782,18 @@ inspector_show :: proc(self: ^Inspector) {
 			max_size = INFINITY,
 			interactive = true,
 			vertical = true,
+			data = global_ctx,
+			on_draw = proc(self: ^Node) {
+				center := self.box.hi - box_height(self.box) / 2
+				radius := box_height(self.box) * 0.35
+				ctx := (^Context)(self.data)
+
+				kn.add_circle(center, radius, tw.AMBER_500)
+				angle: f32 = 0
+				radians := (f32(ctx.compute_duration) / f32(ctx.frame_duration)) * math.PI * 2
+				kn.add_pie(center, angle, angle + radians, radius, tw.FUCHSIA_500)
+				angle += radians
+			},
 		},
 	).?
 	{
@@ -2779,12 +2804,15 @@ inspector_show :: proc(self: ^Inspector) {
 		}
 		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
 		add_node(&desc)
-		desc.text = fmt.tprintf("Frame time: %v", global_ctx.frame_duration)
-		add_node(&desc)
 		desc.text = fmt.tprintf("Interval time: %v", global_ctx.interval_duration)
 		add_node(&desc)
+		desc.text = fmt.tprintf("Frame time: %v", global_ctx.frame_duration)
+		desc.foreground = tw.AMBER_500
+		add_node(&desc)
+		desc.foreground = tw.FUCHSIA_500
 		desc.text = fmt.tprintf("Compute time: %v", global_ctx.compute_duration)
 		add_node(&desc)
+		desc.foreground = _TEXT
 		desc.text = fmt.tprintf(
 			"%i/%i nodes drawn",
 			global_ctx.drawn_nodes,
@@ -3025,3 +3053,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+

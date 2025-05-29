@@ -51,11 +51,11 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(
-	My_App {
+	sdl3app.state = new_clone(My_App {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
+			app.edited_text = strings.clone(FILLER_TEXT)
 			lucide.load()
 			components.theme.icon_font = &lucide.font
 			app.image = opal.load_image("image.png") or_else panic("Could not load image!")
@@ -63,6 +63,7 @@ main :: proc() {
 			opal.set_color(.Selection_Foreground, tw.BLACK)
 			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
 			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
+			opal.global_ctx.snap_to_pixels = true
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -74,7 +75,7 @@ main :: proc() {
 				&{
 					min_size = global_ctx.screen_size,
 					background = tw.NEUTRAL_950,
-					stroke = tw.NEUTRAL_200,
+					stroke = tw.NEUTRAL_600,
 					stroke_width = 1,
 					vertical = true,
 					padding = 1,
@@ -99,10 +100,10 @@ main :: proc() {
 						&{grow = true, max_size = INFINITY, interactive = true},
 					).?
 					sdl3app.app_use_node_for_window_grabbing(app, grab_node)
-					if do_window_button(lucide.CHEVRON_DOWN, tw.ROSE_500) {
+					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
 						sdl3.MinimizeWindow(app.window)
 					}
-					if do_window_button(lucide.CHEVRON_UP, tw.ROSE_500) {
+					if do_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
 						if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
 							sdl3.RestoreWindow(app.window)
 						} else {
@@ -131,122 +132,14 @@ main :: proc() {
 					},
 				).?
 				{
-					begin_node(
-						&{
-							fit = {0, 1},
-							grow = {true, true},
-							max_size = INFINITY,
-							background = tw.NEUTRAL_800,
-							vertical = true,
-							padding = 10,
-							gap = 5,
-						},
-					)
-					{
-						begin_node(
-							&{
-								fit          = 1,
-								gap          = 5,
-								grow         = true,
-								max_size     = INFINITY,
-								wrapped      = true,
-								clip_content = true,
-								// padding  = 10,
-								// stroke = tw.INDIGO_500,
-								// stroke_width = 2,
-								// radius = 5,
-							},
-						)
-						{
-							do_text(
-								&{
-									grow = {true, true},
-									max_size = INFINITY,
-									min_size = {300, 0},
-									fit = {1, 1},
-									stroke = TEXT_STROKE_COLOR,
-									stroke_width = 2,
-									radius = 5,
-									padding = 10,
-								},
-								FILLER_TEXT,
-								14,
-								&kn.DEFAULT_FONT,
-								TEXT_COLOR,
-							)
-							do_text(
-								&{
-									grow = {true, true},
-									max_size = INFINITY,
-									min_size = {300, 0},
-									fit = {1, 1},
-									stroke = TEXT_STROKE_COLOR,
-									stroke_width = 2,
-									radius = 5,
-									padding = 10,
-								},
-								FILLER_TEXT,
-								14,
-								&kn.DEFAULT_FONT,
-								TEXT_COLOR,
-							)
-							add_node(
-								&{
-									min_size = 80,
-									grow = true,
-									max_size = 120,
-									radius = 5,
-									background = tw.INDIGO_700,
-								},
-							)
-						}
-						end_node()
-						do_text(
-							&{
-								fit           = {1, 1},
-								grow          = {true, true},
-								max_size      = INFINITY,
-								stroke        = TEXT_STROKE_COLOR,
-								stroke_width  = 2,
-								radius        = 5,
-								// vertical      = true,
-								content_align = 0.5,
-								padding       = 10,
-								gap           = 5,
-								// min_size = {0, 500},
-							},
-							FILLER_TEXT,
-							12,
-							&kn.DEFAULT_FONT,
-							TEXT_COLOR,
-						)
-						do_text(
-							&{
-								grow = {true, true},
-								max_size = INFINITY,
-								fit = {0, 1},
-								stroke = TEXT_STROKE_COLOR,
-								stroke_width = 2,
-								radius = 5,
-								justify_between = true,
-								padding = 10,
-							},
-							FILLER_TEXT,
-							20,
-							&kn.DEFAULT_FONT,
-							TEXT_COLOR,
-						)
-						do_text_editor(app)
-					}
-					end_node()
+					do_text_editor(app)
 				}
 				end_node()
 			}
 			end_node()
 			end()
 		},
-	},
-	)
+	})
 
 	sdl3app.run(
 		&{
@@ -368,7 +261,8 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			desc.grow = {true, false}
 			desc.max_size = {INFINITY, 0}
 			desc.placeholder = "Once upon a time..."
-			// desc.is_multiline = true
+			desc.value_data = &app.edited_text
+			desc.value_type_info = type_info_of(string)
 			desc.wrapped = true
 			// Then add the node to the UI and perform the input logic
 			add_field(&desc)
@@ -419,3 +313,4 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
 	}
 }
+

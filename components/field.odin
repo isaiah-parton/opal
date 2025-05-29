@@ -1,6 +1,7 @@
 package components
 
 import ".."
+import kn "../../katana"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
@@ -25,32 +26,61 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 		padding = 4,
 		radius = 3,
 		clip_content = true,
-		text = fmt.tprint(any{data = data, id = type_info.id}),
-		foreground = tw.NEUTRAL_50,
-		enable_edit = true,
-		enable_selection = true,
 		interactive = true,
+		inherit_state = true,
+		wrapped = true,
 		stroke_type = .Outer,
 		value_data = data,
 		value_type_info = type_info,
+		cursor = .Text,
 	}
 }
 
 add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 	using opal
 	self := begin_node(desc).?
-	if desc.placeholder != "" && len(desc.text) == 0 {
-		push_id(hash(loc))
-		add_node(
-			&{
-				font = desc.font,
-				font_size = desc.font_size,
-				foreground = tw.NEUTRAL_500,
-				text = desc.placeholder,
-				fit = 1,
-			},
-		)
-		pop_id()
+	{
+		text := fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
+		if desc.placeholder != "" && len(text) == 0 {
+			push_id(hash(loc))
+			add_node(
+				&{
+					font = desc.font,
+					font_size = desc.font_size,
+					foreground = tw.NEUTRAL_500,
+					text = desc.placeholder,
+					fit = 1,
+				},
+			)
+			pop_id()
+		}
+		begin_text(self.id)
+		j := 1
+		for len(text) > 0 {
+			i := strings.index_byte(text, ' ')
+			if i == -1 {
+				i = len(text)
+			} else {
+				i += 1
+			}
+			push_id(j)
+			add_node(
+				&{
+					font = desc.font,
+					font_size = desc.font_size,
+					foreground = tw.WHITE,
+					text = text[:i],
+					fit = 1,
+					interactive = true,
+					enable_selection = true,
+					cursor = .Text,
+				},
+			)
+			pop_id()
+			j += 1
+			text = text[i:]
+		}
+		end_text()
 	}
 	end_node()
 	node_update_transition(self, 0, self.is_hovered, 0.1)
@@ -129,3 +159,4 @@ field_output :: proc(
 	}
 	return true
 }
+
