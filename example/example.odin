@@ -51,7 +51,8 @@ main :: proc() {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(My_App {
+	sdl3app.state = new_clone(
+	My_App {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^My_App)(app)
@@ -132,6 +133,99 @@ main :: proc() {
 					},
 				).?
 				{
+					begin_node(
+						&{
+							fit          = 1,
+							gap          = 5,
+							grow         = true,
+							max_size     = INFINITY,
+							wrapped      = true,
+							clip_content = true,
+							// padding  = 10,
+							// stroke = tw.INDIGO_500,
+							// stroke_width = 2,
+							// radius = 5,
+						},
+					)
+					{
+						do_text(
+							&{
+								grow = {true, true},
+								max_size = INFINITY,
+								min_size = {300, 0},
+								fit = {1, 1},
+								stroke = TEXT_STROKE_COLOR,
+								stroke_width = 2,
+								radius = 5,
+								padding = 10,
+							},
+							FILLER_TEXT,
+							14,
+							&kn.DEFAULT_FONT,
+							TEXT_COLOR,
+						)
+						do_text(
+							&{
+								grow = {true, true},
+								max_size = INFINITY,
+								min_size = {300, 0},
+								fit = {1, 1},
+								stroke = TEXT_STROKE_COLOR,
+								stroke_width = 2,
+								radius = 5,
+								padding = 10,
+							},
+							FILLER_TEXT,
+							14,
+							&kn.DEFAULT_FONT,
+							TEXT_COLOR,
+						)
+						add_node(
+							&{
+								min_size = 80,
+								grow = true,
+								max_size = 120,
+								radius = 5,
+								background = tw.INDIGO_700,
+							},
+						)
+					}
+					end_node()
+					do_text(
+						&{
+							fit           = {1, 1},
+							grow          = {true, true},
+							max_size      = INFINITY,
+							stroke        = TEXT_STROKE_COLOR,
+							stroke_width  = 2,
+							radius        = 5,
+							// vertical      = true,
+							content_align = 0.5,
+							padding       = 10,
+							gap           = 5,
+							// min_size = {0, 500},
+						},
+						FILLER_TEXT,
+						12,
+						&kn.DEFAULT_FONT,
+						TEXT_COLOR,
+					)
+					do_text(
+						&{
+							grow = {true, true},
+							max_size = INFINITY,
+							fit = {0, 1},
+							stroke = TEXT_STROKE_COLOR,
+							stroke_width = 2,
+							radius = 5,
+							justify_between = true,
+							padding = 10,
+						},
+						FILLER_TEXT,
+						20,
+						&kn.DEFAULT_FONT,
+						TEXT_COLOR,
+					)
 					do_text_editor(app)
 				}
 				end_node()
@@ -139,7 +233,8 @@ main :: proc() {
 			end_node()
 			end()
 		},
-	})
+	},
+	)
 
 	sdl3app.run(
 		&{
@@ -188,11 +283,13 @@ do_text :: proc(
 		push_id(int(i))
 		add_node(
 			&{
-				foreground = paint,
-				fit        = 1,
-				text       = s[:until],
-				font       = font,
-				font_size  = size,
+				foreground       = paint,
+				fit              = 1,
+				text             = s[:until],
+				font             = font,
+				font_size        = size,
+				interactive      = true,
+				enable_selection = true,
 				// static_text = true,
 			},
 			loc = loc,

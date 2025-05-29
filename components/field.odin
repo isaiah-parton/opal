@@ -160,3 +160,85 @@ field_output :: proc(
 	return true
 }
 
+// Perform text editing
+// TODO: Implement up/down movement
+/*
+	if self.enable_edit {
+		if self.editor.builder == nil {
+			self.editor.builder = &self.builder
+			self.editor.undo_text_allocator = context.allocator
+			self.editor.set_clipboard = ctx.on_set_clipboard
+			self.editor.get_clipboard = ctx.on_get_clipboard
+		}
+		if self.is_focused != self.was_focused {
+			strings.builder_reset(self.editor.builder)
+			strings.write_string(self.editor.builder, self.text)
+		}
+		if self.is_focused {
+			cmd: tedit.Command
+			control_down := key_down(.Left_Control) || key_down(.Right_Control)
+			shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
+			if control_down {
+				if key_pressed(.A) do cmd = .Select_All
+				if key_pressed(.C) do cmd = .Copy
+				if key_pressed(.V) do cmd = .Paste
+				if key_pressed(.X) do cmd = .Cut
+				if key_pressed(.Z) do cmd = .Undo
+				if key_pressed(.Y) do cmd = .Redo
+			}
+			if len(ctx.text_input) > 0 {
+				for char, c in ctx.text_input {
+					tedit.input_runes(&self.editor, {char})
+					draw_frames(1)
+					self.was_changed = true
+				}
+			}
+			if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
+			if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
+			if key_pressed(.Enter) {
+				cmd = .New_Line
+				if self.is_multiline {
+					if control_down {
+						self.was_confirmed = true
+					}
+				} else {
+					self.was_confirmed = true
+				}
+			}
+			if key_pressed(.Left) {
+				if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
+				else do cmd = .Word_Left if control_down else .Left
+			}
+			if key_pressed(.Right) {
+				if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
+				else do cmd = .Word_Right if control_down else .Right
+			}
+			if key_pressed(.Up) {
+				if shift_down do cmd = .Select_Up
+				else do cmd = .Up
+			}
+			if key_pressed(.Down) {
+				if shift_down do cmd = .Select_Down
+				else do cmd = .Down
+			}
+			if key_pressed(.Home) {
+				cmd = .Select_Line_Start if control_down else .Line_Start
+			}
+			if key_pressed(.End) {
+				cmd = .Select_Line_End if control_down else .Line_End
+			}
+			if !self.is_multiline && (cmd in tedit.MULTILINE_COMMANDS) {
+				cmd = .None
+			}
+			if cmd != .None {
+				tedit.editor_execute(&self.editor, cmd)
+				if cmd in tedit.EDIT_COMMANDS {
+					self.was_changed = true
+				}
+				draw_frames(1)
+			}
+			reader = strings.to_reader(&string_reader, strings.to_string(self.builder))
+		}
+	}
+	*/
+

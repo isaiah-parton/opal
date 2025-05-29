@@ -2,14 +2,13 @@ package opal
 
 //
 // The following are features and optimizations that could be necessary depending on what features I deem a priority in the future. Only to be implemented if absolutely necessary and if they don't compromise the system's simplicity and low-level control, or add pointless overhead.
-// 	- Add an 'inline' layout mode to, well, layout children inline along any axis allowing for wrapping. Text layout and such could then be migrated to opal entirely. Adding nodes in between text is already possible, but there is no support for wrapping such nodes.
 // 	- Abstract away the functional components of a Node (Descriptor, Retained_State, Transient_State) to allow for transient nodes wihout hashed ids or interaction logic. Flex layouts need only a descriptor and some transient state, while inline layouts need additional retained state for caching their size. Ids will become retained state as they are only required by interactive nodes.
 //
 // TODO:
 // 	[ ] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
 //  [ ] Add inner shadows (to katana)
 //  [X] Wrapped wrapped layouts
-// 	[ ] Make the `Node` struct smalllerrr
+// 	[X] Make the `Node` struct smalllerrr
 // 		- Maybe by separating nodes from their style (yes definitely, there's no reason to duplicate that data for 100s of nodes)
 //
 
@@ -254,225 +253,6 @@ Rules :: struct {
 	shadow_size:      Rule_Shadow_Size,
 }
 
-//
-// The visual description of a node, used for the default drawing procedure
-// This is abstracted out by gut feeling ✊😔
-//
-Node_Style :: struct {
-	// Corner radius
-	radius:           [4]f32,
-
-	// The origin of transformation (0, 0) = top left, (1, 1) = bottom right
-	transform_origin: [2]f32,
-
-	// Transformation applied to self and children
-	scale:            [2]f32,
-	translate:        [2]f32,
-	rotation:         f32,
-	stroke_type:      Stroke_Type,
-	stroke:           Paint_Option,
-	background:       Paint_Variant,
-	foreground:       Paint_Option,
-	font:             ^Font `fmt:"-"`,
-	shadow_color:     Color,
-	stroke_width:     f32,
-	font_size:        f32,
-	shadow_size:      f32,
-}
-
-//
-// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
-//
-Node_Descriptor :: struct {
-	using style:        Node_Style,
-
-	// Text
-	text:               string,
-
-	// Z index (higher values appear in front of lower ones), this value stacks down the tree
-	z_index:            u32,
-
-	// The node's final box will be loosely bound within this box, maintaining its size
-	bounds:             Maybe(Box),
-
-	//
-	cursor:             Cursor,
-
-	// Absolute nodes aren't affected by layout, they just get positioned and sized relative to their parent after its layout is known and then treated as roots
-	absolute:           bool,
-
-	//
-	exact_offset:       [2]f32,
-	exact_size:         [2]f32,
-	relative_offset:    [2]f32,
-	relative_size:      [2]f32,
-
-	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	min_size:           [2]f32,
-
-	// The maximum size the node is allowed to grow to
-	max_size:           [2]f32,
-
-	// If the node will be grown to fill available space
-	grow:               [2]bool,
-
-	// If the node will grow to acommodate its contents
-	fit:                [2]f32,
-
-	// Values for the node's children layout
-	padding:            [4]f32,
-
-	// How the content will be aligned if there is extra space
-	content_align:      [2]f32,
-
-	// Spacing added between children
-	gap:                f32,
-
-	//
-	justify_between:    bool,
-
-	// If this node will inherit the combined state of its children
-	inherit_state:      bool,
-
-	// If the node's children are arranged vertically
-	vertical:           bool,
-
-	// Wraps contents
-	wrapped:            bool,
-
-	// Prevents the node from being adopted and instead adds it as a new root.
-	is_root:            bool,
-
-	// If overflowing content is clipped
-	clip_content:       bool,
-
-	// If text content can be selected
-	enable_selection:   bool,
-
-	// Disallows inspection in the debug inspector
-	disable_inspection: bool,
-
-	// Show/hide scrollbars when content overflows
-	show_scrollbars:    bool,
-
-	// Forces equal width and height when fitting to content size
-	square_fit:         bool,
-
-	//
-	interactive:        bool,
-
-	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
-	owner:              ^Node `fmt:"-"`,
-
-	// Called after the default drawing behavior
-	on_draw:            proc(self: ^Node),
-
-	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
-	data:               rawptr,
-}
-
-Glyph :: struct {
-	using glyph: kn.Font_Glyph,
-	offset:      [2]f32,
-	index:       int,
-	node:        ^Node,
-}
-
-//
-// Generic UI nodes, everything is a made out of these
-//
-Node :: struct {
-	using descriptor:        Node_Descriptor,
-
-	// Node tree references
-	parent:                  ^Node,
-	children:                [dynamic]^Node `fmt:"-"`,
-
-	// Layout tree references
-	layout_parent:           ^Node,
-	layout_children:         [dynamic]^Node `fmt:"-"`,
-
-	// A simple kill switch that causes the node to be discarded
-	is_dead:                 bool,
-
-	// The node's size has changed and a sizing pass will be triggered
-	dirty:                   bool,
-
-	// Last frame on which this node was invoked
-	frame:                   int,
-
-	// Unique identifier
-	id:                      Id `fmt:"x"`,
-
-	// The node's local position within its parent; or screen position if its a root
-	position:                [2]f32,
-
-	//
-	size:                    [2]f32,
-
-	// The last size known at invocation
-	last_size:               [2]f32,
-
-	// Cached size to reuse when no sizing pass occurs
-	cached_size:             [2]f32,
-
-	// The content size minus the last calculated size
-	overflow:                [2]f32,
-
-	// This is computed as the minimum space required to fit all children or the node's text content with padding
-	content_size:            [2]f32,
-
-	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
-	box:                     Box,
-
-	// If this is the node with the highest z-index that the mouse overlaps
-	was_hovered:             bool,
-	is_hovered:              bool,
-	has_hovered_child:       bool,
-
-	// Active state (clicked)
-	was_active:              bool,
-	is_active:               bool,
-	has_active_child:        bool,
-
-	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
-	was_focused:             bool,
-	is_focused:              bool,
-	has_focused_child:       bool,
-	// TODO: WHYYYY?!?!
-	will_have_focused_child: bool,
-
-	// Times the node was clicked
-	click_count:             u8,
-
-	// Time of last mouse down event over this node
-	last_click_time:         time.Time,
-
-	// Interaction
-	is_toggled:              bool,
-
-	// The timestamp of the node's initialization in the context's arena
-	time_created:            time.Time,
-
-	// Text stuff
-	text_origin:             [2]f32,
-	text_size:               [2]f32,
-	text_view:               ^Text_View,
-	text_byte_index:         int,
-	glyphs:                  []Glyph `fmt:"-"`,
-
-	// View offset of contents
-	scroll:                  [2]f32,
-	target_scroll:           [2]f32,
-
-	// Needs scissor
-	has_clipped_child:       bool,
-	is_clipped:              bool,
-
-	// Universal state transition values for smooth animations
-	transitions:             [3]f32,
-}
-
 Context_Color :: enum {
 	Selection_Background,
 	Selection_Foreground,
@@ -489,21 +269,6 @@ Context_Descriptor :: struct {
 
 	// User-defined data for callbacks
 	callback_data:      rawptr,
-}
-
-//
-// An abstraction that manages multiple nodes with text content.
-//
-// Any interactive node with text will be included in only the top text on the stack at the time.
-//
-Text_View :: struct {
-	id:          Id,
-	byte_length: int,
-	hover_index: int,
-	selection:   [2]int,
-	nodes:       [dynamic]^Node,
-	glyphs:      [dynamic]Glyph,
-	dead:        bool,
 }
 
 Context :: struct {
@@ -538,6 +303,10 @@ Context :: struct {
 
 	// Mouse scroll input
 	mouse_scroll:              Vector2,
+
+	// Time of last mouse down event
+	last_mouse_down_time:      time.Time,
+	last_mouse_down_button:    Mouse_Button,
 
 	// The mouse offset from the clicked node
 	node_click_offset:         Vector2,
@@ -604,17 +373,11 @@ Context :: struct {
 	// The hash stack
 	id_stack:                  [dynamic]Id,
 
-	// Runes
-	// runes:                     [dynamic]Rune,
+	// Non-interactive glyphs
+	glyphs:                    [dynamic]Glyph,
+
 	//
-	text_stack:                [dynamic]^Text_View,
-	text_map:                  map[Id]^Text_View,
-	text_array:                [dynamic]Text_View,
-	active_text_id:            Id,
-	last_active_text_id:       Id,
-	hovered_text_context:      ^Text_View,
-	active_text_context:       ^Text_View,
-	editor:                    tedit.Editor,
+	text_agent:                Text_Agent,
 
 	//
 	// Styles
@@ -731,42 +494,15 @@ get_screen_box :: proc() -> Box {
 }
 
 begin_text :: proc(id: Id) -> Maybe(^Text_View) {
-	ctx := global_ctx
-	text, ok := ctx.text_map[id]
-	if !ok {
-		append(&ctx.text_array, Text_View{id = id})
-		text = &ctx.text_array[len(ctx.text_array) - 1]
-		ctx.text_map[id] = text
-	}
-	append(&ctx.text_stack, text)
-
-	if ctx.active_text_id == id {
-		ctx.active_text_context = text
-	}
-
-	text.byte_length = 0
-	text.dead = false
-	clear(&text.glyphs)
-	clear(&text.nodes)
-
-	return text
+	return text_agent_begin_view(&global_ctx.text_agent, id)
 }
 
 end_text :: proc() {
-	ctx := global_ctx
-	// if text, ok := get_current_text(); ok {
-	// 	last_glyph := &text.glyphs[len(text.glyphs) - 1]
-	// 	append(&text.glyphs, Glyph{offset = last_glyph.offset + last_glyph.offset})
-	// }
-	pop(&ctx.text_stack)
+	text_agent_end_view(&global_ctx.text_agent)
 }
 
 get_current_text :: proc() -> (text: ^Text_View, ok: bool) {
-	ctx := global_ctx
-	if len(ctx.text_stack) == 0 {
-		return
-	}
-	return ctx.text_stack[len(ctx.text_stack) - 1], true
+	return text_agent_current_view(&global_ctx.text_agent)
 }
 
 //
@@ -1080,7 +816,6 @@ init :: proc(descriptor: Context_Descriptor) {
 	global_ctx = new(Context)
 	global_ctx.descriptor = descriptor
 	context_init(global_ctx)
-	fmt.println(size_of(Node))
 }
 
 deinit :: proc() {
@@ -1144,6 +879,8 @@ handle_key_up :: proc(key: Keyboard_Key) {
 handle_mouse_down :: proc(button: Mouse_Button) {
 	ctx := global_ctx
 	ctx.mouse_button_down[button] = true
+	ctx.last_mouse_down_button = button
+	ctx.last_mouse_down_time = time.now()
 	draw_frames(2)
 }
 
@@ -1246,24 +983,34 @@ begin :: proc() {
 		ctx.active_node = nil
 		ctx.scrollable_node = nil
 		ctx.hovered_node = nil
-		ctx.hovered_text_context = nil
 
 		for root in ctx.roots {
 			node_receive_input_recursive(root)
 		}
+
+		text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
+	}
+
+	if !mouse_down(.Left) {
+		ctx.text_agent.hovered_view = nil
 	}
 
 	if ctx.hovered_node != nil {
-		ctx.hovered_id = ctx.hovered_node.id
+		node := ctx.hovered_node
+		ctx.hovered_id = node.id
 
-		if ctx.hovered_node.interactive {
+		if node.enable_selection && node.text_view != nil && len(node.glyphs) > 0 {
+			if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
+				ctx.text_agent.hovered_view = node.text_view
+			}
+		}
+
+		if node.interactive {
 			ctx.widget_hovered = true
 		}
 	} else {
 		ctx.hovered_id = 0
 	}
-
-	ctx.last_active_text_id = ctx.active_text_id
 
 	if mouse_pressed(.Left) {
 		// Individual node interaction
@@ -1281,16 +1028,19 @@ begin :: proc() {
 			ctx.focused_id = 0
 		}
 
-		if ctx.hovered_text_context != nil {
-			ctx.active_text_id = ctx.hovered_text_context.id
-		}
+		text_agent_on_mouse_down(&ctx.text_agent, .Left)
+	}
+
+	if mouse_down(.Left) {
+		text_agent_when_mouse_down(&ctx.text_agent)
 	}
 
 	if ctx.active_node != nil {
 		ctx.active_id = ctx.active_node.id
 	} else if mouse_released(.Left) {
 		ctx.active_id = 0
-		ctx.active_text_id = 0
+
+		text_agent_on_mouse_up(&ctx.text_agent)
 	}
 
 	// Receive mouse wheel input
@@ -1324,21 +1074,8 @@ begin :: proc() {
 	//
 	// Purge text
 	//
-	for &text, i in ctx.text_array {
-		if text.dead {
-			delete(text.glyphs)
-			delete(text.nodes)
-			delete_key(&ctx.text_map, text.id)
-			unordered_remove(&ctx.text_array, i)
-		} else {
-			text.dead = true
-			if text.id == ctx.active_text_id {
-				text_view_update_selection(&text, ctx)
-			}
-		}
-	}
+	text_agent_on_new_frame(&ctx.text_agent)
 
-	assert(len(ctx.text_stack) == 0)
 	assert(len(ctx.style_stack) == 0)
 	assert(len(ctx.node_stack) == 0)
 	clear(&ctx.roots)
@@ -1349,6 +1086,10 @@ end :: proc() {
 	ctx := global_ctx
 
 	ctx.frame_duration = time.since(ctx.frame_start_time)
+
+	if key_down(.Left_Control) && key_pressed(.C) {
+		set_clipboard(text_agent_get_selection_string(&ctx.text_agent))
+	}
 
 	// Compute performance averages
 	when ODIN_DEBUG {
@@ -1425,83 +1166,20 @@ ctx_solve_positions_and_draw :: proc(self: ^Context) {
 	}
 }
 
-text_view_update_selection :: proc(self: ^Text_View, ctx: ^Context) {
-	self.hover_index = -1
-
-	min_dist: f32 = INFINITY
-	glyph_index: int
-	for node, node_index in self.nodes {
-		line_height := node.font_size * node.font.line_height
-
-		for glyph in node.glyphs {
-			position := glyph.offset + node.text_origin + {0, line_height / 2}
-			dist := linalg.distance(position, ctx.mouse_position)
-
-			if dist < min_dist {
-				min_dist = dist
-				self.hover_index = glyph_index
-			}
-
-			glyph_index += 1
-		}
-
-		if len(node.glyphs) > 0 {
-			position := node.text_origin + {node.text_size.x, line_height / 2}
-			dist := linalg.distance(position, ctx.mouse_position)
-
-			if dist < min_dist {
-				min_dist = dist
-				self.hover_index = glyph_index
-			}
-		}
-	}
-
-	if ctx.last_active_text_id != ctx.active_text_id {
-		self.selection = self.hover_index
-	} else {
-		self.selection[1] = self.hover_index
-	}
+node_get_text_box :: proc(self: ^Node) -> Box {
+	return {self.text_origin, self.text_origin + self.text_size}
 }
 
-text_view_get_ordered_selection :: proc(self: ^Text_View) -> [2]int {
-	if self.selection[0] > self.selection[1] {
-		return self.selection.yx
+node_get_text_selection_box :: proc(self: ^Node) -> Box {
+	ordered_selection := text_view_get_ordered_selection(self.text_view)
+	indices := [2]int {
+		clamp(ordered_selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
+		clamp(ordered_selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
 	}
-	return self.selection
-}
-
-text_view_collect_range :: proc(self: ^Text_View, from, to: int, w: io.Writer) {
-	if from >= to {
-		return
+	return {
+		node_get_glyph_position(self, indices[0]),
+		node_get_glyph_position(self, indices[1]) + {0, self.font.line_height * self.font_size},
 	}
-
-	for node in self.nodes {
-		indices := [2]int {
-			clamp(from - node.text_byte_index, 0, len(node.text) - 1),
-			clamp(to - node.text_byte_index, 0, len(node.text) - 1),
-		}
-
-		if indices[0] == indices[1] {
-			continue
-		}
-
-		io.write_string(w, node.text[indices[0]:indices[1]])
-	}
-}
-
-text_view_get_string :: proc(self: ^Text_View, allocator := context.allocator) -> string {
-	selection := text_view_get_ordered_selection(self)
-
-	b := strings.builder_make(allocator = allocator)
-
-	text_view_collect_range(
-		self,
-		self.glyphs[selection[0]].index if selection[0] < len(self.glyphs) else self.byte_length,
-		self.glyphs[selection[1]].index if selection[1] < len(self.glyphs) else self.byte_length,
-		strings.to_writer(&b),
-	)
-
-	return strings.to_string(b)
 }
 
 node_update_scroll :: proc(self: ^Node) {
@@ -1780,850 +1458,6 @@ scrollbar_on_draw :: proc(self: ^Node) {
 
 focus_node :: proc(id: Id) {
 	global_ctx.focused_id = id
-}
-
-node_destroy :: proc(self: ^Node) {
-	delete(self.children)
-}
-
-node_update_input :: proc(self: ^Node) {
-	ctx := global_ctx
-
-	self.was_hovered = self.is_hovered
-	self.is_hovered = ctx.hovered_id == self.id
-
-	self.was_active = self.is_active
-	self.is_active = ctx.active_id == self.id
-
-	self.was_focused = self.is_focused
-	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
-
-	if self.is_hovered {
-		set_cursor(self.cursor)
-	}
-}
-
-node_update_propagated_input :: proc(self: ^Node) {
-	self.has_hovered_child = false
-	self.has_active_child = false
-
-	self.has_focused_child = self.will_have_focused_child
-	self.will_have_focused_child = false
-}
-
-node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
-	self.has_hovered_child |= child.is_hovered | child.has_hovered_child
-	self.has_active_child |= child.is_active | child.has_active_child
-	self.has_focused_child |= child.is_focused | child.has_focused_child
-	if self.inherit_state {
-		self.is_hovered |= self.has_hovered_child
-		self.is_active |= self.has_active_child
-		self.is_focused |= self.has_focused_child
-	}
-}
-
-node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
-	assert(depth < MAX_TREE_DEPTH)
-	node_update_propagated_input(self)
-	node_update_input(self)
-	for node in self.children {
-		node_propagate_input_recursively(node)
-		node_receive_propagated_input(self, node)
-	}
-	if self.owner != nil {
-		node_receive_propagated_input(self.owner, self)
-		self.owner.will_have_focused_child = self.has_focused_child | self.is_focused
-	}
-}
-
-node_on_new_frame :: proc(self: ^Node) {
-	ctx := global_ctx
-
-	// Clear arrays and reserve memory
-	reserve(&self.children, 16)
-	clear(&self.children)
-
-	if self.scale == {} {
-		self.scale = 1
-	}
-
-	// Keep alive this frame
-	self.is_dead = false
-
-	// Reset some state
-	self.content_size = 0
-
-	// Initialize string reader for text construction
-	string_reader: strings.Reader
-	reader: Maybe(io.Reader)
-	if len(self.text) > 0 {
-		reader = strings.to_reader(&string_reader, self.text)
-	}
-
-	// Perform text editing
-	// TODO: Implement up/down movement
-	/*
-	if self.enable_edit {
-		if self.editor.builder == nil {
-			self.editor.builder = &self.builder
-			self.editor.undo_text_allocator = context.allocator
-			self.editor.set_clipboard = ctx.on_set_clipboard
-			self.editor.get_clipboard = ctx.on_get_clipboard
-		}
-		if self.is_focused != self.was_focused {
-			strings.builder_reset(self.editor.builder)
-			strings.write_string(self.editor.builder, self.text)
-		}
-		if self.is_focused {
-			cmd: tedit.Command
-			control_down := key_down(.Left_Control) || key_down(.Right_Control)
-			shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
-			if control_down {
-				if key_pressed(.A) do cmd = .Select_All
-				if key_pressed(.C) do cmd = .Copy
-				if key_pressed(.V) do cmd = .Paste
-				if key_pressed(.X) do cmd = .Cut
-				if key_pressed(.Z) do cmd = .Undo
-				if key_pressed(.Y) do cmd = .Redo
-			}
-			if len(ctx.text_input) > 0 {
-				for char, c in ctx.text_input {
-					tedit.input_runes(&self.editor, {char})
-					draw_frames(1)
-					self.was_changed = true
-				}
-			}
-			if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
-			if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
-			if key_pressed(.Enter) {
-				cmd = .New_Line
-				if self.is_multiline {
-					if control_down {
-						self.was_confirmed = true
-					}
-				} else {
-					self.was_confirmed = true
-				}
-			}
-			if key_pressed(.Left) {
-				if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
-				else do cmd = .Word_Left if control_down else .Left
-			}
-			if key_pressed(.Right) {
-				if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
-				else do cmd = .Word_Right if control_down else .Right
-			}
-			if key_pressed(.Up) {
-				if shift_down do cmd = .Select_Up
-				else do cmd = .Up
-			}
-			if key_pressed(.Down) {
-				if shift_down do cmd = .Select_Down
-				else do cmd = .Down
-			}
-			if key_pressed(.Home) {
-				cmd = .Select_Line_Start if control_down else .Line_Start
-			}
-			if key_pressed(.End) {
-				cmd = .Select_Line_End if control_down else .Line_End
-			}
-			if !self.is_multiline && (cmd in tedit.MULTILINE_COMMANDS) {
-				cmd = .None
-			}
-			if cmd != .None {
-				tedit.editor_execute(&self.editor, cmd)
-				if cmd in tedit.EDIT_COMMANDS {
-					self.was_changed = true
-				}
-				draw_frames(1)
-			}
-			reader = strings.to_reader(&string_reader, strings.to_string(self.builder))
-		}
-	}
-	*/
-
-	// Assign a default font for safety
-	if self.style.font == nil {
-		self.style.font = &kn.DEFAULT_FONT
-		assert(self.style.font != nil)
-	}
-
-	// Create text layout
-	if reader, ok := reader.?; ok {
-		self.text_view = get_current_text() or_else panic("No text context initialized!")
-
-		self.text_size = 0
-		first_glyph := len(self.text_view.glyphs)
-		self.text_byte_index = self.text_view.byte_length
-
-		append(&self.text_view.nodes, self)
-
-		for {
-			char, length, err := io.read_rune(reader)
-
-			if err == .EOF {
-				break
-			}
-
-			if char == '\t' {
-				append(
-					&self.text_view.glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						offset = {self.text_size.x, 0},
-					},
-				)
-				self.text_size.x += self.font.space_advance * self.font_size * 2
-			} else if char == '\n' {
-				append(
-					&self.text_view.glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						offset = {self.text_size.x, 0},
-						glyph = {advance = self.font.space_advance},
-					},
-				)
-				self.text_size.x += self.font.space_advance * self.font_size
-			} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-				append(
-					&self.text_view.glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						glyph = glyph,
-						offset = {self.text_size.x, 0},
-					},
-				)
-				self.text_size.x += glyph.advance * self.font_size
-			} else {
-				for char in fmt.tprintf("<0x%x>", char) {
-					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-						append(
-							&self.text_view.glyphs,
-							Glyph {
-								node = self,
-								index = self.text_view.byte_length,
-								glyph = glyph,
-								offset = {self.text_size.x, 0},
-							},
-						)
-						self.text_size.x += glyph.advance * self.font_size
-					}
-				}
-			}
-
-			self.text_view.byte_length += length
-		}
-
-		self.text_size.x += f32(len(self.text_view.glyphs) - 1) * self.gap
-		self.text_size.y = self.font.line_height * self.font_size
-
-		self.glyphs = self.text_view.glyphs[first_glyph:]
-
-		self.content_size = linalg.max(self.content_size, self.text_size)
-	}
-
-	// Root
-	if self.parent == nil {
-		append(&ctx.roots, self)
-		//
-		return
-	}
-
-	// Child logic
-	append(&self.parent.children, self)
-}
-
-node_on_child_end :: proc(self: ^Node, child: ^Node) {
-	self.dirty |= child.dirty
-	// Propagate content size up the tree in reverse breadth-first
-	if self.wrapped {
-		self.content_size = linalg.max(self.content_size, child.size)
-	} else {
-		if self.vertical {
-			self.content_size.y += child.size.y
-			self.content_size.x = max(self.content_size.x, child.size.x)
-		} else {
-			self.content_size.x += child.size.x
-			self.content_size.y = max(self.content_size.y, child.size.y)
-		}
-	}
-}
-
-node_receive_input :: proc(self: ^Node, z_index: u32) -> (mouse_overlap: bool) {
-	ctx := global_ctx
-	if ctx.mouse_position.x >= self.box.lo.x &&
-	   ctx.mouse_position.x <= self.box.hi.x &&
-	   ctx.mouse_position.y >= self.box.lo.y &&
-	   ctx.mouse_position.y <= self.box.hi.y {
-		mouse_overlap = true
-		if self.interactive && !(ctx.hovered_node != nil && ctx.hovered_node.z_index > z_index) {
-			ctx.hovered_node = self
-			if node_is_scrollable(self) {
-				ctx.scrollable_node = self
-			}
-
-			if self.enable_selection && self.text_view != nil && len(self.glyphs) > 0 {
-				if point_in_box(
-					ctx.mouse_position,
-					{self.text_origin, self.text_origin + self.text_size},
-				) {
-					ctx.hovered_text_context = self.text_view
-				}
-			}
-		}
-	}
-	return
-}
-
-node_receive_input_recursive :: proc(self: ^Node, z_index: u32 = 0) {
-	z_index := z_index + self.z_index
-	if node_receive_input(self, z_index) {
-		for node in self.children {
-			node_receive_input_recursive(node, z_index)
-		}
-	}
-}
-
-node_solve_box :: proc(self: ^Node, offset: [2]f32) {
-	self.box.lo = offset + self.position
-	if bounds, ok := self.bounds.?; ok {
-		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
-	}
-	self.box.hi = self.box.lo + self.size
-	if global_ctx.snap_to_pixels {
-		box_snap(&self.box)
-	}
-}
-
-node_solve_box_recursively :: proc(
-	self: ^Node,
-	dirty: bool,
-	offset: [2]f32 = {},
-	clip_box: Box = {0, INFINITY},
-) {
-	if !dirty {
-		self.size = self.cached_size
-	}
-	self.cached_size = self.size
-
-	node_solve_box(self, offset)
-
-	clip_box := clip_box
-
-	if self.parent != nil {
-		clip := box_get_rounded_clip(
-			self.box,
-			clip_box,
-			max(
-				self.parent.radius.x,
-				max(self.parent.radius.y, max(self.parent.radius.z, self.parent.radius.w)),
-			),
-		)
-		self.parent.has_clipped_child |= clip != .None
-		self.is_clipped = clip == .Full
-		when ODIN_DEBUG {
-			global_ctx.drawn_nodes += int(!self.is_clipped)
-		}
-	}
-
-	clip_box = box_clamped(clip_box, self.box)
-
-	self.has_clipped_child = false
-	for node in self.children {
-		node_solve_box_recursively(node, dirty, self.box.lo - self.scroll, clip_box)
-	}
-}
-
-node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset: f32) {
-	i := int(self.vertical)
-	j := 1 - i
-
-	children := self.children[from:to]
-
-	growables := make(
-		[dynamic]^Node,
-		len = 0,
-		cap = len(children),
-		allocator = context.temp_allocator,
-	)
-
-	length: f32
-	for node in children {
-		length += node.size[i]
-		if node.grow[i] {
-			append(&growables, node)
-		}
-	}
-
-	length += self.gap * f32(len(children) - 1)
-
-	length_left := node_grow_children(
-		self,
-		&growables,
-		self.size[i] - self.padding[i] - self.padding[i + 2] - length,
-	)
-
-	spacing := (length_left / f32(len(children) - 1)) if self.justify_between else self.gap
-
-	offset: f32 = self.padding[i]
-
-	for node in children {
-		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
-
-		if node.grow[j] {
-			node.size[j] = span
-		}
-
-		node.position[j] =
-			self.padding[j] +
-			line_offset +
-			(span + self.overflow[j] - node.size[j]) * self.content_align[j]
-
-		offset += node.size[i] + spacing
-	}
-}
-
-node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
-	i := int(self.vertical)
-	j := 1 - i
-
-	offset: f32
-	max_offset := self.size[i] - self.padding[i] - self.padding[i + 2]
-	line_span: f32
-	line_start: int
-
-	content_size: [2]f32
-
-	for child, child_index in self.children {
-		if self.wrapped && offset + child.size[i] > max_offset {
-			node_solve_sizes_in_range(self, line_start, child_index, line_span, content_size[j])
-			line_start = child_index
-
-			content_size[i] = max(content_size[i], offset)
-			offset = 0
-			content_size[j] += line_span + self.gap
-			line_span = 0
-		}
-		line_span = max(line_span, child.size[j])
-		offset += child.size[i] + self.gap
-	}
-
-	if !self.wrapped {
-		line_span = self.size[j] - self.padding[j] - self.padding[j + 2]
-	}
-
-	node_solve_sizes_in_range(self, line_start, len(self.children), line_span, content_size[j])
-
-	content_size[j] += line_span + self.padding[j] + self.padding[j + 2]
-
-	// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
-	// if self.parent != nil && self.parent.vertical == self.vertical {
-	// 	line_offset = min(
-	// 		line_offset,
-	// 		self.parent.size[j] - self.parent.padding[j] - self.parent.padding[j + 2],
-	// 	)
-	// }
-
-	if self.wrapped && self.content_size != content_size {
-		self.content_size = content_size
-		self.size = linalg.max(self.size, self.content_size * self.fit)
-		needs_resolve = true
-	}
-
-	return
-}
-
-//
-// Expand all growable children and return the remaining space
-//
-node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> f32 {
-	length := length
-
-	i := int(self.vertical)
-
-	for length > 0 && len(array) > 0 {
-		// Get the smallest size along the layout axis, nodes of this size will be grown first
-		smallest := array[0].size[i]
-
-		// Until they reach this size
-		second_smallest := f32(math.F32_MAX)
-		size_to_add := length
-
-		for node in array {
-			if node.size[i] < smallest {
-				second_smallest = smallest
-				smallest = node.size[i]
-			}
-
-			if node.size[i] > smallest {
-				second_smallest = min(second_smallest, node.size[i])
-			}
-		}
-
-		// Compute the smallest size to add
-		size_to_add = min(second_smallest - smallest, length / f32(len(array)))
-
-		// Add that amount to every eligable child
-		for node, node_index in array {
-			if node.size[i] == smallest {
-				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
-
-				// Remove the node when it's done growing
-				if size_to_add <= 0 {
-					unordered_remove(array, node_index)
-					continue
-				}
-
-				// Grow the node
-				node.size[i] += size_to_add
-
-				// Add content size (this is important)
-				self.content_size[i] += size_to_add
-
-				// Decrease remaining space
-				length -= size_to_add
-			}
-		}
-	}
-
-	return length
-}
-
-//
-// Walks down the tree, calculating node sizes, wrapping contents and then propagating size changes back up the tree for an optional second pass
-//
-node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_resolve: bool) {
-	assert(depth < MAX_TREE_DEPTH)
-
-	needs_resolve = node_solve_sizes(self)
-
-	if self.wrapped {
-		for child in self.children {
-			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
-		}
-		if needs_resolve {
-			node_solve_sizes(self)
-		}
-	} else {
-		i := int(self.vertical)
-		j := 1 - i
-
-		content_size: [2]f32
-
-		for child in self.children {
-			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
-
-			content_size[i] += child.size[i]
-			content_size[j] = max(content_size[j], child.size[j])
-		}
-
-		content_size += self.padding.xy + self.padding.zw
-
-		content_size[i] += self.gap * f32(len(self.children) - 1)
-
-		if self.content_size != content_size {
-			self.content_size = content_size
-			self.size = linalg.max(self.size, self.content_size * self.fit)
-			self.overflow = linalg.max(self.content_size - self.size, 0)
-		}
-	}
-
-	return
-}
-
-//
-// Second pass
-//
-node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
-	assert(depth < MAX_TREE_DEPTH)
-
-	if self.wrapped {
-		return
-	}
-
-	node_solve_sizes_in_range(self, 0, len(self.children), node_get_content_span(self), 0)
-	self.overflow = linalg.max(self.content_size - self.size, 0)
-
-	for node in self.children {
-		node_solve_sizes_recursive(node, depth + 1)
-	}
-
-	return
-}
-
-node_get_content_span :: proc(self: ^Node) -> f32 {
-	if self.vertical {
-		return self.content_size.x - self.padding.x - self.padding.z
-	} else {
-		return self.content_size.y - self.padding.y - self.padding.w
-	}
-}
-
-node_is_scrollable :: proc(self: ^Node) -> bool {
-	return self.overflow != {}
-}
-
-node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Paint_Index {
-	switch v in self.style.background {
-	case kn.Color:
-		return kn.paint_index_from_option(v)
-	case Image_Paint:
-		size := box_size(self.box)
-		if source, ok := use_image(v.index); ok {
-			return kn.add_paint(
-				kn.make_atlas_sample(
-					source,
-					{self.box.lo + v.offset * size, self.box.lo + v.size * size},
-					kn.WHITE,
-				),
-			)
-		}
-	case Radial_Gradient:
-		return kn.add_paint(
-			kn.make_radial_gradient(
-				self.box.lo + v.center * self.size,
-				v.radius * max(self.size.x, self.size.y),
-				v.inner,
-				v.outer,
-			),
-		)
-	case Linear_Gradient:
-		return kn.add_paint(
-			kn.make_linear_gradient(
-				self.box.lo + v.points[0] * self.size,
-				self.box.lo + v.points[1] * self.size,
-				v.colors[0],
-				v.colors[1],
-			),
-		)
-	}
-	return 0
-}
-
-node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
-	assert(depth < MAX_TREE_DEPTH)
-
-	if self.is_clipped {
-		return
-	}
-
-	enable_scissor :=
-		self.clip_content &&
-		(self.has_clipped_child ||
-				max(self.overflow.x, self.overflow.y) > 0.1 ||
-				max(abs(self.scroll.x), abs(self.scroll.y)) > 0.1)
-
-	// Compute text selection state if enabled
-	// if self.enable_selection {
-	// 	cursor_box := text_get_cursor_box(&self.text_layout, text_origin)
-
-	// 	// Make sure to clip the cursor
-	// 	padded_box := node_get_padded_box(self)
-	// 	left := max(0, padded_box.lo.x - cursor_box.lo.x)
-	// 	top := max(0, padded_box.lo.y - cursor_box.lo.y)
-	// 	right := max(0, cursor_box.hi.x - padded_box.hi.x)
-	// 	bottom := max(0, cursor_box.hi.y - padded_box.hi.y)
-	// 	enable_scissor |= max(left, right) > 0
-	// 	enable_scissor |= max(top, bottom) > 0
-
-	// 	// Scroll to bring cursor into view
-	// 	if self.is_focused && self.editor.selection != self.last_selection {
-	// 		self.target_scroll.x += right - left
-	// 		self.target_scroll.y += bottom - top
-	// 	}
-	// }
-	//
-
-	z_index := z_index + self.z_index
-
-	// Is transformation necessary?
-	is_transformed :=
-		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
-
-	kn.set_draw_order(int(z_index))
-
-	// Perform transformations
-	if is_transformed {
-		transform_origin := self.box.lo + self.size * self.style.transform_origin
-		kn.push_matrix()
-		kn.translate(transform_origin)
-		kn.rotate(self.style.rotation)
-		kn.scale(self.style.scale)
-		kn.translate(-transform_origin + self.style.translate)
-	}
-
-	if self.shadow_color != {} {
-		kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
-	}
-
-	// Apply clipping
-	if enable_scissor {
-		kn.push_scissor(kn.make_box(self.box, self.style.radius))
-	}
-
-	// Draw self
-	if self.background != {} {
-		kn.add_box(
-			self.box,
-			self.style.radius,
-			paint = node_convert_paint_variant(self, self.background),
-		)
-	}
-	if self.style.foreground != nil && len(self.glyphs) > 0 {
-		self.text_origin =
-			linalg.lerp(
-				self.box.lo + self.padding.xy,
-				self.box.hi - self.padding.zw,
-				self.content_align,
-			) -
-			self.text_size * self.content_align -
-			self.scroll
-
-		paint := kn.paint_index_from_option(self.foreground)
-
-		for &glyph in self.glyphs {
-			kn.add_glyph(glyph, self.font_size, self.text_origin + glyph.offset, paint)
-		}
-
-		cursor_index := self.text_view.selection[1] - self.text_byte_index
-
-		if self.enable_selection {
-			line_height := self.font.line_height * self.font_size
-			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
-				top_left := node_get_glyph_position(self, cursor_index)
-				kn.add_box(
-					{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
-					paint = global_ctx.colors[.Selection_Background],
-				)
-			}
-			selection := [2]int {
-				clamp(self.text_view.selection[0] - self.text_byte_index, 0, len(self.glyphs)),
-				clamp(self.text_view.selection[1] - self.text_byte_index, 0, len(self.glyphs)),
-			}
-			ordered_selection := selection
-			if ordered_selection[0] != ordered_selection[1] {
-				if ordered_selection[0] > ordered_selection[1] {
-					ordered_selection = ordered_selection.yx
-				}
-				kn.add_box(
-					{
-						node_get_glyph_position(self, ordered_selection[0]),
-						node_get_glyph_position(self, ordered_selection[1]) +
-						{0, math.floor(line_height)},
-					},
-					paint = fade(global_ctx.colors[.Selection_Background], 0.5),
-				)
-			}
-		}
-	}
-
-	if self.on_draw != nil {
-		self.on_draw(self)
-	}
-
-	// Draw children
-	for node in self.children {
-		node_draw_recursive(node, z_index, depth + 1)
-	}
-
-	if enable_scissor {
-		kn.pop_scissor()
-	}
-
-	if self.style.stroke != nil {
-		kn.add_box_lines(
-			self.box,
-			self.style.stroke_width,
-			self.style.radius,
-			paint = self.style.stroke,
-			outline = kn.Shape_Outline(
-				int(self.style.stroke_type) + int(kn.Shape_Outline.Inner_Stroke),
-			),
-		)
-	}
-
-	if is_transformed {
-		kn.pop_matrix()
-	}
-
-	// Draw debug lines
-	if ODIN_DEBUG {
-		ctx := global_ctx
-		if ctx.inspector.inspected_id == self.id {
-			too_smol: bool
-			if self.parent != nil {
-				if box_width(self.box) == 0 {
-					too_smol = true
-					kn.add_box(
-						{
-							{self.parent.box.lo.x + self.parent.padding.x, self.box.lo.y},
-							{self.parent.box.hi.x - self.parent.padding.z, self.box.hi.y},
-						},
-						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-					)
-				}
-				if box_height(self.box) == 0 {
-					too_smol = true
-					kn.add_box(
-						{
-							{self.box.lo.x, self.parent.box.lo.y + self.parent.padding.y},
-							{self.box.hi.x, self.parent.box.hi.y - self.parent.padding.w},
-						},
-						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-					)
-				}
-			}
-			if !too_smol {
-				// box := Box{self.box.lo - self.scroll, {}}
-				// box.hi = box.lo + linalg.max(self.content_size, self.size)
-				// box.hi = box.lo + self.size
-				box := self.box
-				padding_paint := kn.paint_index_from_option(kn.fade(kn.SKY_BLUE, 0.5))
-				if self.padding.x > 0 {
-					kn.add_box(
-						box_clamped(box_cut_left(&box, self.padding.x), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.y > 0 {
-					kn.add_box(
-						box_clamped(box_cut_top(&box, self.padding.y), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.z > 0 {
-					kn.add_box(
-						box_clamped(box_cut_right(&box, self.padding.z), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.w > 0 {
-					kn.add_box(
-						box_clamped(box_cut_bottom(&box, self.padding.w), self.box),
-						paint = padding_paint,
-					)
-				}
-				kn.add_box(box_clamped(box, self.box), paint = kn.fade(kn.BLUE_VIOLET, 0.5))
-			}
-		}
-	}
-}
-
-node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
-	if index == 0 {
-		return linalg.floor(self.text_origin)
-	}
-	if index == len(self.glyphs) {
-		return linalg.floor(self.text_origin + {self.text_size.x, 0})
-	}
-	return linalg.floor(self.text_origin + self.glyphs[index].offset)
-}
-
-node_get_padded_box :: proc(self: ^Node) -> Box {
-	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
 }
 
 string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> string {
