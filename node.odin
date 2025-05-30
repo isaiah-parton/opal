@@ -328,7 +328,11 @@ node_update_scroll :: proc(self: ^Node) {
 	// Update and clamp scroll
 	self.target_scroll = linalg.clamp(self.target_scroll, 0, self.overflow)
 	previous_scroll := self.scroll
-	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(10)
+	self.scroll = linalg.clamp(
+		linalg.lerp(self.scroll, self.target_scroll, rate_per_second(10)),
+		0,
+		self.overflow,
+	)
 	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
 		draw_frames(1)
 	}
@@ -364,9 +368,10 @@ node_on_new_frame :: proc(self: ^Node) {
 		assert(self.style.font != nil)
 	}
 
+	self.text_view = get_current_text() or_else panic("No text context initialized!")
+
 	// Create text layout
 	if reader, ok := reader.?; ok {
-		self.text_view = get_current_text() or_else panic("No text context initialized!")
 
 		self.text_size = 0
 		self.text_glyph_index =
@@ -598,7 +603,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
 
 		if node.grow[j] {
-			node.size[j] = span
+			node.size[j] = min(span, node.max_size[j])
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
 
@@ -618,44 +623,56 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	offset: f32
 	max_offset := self.size[i] - self.padding[i] - self.padding[i + 2]
 	line_span: f32
-	line_start: int
 
-	content_size: [2]f32
+	if self.wrapped {
+		line_start: int
+		content_size: [2]f32
 
-	for child, child_index in self.children {
-		if self.wrapped && offset + child.size[i] > max_offset {
-			node_solve_sizes_in_range(self, line_start, child_index, line_span, content_size[j])
-			line_start = child_index
+		for child, child_index in self.children {
+			if offset + child.size[i] > max_offset {
+				node_solve_sizes_in_range(
+					self,
+					line_start,
+					child_index,
+					line_span,
+					content_size[j],
+				)
+				line_start = child_index
 
-			content_size[i] = max(content_size[i], offset)
-			offset = 0
-			content_size[j] += line_span + self.gap
-			line_span = 0
+				content_size[i] = max(content_size[i], offset)
+				offset = 0
+				content_size[j] += line_span + self.gap
+				line_span = 0
+			}
+			line_span = max(line_span, child.size[j])
+			offset += child.size[i] + self.gap
 		}
-		line_span = max(line_span, child.size[j])
-		offset += child.size[i] + self.gap
-	}
 
-	if !self.wrapped {
-		line_span = self.size[j] - self.padding[j] - self.padding[j + 2]
-	}
+		node_solve_sizes_in_range(self, line_start, len(self.children), line_span, content_size[j])
 
-	node_solve_sizes_in_range(self, line_start, len(self.children), line_span, content_size[j])
+		content_size[j] += line_span + self.padding[j] + self.padding[j + 2]
 
-	content_size[j] += line_span + self.padding[j] + self.padding[j + 2]
+		// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
+		// if self.parent != nil && self.parent.vertical == self.vertical {
+		// 	line_offset = min(
+		// 		line_offset,
+		// 		self.parent.size[j] - self.parent.padding[j] - self.parent.padding[j + 2],
+		// 	)
+		// }
 
-	// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
-	// if self.parent != nil && self.parent.vertical == self.vertical {
-	// 	line_offset = min(
-	// 		line_offset,
-	// 		self.parent.size[j] - self.parent.padding[j] - self.parent.padding[j + 2],
-	// 	)
-	// }
-
-	if self.wrapped && self.content_size != content_size {
-		self.content_size = content_size
-		self.size = linalg.max(self.size, self.content_size * self.fit)
-		needs_resolve = true
+		if self.wrapped && self.content_size != content_size {
+			self.content_size = content_size
+			self.size = linalg.max(self.size, self.content_size * self.fit)
+			needs_resolve = true
+		}
+	} else {
+		node_solve_sizes_in_range(
+			self,
+			0,
+			len(self.children),
+			self.size[j] - self.padding[j] - self.padding[j + 2],
+			0,
+		)
 	}
 
 	return
@@ -977,68 +994,6 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 	if is_transformed {
 		kn.pop_matrix()
-	}
-
-	// Draw debug lines
-	if ODIN_DEBUG {
-		ctx := global_ctx
-		if ctx.inspector.inspected_id == self.id {
-			too_smol: bool
-			if self.parent != nil {
-				if box_width(self.box) == 0 {
-					too_smol = true
-					kn.add_box(
-						{
-							{self.parent.box.lo.x + self.parent.padding.x, self.box.lo.y},
-							{self.parent.box.hi.x - self.parent.padding.z, self.box.hi.y},
-						},
-						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-					)
-				}
-				if box_height(self.box) == 0 {
-					too_smol = true
-					kn.add_box(
-						{
-							{self.box.lo.x, self.parent.box.lo.y + self.parent.padding.y},
-							{self.box.hi.x, self.parent.box.hi.y - self.parent.padding.w},
-						},
-						paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-					)
-				}
-			}
-			if !too_smol {
-				// box := Box{self.box.lo - self.scroll, {}}
-				// box.hi = box.lo + linalg.max(self.content_size, self.size)
-				// box.hi = box.lo + self.size
-				box := self.box
-				padding_paint := kn.paint_index_from_option(kn.fade(kn.SKY_BLUE, 0.5))
-				if self.padding.x > 0 {
-					kn.add_box(
-						box_clamped(box_cut_left(&box, self.padding.x), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.y > 0 {
-					kn.add_box(
-						box_clamped(box_cut_top(&box, self.padding.y), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.z > 0 {
-					kn.add_box(
-						box_clamped(box_cut_right(&box, self.padding.z), self.box),
-						paint = padding_paint,
-					)
-				}
-				if self.padding.w > 0 {
-					kn.add_box(
-						box_clamped(box_cut_bottom(&box, self.padding.w), self.box),
-						paint = padding_paint,
-					)
-				}
-				kn.add_box(box_clamped(box, self.box), paint = kn.fade(kn.BLUE_VIOLET, 0.5))
-			}
-		}
 	}
 }
 

@@ -43,10 +43,8 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 
 add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Field_Response) {
 	using opal
+	text_view := begin_text_view({id = hash_loc(loc), show_cursor = true}).?
 	cont_node := begin_node(desc).?
-	text_view := begin_text_view(
-		{id = cont_node.id, show_cursor = true, editing = cont_node.is_focused},
-	).?
 	{
 		text := fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
 
@@ -96,8 +94,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	}
 
-	end_text_view()
 	end_node()
+	end_text_view()
 
 	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
 	node_update_transition(cont_node, 1, cont_node.is_focused, 0.1)
@@ -253,3 +251,4 @@ field_output :: proc(
 
 	}
 	*/
+
