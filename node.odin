@@ -157,7 +157,7 @@ Node :: struct {
 	layout_children:         [dynamic]^Node `fmt:"-"`,
 
 	// A simple kill switch that causes the node to be discarded
-	is_dead:                 bool,
+	dead:                    bool,
 
 	// The node's size has changed and a sizing pass will be triggered
 	dirty:                   bool,
@@ -238,6 +238,22 @@ Node :: struct {
 	transitions:             [3]f32,
 }
 
+push_node :: proc(node: ^Node) {
+	ctx := global_ctx
+	append(&ctx.node_stack, node)
+	ctx.current_node = node
+}
+
+pop_node :: proc() {
+	ctx := global_ctx
+	pop(&ctx.node_stack)
+	if len(ctx.node_stack) == 0 {
+		ctx.current_node = nil
+		return
+	}
+	ctx.current_node = ctx.node_stack[len(ctx.node_stack) - 1]
+}
+
 node_destroy :: proc(self: ^Node) {
 	delete(self.children)
 }
@@ -304,7 +320,7 @@ node_on_new_frame :: proc(self: ^Node) {
 	}
 
 	// Keep alive this frame
-	self.is_dead = false
+	self.dead = false
 
 	// Reset some state
 	self.content_size = 0
@@ -333,7 +349,7 @@ node_on_new_frame :: proc(self: ^Node) {
 
 		if self.enable_selection {
 			append(&self.text_view.nodes, self)
-			append_string(&self.text_view.data, self.text)
+			strings.write_string(&self.text_view.builder, self.text)
 		}
 
 		glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
@@ -394,12 +410,14 @@ node_on_new_frame :: proc(self: ^Node) {
 				}
 			}
 
+			self.text_size.x += self.gap
+
 			if self.enable_selection {
 				self.text_view.byte_length += length
 			}
 		}
 
-		self.text_size.x += f32(len(glyphs) - 1 - self.text_glyph_index) * self.gap
+		self.text_size.x -= self.gap
 		self.text_size.y = self.font.line_height * self.font_size
 
 		self.glyphs = glyphs[self.text_glyph_index:]
@@ -466,9 +484,9 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
 	}
 	self.box.hi = self.box.lo + self.size
-	if global_ctx.snap_to_pixels {
-		box_snap(&self.box)
-	}
+	// if global_ctx.snap_to_pixels {
+	// 	box_snap(&self.box)
+	// }
 }
 
 node_solve_box_recursively :: proc(
@@ -555,7 +573,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 			line_offset +
 			(span + self.overflow[j] - node.size[j]) * self.content_align[j]
 
-		offset += math.floor(node.size[i] + spacing)
+		offset += node.size[i] + spacing
 	}
 }
 
@@ -577,7 +595,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 
 			content_size[i] = max(content_size[i], offset)
 			offset = 0
-			content_size[j] += math.floor(line_span + self.gap)
+			content_size[j] += line_span + self.gap
 			line_span = 0
 		}
 		line_span = max(line_span, child.size[j])
@@ -717,8 +735,8 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 		return
 	}
 
-	node_solve_sizes_in_range(self, 0, len(self.children), node_get_content_span(self), 0)
 	self.overflow = linalg.max(self.content_size - self.size, 0)
+	node_solve_sizes_in_range(self, 0, len(self.children), node_get_content_span(self), 0)
 
 	for node in self.children {
 		node_solve_sizes_recursive(node, depth + 1)
@@ -871,8 +889,7 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 				kn.add_box(
 					{
 						node_get_glyph_position(self, ordered_selection[0]),
-						node_get_glyph_position(self, ordered_selection[1]) +
-						{0, math.floor(line_height)},
+						node_get_glyph_position(self, ordered_selection[1]) + {0, line_height},
 					},
 					paint = paint,
 				)
@@ -887,7 +904,7 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 		cursor_index := self.text_view.selection[1] - self.text_byte_index
 
-		if self.enable_selection && self.text_view.active {
+		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
 				top_left := node_get_glyph_position(self, cursor_index)
 				kn.add_box(
@@ -992,15 +1009,14 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
 	if index == 0 {
-		return linalg.floor(self.text_origin)
+		return self.text_origin
 	}
 	if index == len(self.glyphs) {
-		return linalg.floor(self.text_origin + {self.text_size.x, 0})
+		return self.text_origin + {self.text_size.x, 0}
 	}
-	return linalg.floor(self.text_origin + self.glyphs[index].offset)
+	return self.text_origin + self.glyphs[index].offset
 }
 
 node_get_padded_box :: proc(self: ^Node) -> Box {
 	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
 }
-

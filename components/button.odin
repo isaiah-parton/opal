@@ -4,7 +4,7 @@ import ".."
 
 import tw "../tailwind_colors"
 
-do_button :: proc(label: union #no_nil {
+add_button :: proc(label: union #no_nil {
 		string,
 		rune,
 	}, font: ^opal.Font = nil, font_size: f32 = 12, radius: [4]f32 = 3, loc := #caller_location) -> bool {

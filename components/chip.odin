@@ -3,21 +3,24 @@ package components
 import ".."
 
 Chip_Descriptor :: struct {
-	selected: bool,
+	using base: opal.Node_Descriptor,
+	selected:   bool,
 }
 
-begin_chip :: proc(descriptor: ^Chip_Descriptor) -> opal.Node_Result {
+add_chip :: proc(text: string) -> opal.Node_Result {
 	using opal
-	return begin_node(
+	self := add_node(
 		&{
-			stroke       = theme.border_color,
-			stroke_width = 2,
-			padding      = 3,
-			gap          = 2,
-			// on_animate = proc(self: ^Node) {
-			// 	node_update_transition(self, 0, self.is_hovered, theme.animation_time)
-			// 	self.background = fade(theme.color.background, self.transitions[0])
-			// },
+			background = Color{255, 255, 255, 50},
+			stroke = theme.border_color,
+			stroke_width = 1,
+			padding = {12, 3, 12, 3},
+			fit = 1,
+			text = text,
+			font_size = 12,
+			foreground = Color{255, 255, 255, 255},
 		},
-	)
+	).?
+	self.radius = self.size.y / 2
+	return self
 }

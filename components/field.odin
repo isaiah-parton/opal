@@ -17,6 +17,11 @@ Field_Descriptor :: struct {
 	value_type_info: ^runtime.Type_Info,
 }
 
+Field_Response :: struct {
+	was_changed:   bool,
+	was_confirmed: bool,
+}
+
 make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Field_Descriptor {
 	return {
 		background = tw.NEUTRAL_950,
@@ -36,11 +41,15 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 	}
 }
 
-add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
+add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Field_Response) {
 	using opal
-	self := begin_node(desc).?
+	cont_node := begin_node(desc).?
+	text_view := begin_text_view(
+		{id = cont_node.id, show_cursor = true, editing = cont_node.is_focused},
+	).?
 	{
 		text := fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
+
 		if desc.placeholder != "" && len(text) == 0 {
 			push_id(hash(loc))
 			add_node(
@@ -54,8 +63,10 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 			)
 			pop_id()
 		}
-		begin_text(self.id)
+
+
 		j := 1
+
 		for len(text) > 0 {
 			i := strings.index_byte(text, ' ')
 			if i == -1 {
@@ -63,6 +74,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 			} else {
 				i += 1
 			}
+
 			push_id(j)
 			add_node(
 				&{
@@ -77,19 +89,93 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) {
 				},
 			)
 			pop_id()
+
 			j += 1
 			text = text[i:]
 		}
-		end_text()
+
 	}
+
+	end_text_view()
 	end_node()
-	node_update_transition(self, 0, self.is_hovered, 0.1)
-	node_update_transition(self, 1, self.is_focused, 0.1)
-	self.style.stroke = tw.LIME_500
-	self.style.stroke_width = 3 * self.transitions[1]
-	// if self.was_changed {
-	// 	field_output(desc.value_data, desc.value_type_info, strings.to_string(self.builder))
-	// }
+
+	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
+	node_update_transition(cont_node, 1, cont_node.is_focused, 0.1)
+	cont_node.style.stroke = tw.LIME_500
+	cont_node.style.stroke_width = 3 * cont_node.transitions[1]
+
+	ctx := global_ctx
+
+	if cont_node.is_focused {
+		cmd: Command
+		control_down := key_down(.Left_Control) || key_down(.Right_Control)
+		shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
+		if control_down {
+			if key_pressed(.A) do cmd = .Select_All
+			if key_pressed(.C) do cmd = .Copy
+			if key_pressed(.V) do cmd = .Paste
+			if key_pressed(.X) do cmd = .Cut
+			if key_pressed(.Z) do cmd = .Undo
+			if key_pressed(.Y) do cmd = .Redo
+		}
+		if len(ctx.text_input) > 0 {
+			for char, c in ctx.text_input {
+				text_view_insert_runes(text_view, {char})
+				draw_frames(1)
+				res.was_changed = true
+			}
+		}
+		if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
+		if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
+		if key_pressed(.Enter) {
+			cmd = .New_Line
+			// if self.is_multiline {
+			// 	if control_down {
+			// 		res.was_confirmed = true
+			// 	}
+			// } else {
+			// 	res.was_confirmed = true
+			// }
+		}
+		if key_pressed(.Left) {
+			if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
+			else do cmd = .Word_Left if control_down else .Left
+		}
+		if key_pressed(.Right) {
+			if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
+			else do cmd = .Word_Right if control_down else .Right
+		}
+		if key_pressed(.Up) {
+			if shift_down do cmd = .Select_Up
+			else do cmd = .Up
+		}
+		if key_pressed(.Down) {
+			if shift_down do cmd = .Select_Down
+			else do cmd = .Down
+		}
+		if key_pressed(.Home) {
+			cmd = .Select_Line_Start if control_down else .Line_Start
+		}
+		if key_pressed(.End) {
+			cmd = .Select_Line_End if control_down else .Line_End
+		}
+		// if !self.is_multiline && (cmd in MULTILINE_COMMANDS) {
+		// 	cmd = .None
+		// }
+		if cmd != .None {
+			text_view_execute(text_view, cmd)
+			if cmd in EDIT_COMMANDS {
+				res.was_changed = true
+			}
+			draw_frames(1)
+		}
+	}
+
+	if res.was_changed {
+		field_output(desc.value_data, desc.value_type_info, strings.to_string(text_view.builder))
+	}
+
+	return
 }
 
 field_output :: proc(
@@ -164,81 +250,6 @@ field_output :: proc(
 // TODO: Implement up/down movement
 /*
 	if self.enable_edit {
-		if self.editor.builder == nil {
-			self.editor.builder = &self.builder
-			self.editor.undo_text_allocator = context.allocator
-			self.editor.set_clipboard = ctx.on_set_clipboard
-			self.editor.get_clipboard = ctx.on_get_clipboard
-		}
-		if self.is_focused != self.was_focused {
-			strings.builder_reset(self.editor.builder)
-			strings.write_string(self.editor.builder, self.text)
-		}
-		if self.is_focused {
-			cmd: tedit.Command
-			control_down := key_down(.Left_Control) || key_down(.Right_Control)
-			shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
-			if control_down {
-				if key_pressed(.A) do cmd = .Select_All
-				if key_pressed(.C) do cmd = .Copy
-				if key_pressed(.V) do cmd = .Paste
-				if key_pressed(.X) do cmd = .Cut
-				if key_pressed(.Z) do cmd = .Undo
-				if key_pressed(.Y) do cmd = .Redo
-			}
-			if len(ctx.text_input) > 0 {
-				for char, c in ctx.text_input {
-					tedit.input_runes(&self.editor, {char})
-					draw_frames(1)
-					self.was_changed = true
-				}
-			}
-			if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
-			if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
-			if key_pressed(.Enter) {
-				cmd = .New_Line
-				if self.is_multiline {
-					if control_down {
-						self.was_confirmed = true
-					}
-				} else {
-					self.was_confirmed = true
-				}
-			}
-			if key_pressed(.Left) {
-				if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
-				else do cmd = .Word_Left if control_down else .Left
-			}
-			if key_pressed(.Right) {
-				if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
-				else do cmd = .Word_Right if control_down else .Right
-			}
-			if key_pressed(.Up) {
-				if shift_down do cmd = .Select_Up
-				else do cmd = .Up
-			}
-			if key_pressed(.Down) {
-				if shift_down do cmd = .Select_Down
-				else do cmd = .Down
-			}
-			if key_pressed(.Home) {
-				cmd = .Select_Line_Start if control_down else .Line_Start
-			}
-			if key_pressed(.End) {
-				cmd = .Select_Line_End if control_down else .Line_End
-			}
-			if !self.is_multiline && (cmd in tedit.MULTILINE_COMMANDS) {
-				cmd = .None
-			}
-			if cmd != .None {
-				tedit.editor_execute(&self.editor, cmd)
-				if cmd in tedit.EDIT_COMMANDS {
-					self.was_changed = true
-				}
-				draw_frames(1)
-			}
-			reader = strings.to_reader(&string_reader, strings.to_string(self.builder))
-		}
+
 	}
 	*/
-

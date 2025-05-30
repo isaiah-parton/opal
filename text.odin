@@ -7,60 +7,369 @@ import "core:math/linalg"
 import "core:strings"
 import "core:time"
 import "core:unicode"
+import "core:unicode/utf8"
+
+Command_Set :: distinct bit_set[Command;u32]
+
+Command :: enum u32 {
+	None,
+	Undo,
+	Redo,
+	New_Line, // multi-lines
+	Cut,
+	Copy,
+	Paste,
+	Select_All,
+	Backspace,
+	Delete,
+	Delete_Word_Left,
+	Delete_Word_Right,
+	Left,
+	Right,
+	Up, // multi-lines
+	Down, // multi-lines
+	Word_Left,
+	Word_Right,
+	Start,
+	End,
+	Line_Start,
+	Line_End,
+	Select_Left,
+	Select_Right,
+	Select_Up, // multi-lines
+	Select_Down, // multi-lines
+	Select_Word_Left,
+	Select_Word_Right,
+	Select_Start,
+	Select_End,
+	Select_Line_Start,
+	Select_Line_End,
+}
+
+MULTILINE_COMMANDS :: Command_Set{.New_Line, .Up, .Down, .Select_Up, .Select_Down}
+EDIT_COMMANDS :: Command_Set {
+	.New_Line,
+	.Delete,
+	.Delete_Word_Left,
+	.Delete_Word_Right,
+	.Backspace,
+	.Cut,
+	.Paste,
+	.Undo,
+	.Redo,
+}
+
+Translation :: enum u32 {
+	Start,
+	End,
+	Left,
+	Right,
+	Up,
+	Down,
+	Word_Left,
+	Word_Right,
+	Word_Start,
+	Word_End,
+	Soft_Line_Start,
+	Soft_Line_End,
+}
 
 //
-// An abstraction that manages multiple nodes with text content.
+// Text selection is functional at least for ASCII, just figure out a solution for a more acceptable visual representation of selection
+//
+
+//
+Text_View_Descriptor :: struct {
+	id:          Id,
+	show_cursor: bool,
+	editing:     bool,
+}
+
+//
+// A 'view' of a bunch of text in the UI. An abstraction that manages multiple nodes with text content.
 //
 // Any interactive node with text will be included in only the top text on the stack at the time.
 //
 Text_View :: struct {
-	// Identifier
-	id:          Id,
+	using desc:       Text_View_Descriptor,
 
 	// Text length in bytes
-	byte_length: int,
+	byte_length:      int,
 
 	// Hovered glyph index
-	hover_index: int,
+	hover_index:      int,
 
 	// Selection in glyph indices
-	selection:   [2]int,
+	selection:        [2]int,
 
 	// Anchor for word selection
-	anchor:      int,
+	anchor:           int,
 
 	// Interactive nodes with text
-	nodes:       [dynamic]^Node,
+	nodes:            [dynamic]^Node,
 
 	// All glyphs, interactive or not
-	glyphs:      [dynamic]Glyph,
+	glyphs:           [dynamic]Glyph,
 
 	// Text
-	data:        [dynamic]u8,
+	builder:          strings.Builder,
+
+	// Active text container node
+	active_container: Id,
 
 	// Active
-	active:      bool,
+	active:           bool,
 
 	// Kill flag
-	dead:        bool,
+	dead:             bool,
+}
+
+text_view_translate :: proc(self: ^Text_View, pos: int, t: Translation) -> int {
+	is_continuation_byte :: proc(b: byte) -> bool {
+		return b >= 0x80 && b < 0xc0
+	}
+
+	is_space :: proc(b: byte) -> bool {
+		return b == ' ' || b == '\t' || b == '\n'
+	}
+
+	buf := self.builder.buf[:]
+
+	pos := pos
+	pos = clamp(pos, 0, len(buf))
+
+	switch t {
+	case .Start:
+		pos = 0
+	case .End:
+		pos = len(buf)
+	case .Left:
+		pos -= 1
+		for pos >= 0 && is_continuation_byte(buf[pos]) {
+			pos -= 1
+		}
+	case .Right:
+		pos += 1
+		for pos < len(buf) && is_continuation_byte(buf[pos]) {
+			pos += 1
+		}
+	case .Up:
+	// pos = self.up_index
+	case .Down:
+	// pos = self.down_index
+	case .Word_Left:
+		for pos > 0 && is_space(buf[pos - 1]) {
+			pos -= 1
+		}
+		for pos > 0 && !is_space(buf[pos - 1]) {
+			pos -= 1
+		}
+	case .Word_Right:
+		for pos < len(buf) && !is_space(buf[pos]) {
+			pos += 1
+		}
+		for pos < len(buf) && is_space(buf[pos]) {
+			pos += 1
+		}
+	case .Word_Start:
+		for pos > 0 && !is_space(buf[pos - 1]) {
+			pos -= 1
+		}
+	case .Word_End:
+		for pos < len(buf) && !is_space(buf[pos]) {
+			pos += 1
+		}
+	case .Soft_Line_Start:
+	// pos = self.line_start
+	case .Soft_Line_End:
+	// pos = self.line_end
+	}
+	return clamp(pos, 0, len(buf))
+}
+
+text_view_move_to :: proc(self: ^Text_View, t: Translation) {
+	if t == .Left && text_view_has_selection(self) {
+		selection := text_view_get_ordered_selection(self)
+		self.selection = selection[0]
+	} else if t == .Right && text_view_has_selection(self) {
+		selection := text_view_get_ordered_selection(self)
+		self.selection = selection[1]
+	} else {
+		pos := text_view_translate(self, self.selection[0], t)
+		self.selection = {pos, pos}
+	}
+}
+
+text_view_select_to :: proc(self: ^Text_View, t: Translation) {
+	self.selection[1] = text_view_translate(self, self.selection[1], t)
+}
+
+text_view_delete_to :: proc(self: ^Text_View, t: Translation) {
+	if text_view_has_selection(self) {
+		text_view_delete_selection(self)
+	} else {
+		lo := self.selection[0]
+		hi := text_view_translate(self, lo, t)
+		lo, hi = min(lo, hi), max(lo, hi)
+		remove_range(&self.builder.buf, lo, hi)
+		self.selection = {lo, lo}
+	}
+}
+
+text_view_delete_selection :: proc(self: ^Text_View) {
+	selection := text_view_get_ordered_selection(self)
+	remove_range(&self.builder.buf, selection[0], selection[1])
+	self.selection = selection[0]
+}
+
+text_view_cut :: proc(self: ^Text_View) -> bool {
+	if text_view_copy_to_clipboard(self) {
+		lo, hi :=
+			min(self.selection[0], self.selection[1]), max(self.selection[0], self.selection[1])
+		text_view_delete_selection(self)
+		return true
+	}
+	return false
+}
+
+text_view_copy_to_clipboard :: proc(self: ^Text_View) -> bool {
+	set_clipboard(text_view_get_selection_string(self))
+	return true
+}
+
+text_view_paste_from_clipboard :: proc(self: ^Text_View) -> bool {
+	assert(global_ctx.on_get_clipboard != nil)
+	str := global_ctx.on_get_clipboard(global_ctx.callback_data) or_return
+	a: bool
+	str, a = strings.replace_all(str, "\t", " ") // this should never allocate
+	text_view_insert(self, str)
+	if a {
+		delete(str)
+	}
+	return true
+}
+
+text_view_has_selection :: proc(self: ^Text_View) -> bool {
+	return self.selection[0] != self.selection[1]
+}
+
+text_view_insert_runes :: proc(self: ^Text_View, runes: []rune) {
+	if text_view_has_selection(self) {
+		text_view_delete_selection(self)
+	}
+	offset := self.selection[0]
+	for r in runes {
+		b, w := utf8.encode_rune(r)
+		text := string(b[:w])
+		inject_at(&self.builder.buf, offset, text)
+		offset += w
+	}
+	self.selection = {offset, offset}
+}
+
+text_view_insert :: proc(self: ^Text_View, data: string) {
+	if text_view_has_selection(self) {
+		text_view_delete_selection(self)
+	}
+	inject_at(&self.builder.buf, self.selection[0], data)
+	self.selection += len(data)
+}
+
+text_view_execute :: proc(self: ^Text_View, cmd: Command) {
+	switch cmd {
+	case .None: /**/
+	case .Undo:
+	// editor_undo(self, &self.undo, &self.redo)
+	case .Redo:
+	// editor_undo(self, &self.redo, &self.undo)
+	case .New_Line:
+		text_view_insert_runes(self, {'\n'})
+	case .Cut:
+		text_view_cut(self)
+	case .Copy:
+		text_view_copy_to_clipboard(self)
+	case .Paste:
+		text_view_paste_from_clipboard(self)
+	case .Select_All:
+		self.selection = {len(self.builder.buf), 0}
+	case .Backspace:
+		text_view_delete_to(self, .Left)
+	case .Delete:
+		text_view_delete_to(self, .Right)
+	case .Delete_Word_Left:
+		text_view_delete_to(self, .Word_Left)
+	case .Delete_Word_Right:
+		text_view_delete_to(self, .Word_Right)
+	case .Left:
+		text_view_move_to(self, .Left)
+	case .Right:
+		text_view_move_to(self, .Right)
+	case .Up:
+		text_view_move_to(self, .Up)
+	case .Down:
+		text_view_move_to(self, .Down)
+	case .Word_Left:
+		text_view_move_to(self, .Word_Left)
+	case .Word_Right:
+		text_view_move_to(self, .Word_Right)
+	case .Start:
+		text_view_move_to(self, .Start)
+	case .End:
+		text_view_move_to(self, .End)
+	case .Line_Start:
+		text_view_move_to(self, .Soft_Line_Start)
+	case .Line_End:
+		text_view_move_to(self, .Soft_Line_End)
+	case .Select_Left:
+		text_view_select_to(self, .Left)
+	case .Select_Right:
+		text_view_select_to(self, .Right)
+	case .Select_Up:
+		text_view_select_to(self, .Up)
+	case .Select_Down:
+		text_view_select_to(self, .Down)
+	case .Select_Word_Left:
+		text_view_select_to(self, .Word_Left)
+	case .Select_Word_Right:
+		text_view_select_to(self, .Word_Right)
+	case .Select_Start:
+		text_view_select_to(self, .Start)
+	case .Select_End:
+		text_view_select_to(self, .End)
+	case .Select_Line_Start:
+		text_view_select_to(self, .Soft_Line_Start)
+	case .Select_Line_End:
+		text_view_select_to(self, .Soft_Line_End)
+	}
 }
 
 text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
-	self.hover_index = -1
-
 	min_dist: [2]f32 = INFINITY
 	closest_y: f32
 
+	text_view_validate_selection_candidate :: proc(self: ^Text_View, node: ^Node) -> bool {
+		return(
+			(node.parent != nil &&
+				(node.parent.is_hovered || self.active_container == node.parent.id)) ||
+			node.is_hovered \
+		)
+	}
+
 	for node in self.nodes {
+		if !text_view_validate_selection_candidate(self, node) {
+			continue
+		}
+
 		dist_y := abs((node.text_origin.y + node.text_size.y / 2) - mouse_position.y)
+
 		if dist_y < min_dist.y {
 			min_dist.y = dist_y
 			closest_y = node.text_origin.y
 		}
 	}
 
-	for node, node_index in self.nodes {
-		if node.text_origin.y != closest_y {
+	for node in self.nodes {
+		if !text_view_validate_selection_candidate(self, node) || node.text_origin.y != closest_y {
 			continue
 		}
 
@@ -70,6 +379,7 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 			if dist < min_dist.x {
 				min_dist.x = dist
 				self.hover_index = glyph_index + node.text_glyph_index
+				self.active_container = node.parent.id if node.parent != nil else 0
 			}
 		}
 
@@ -79,6 +389,7 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 			if dist < min_dist.x {
 				min_dist.x = dist
 				self.hover_index = len(node.glyphs) + node.text_glyph_index
+				self.active_container = node.parent.id if node.parent != nil else 0
 			}
 		}
 	}
@@ -95,20 +406,23 @@ text_view_when_mouse_down :: proc(self: ^Text_View, index: int) {
 		return !unicode.is_alpha(r) && !unicode.is_number(r)
 	}
 
-	data := string(self.data[:])
+	data := strings.to_string(self.builder)
 
 	last_selection := self.selection
-	switch index {
 
+	switch index {
 	case 0:
 		self.selection[1] = self.hover_index
 
 	case 1:
 		allow_precision := self.hover_index != self.selection[0]
+
 		if self.hover_index < self.anchor {
 			self.selection[1] =
 				self.hover_index if (allow_precision && is_separator(rune(data[self.hover_index]))) else max(0, strings.last_index_proc(data[:min(self.hover_index, len(data))], is_separator) + 1)
+
 			self.selection[0] = strings.index_proc(data[self.anchor:], is_separator)
+
 			if self.selection[0] == -1 {
 				self.selection[0] = len(data)
 			} else {
@@ -119,8 +433,10 @@ text_view_when_mouse_down :: proc(self: ^Text_View, index: int) {
 				0,
 				strings.last_index_proc(data[:self.anchor], is_separator) + 1,
 			)
+
 			self.selection[1] =
 				0 if (allow_precision && is_separator(rune(data[self.hover_index - 1]))) else strings.index_proc(data[self.hover_index:], is_separator)
+
 			if self.selection[1] == -1 {
 				self.selection[1] = len(data)
 			} else {
@@ -266,18 +582,19 @@ Text_Agent :: struct {
 	focused_view:      ^Text_View,
 }
 
-text_agent_begin_view :: proc(self: ^Text_Agent, id: Id) -> Maybe(^Text_View) {
-	text, ok := self.dict[id]
+text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> Maybe(^Text_View) {
+	text, ok := self.dict[desc.id]
 	if !ok {
-		append(&self.array, Text_View{id = id})
+		append(&self.array, Text_View{desc = desc})
 		text = &self.array[len(self.array) - 1]
-		self.dict[id] = text
+		self.dict[desc.id] = text
 	}
 	append(&self.stack, text)
 
 	text.byte_length = 0
 	text.dead = false
-	clear(&text.data)
+
+	strings.builder_reset(&text.builder)
 	clear(&text.glyphs)
 	clear(&text.nodes)
 
@@ -356,4 +673,3 @@ text_agent_get_selection_string :: proc(self: ^Text_Agent) -> string {
 	}
 	return ""
 }
-

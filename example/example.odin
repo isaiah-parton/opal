@@ -133,6 +133,8 @@ main :: proc() {
 					},
 				).?
 				{
+					add_button("Button 1")
+					add_chip("Chip")
 					begin_node(
 						&{
 							fit          = 1,
@@ -151,13 +153,14 @@ main :: proc() {
 						do_text(
 							&{
 								grow = {true, true},
-								max_size = INFINITY,
-								min_size = {300, 0},
-								fit = {1, 1},
+								max_size = {300, 300},
+								min_size = {100, 0},
 								stroke = TEXT_STROKE_COLOR,
 								stroke_width = 2,
 								radius = 5,
 								padding = 10,
+								interactive = true,
+								clip_content = true,
 							},
 							FILLER_TEXT,
 							14,
@@ -410,4 +413,3 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
 	}
 }
-
