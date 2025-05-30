@@ -947,12 +947,6 @@ begin :: proc() {
 	}
 	ctx.queued_frames = max(0, ctx.queued_frames - 1)
 
-	// Update durations
-	if ctx.interval_start_time != {} {
-		ctx.interval_duration = time.since(ctx.interval_start_time)
-	}
-	ctx.interval_start_time = time.now()
-
 	// Initial frame interval
 	frame_interval := ctx.frame_interval
 
@@ -961,8 +955,16 @@ begin :: proc() {
 		frame_interval = time.Second / 20
 	}
 
+	// Update durations
+	if ctx.interval_start_time != {} {
+		ctx.interval_duration = time.since(ctx.interval_start_time)
+	}
+	ctx.interval_start_time = time.now()
+
 	// Sleep to limit framerate
-	time.sleep(max(0, frame_interval - ctx.frame_duration))
+	if ctx.interval_duration < frame_interval {
+		sdl3.DelayNS(u64(frame_interval - ctx.interval_duration))
+	}
 
 	ctx.frame_start_time = time.now()
 
@@ -1170,32 +1172,6 @@ ctx_solve_positions_and_draw :: proc(self: ^Context) {
 
 	for root in self.roots {
 		node_draw_recursive(root)
-	}
-}
-
-node_get_text_box :: proc(self: ^Node) -> Box {
-	return {self.text_origin, self.text_origin + self.text_size}
-}
-
-node_get_text_selection_box :: proc(self: ^Node) -> Box {
-	ordered_selection := text_view_get_ordered_selection(self.text_view)
-	indices := [2]int {
-		clamp(ordered_selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
-		clamp(ordered_selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
-	}
-	return {
-		node_get_glyph_position(self, indices[0]),
-		node_get_glyph_position(self, indices[1]) + {0, self.font.line_height * self.font_size},
-	}
-}
-
-node_update_scroll :: proc(self: ^Node) {
-	// Update and clamp scroll
-	self.target_scroll = linalg.clamp(self.target_scroll, 0, self.overflow)
-	previous_scroll := self.scroll
-	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(10)
-	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
-		draw_frames(1)
 	}
 }
 
@@ -1457,3 +1433,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

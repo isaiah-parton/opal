@@ -308,6 +308,32 @@ node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
 	}
 }
 
+node_get_text_box :: proc(self: ^Node) -> Box {
+	return {self.text_origin, self.text_origin + self.text_size}
+}
+
+node_get_text_selection_box :: proc(self: ^Node) -> Box {
+	ordered_selection := text_view_get_ordered_selection(self.text_view)
+	indices := [2]int {
+		clamp(ordered_selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
+		clamp(ordered_selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
+	}
+	return {
+		node_get_glyph_position(self, indices[0]),
+		node_get_glyph_position(self, indices[1]) + {0, self.font.line_height * self.font_size},
+	}
+}
+
+node_update_scroll :: proc(self: ^Node) {
+	// Update and clamp scroll
+	self.target_scroll = linalg.clamp(self.target_scroll, 0, self.overflow)
+	previous_scroll := self.scroll
+	self.scroll += (self.target_scroll - self.scroll) * rate_per_second(10)
+	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
+		draw_frames(1)
+	}
+}
+
 node_on_new_frame :: proc(self: ^Node) {
 	ctx := global_ctx
 
@@ -528,6 +554,13 @@ node_solve_box_recursively :: proc(
 	}
 }
 
+//
+// Layout section
+//
+
+//
+// Solve one continuous extent of children along an axis
+//
 node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset: f32) {
 	i := int(self.vertical)
 	j := 1 - i
@@ -566,6 +599,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 		if node.grow[j] {
 			node.size[j] = span
+			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
 
 		node.position[j] =
@@ -718,9 +752,10 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 		if self.content_size != content_size {
 			self.content_size = content_size
 			self.size = linalg.max(self.size, self.content_size * self.fit)
-			self.overflow = linalg.max(self.content_size - self.size, 0)
 		}
 	}
+
+	self.overflow = linalg.max(self.content_size - self.size, 0)
 
 	return
 }
@@ -735,7 +770,7 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 		return
 	}
 
-	self.overflow = linalg.max(self.content_size - self.size, 0)
+	// self.overflow = linalg.max(self.content_size - self.size, 0)
 	node_solve_sizes_in_range(self, 0, len(self.children), node_get_content_span(self), 0)
 
 	for node in self.children {
@@ -1020,3 +1055,4 @@ node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
 node_get_padded_box :: proc(self: ^Node) -> Box {
 	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
 }
+

@@ -241,10 +241,14 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	display_mode := sdl3.GetCurrentDisplayMode(display_id)
 
 	// TODO: Add a setter proc to opal
-	ctx.frame_interval = max(
-		time.Duration(f32(time.Second) / display_mode.refresh_rate),
-		app.min_frame_interval,
-	)
+	if app.vsync {
+		ctx.frame_interval = 0
+	} else {
+		ctx.frame_interval = max(
+			time.Duration(f32(time.Second) / display_mode.refresh_rate),
+			app.min_frame_interval,
+		)
+	}
 
 	if !app.run {
 		return .SUCCESS
@@ -327,3 +331,4 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
+

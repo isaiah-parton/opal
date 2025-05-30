@@ -24,6 +24,7 @@ My_App :: struct {
 	using app:             sdl3app.App,
 	image:                 int,
 	edited_text:           string,
+	edited_number:         f32,
 	drag_offset:           [2]f32,
 	inspector_position:    [2]f32,
 	is_dragging_inspector: bool,
@@ -154,7 +155,7 @@ main :: proc() {
 							&{
 								grow = {true, true},
 								max_size = {300, 300},
-								min_size = {100, 0},
+								min_size = {100, 150},
 								stroke = TEXT_STROKE_COLOR,
 								stroke_width = 2,
 								radius = 5,
@@ -169,7 +170,7 @@ main :: proc() {
 						)
 						do_text(
 							&{
-								grow = {true, true},
+								grow = {true, false},
 								max_size = INFINITY,
 								min_size = {300, 0},
 								fit = {1, 1},
@@ -241,12 +242,12 @@ main :: proc() {
 
 	sdl3app.run(
 		&{
-			width = 1000,
-			height = 800,
-			min_width = 500,
-			min_height = 400,
-			customize_window = true,
-			vsync = true,
+			width              = 1000,
+			height             = 800,
+			min_width          = 500,
+			min_height         = 400,
+			customize_window   = true,
+			// vsync = true,
 			min_frame_interval = time.Second / 120,
 		},
 	)
@@ -361,8 +362,8 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			desc.grow = {true, false}
 			desc.max_size = {INFINITY, 0}
 			desc.placeholder = "Once upon a time..."
-			desc.value_data = &app.edited_text
-			desc.value_type_info = type_info_of(string)
+			desc.value_data = &app.edited_number
+			desc.value_type_info = type_info_of(f32)
 			desc.wrapped = true
 			// Then add the node to the UI and perform the input logic
 			add_field(&desc)
@@ -413,3 +414,4 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		self.style.background = fade(tw.NEUTRAL_700, self.transitions[0])
 	}
 }
+

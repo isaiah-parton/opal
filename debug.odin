@@ -130,7 +130,7 @@ inspector_show :: proc(self: ^Inspector) {
 				text = fmt.tprint(any{data = data, id = type_info.id})
 			}
 		case (runtime.Type_Info_Pointer):
-			text = fmt.tprint((^rawptr)(data)^)
+			text = fmt.tprint(any{data = data, id = typeid_of(rawptr)})
 		case:
 			text = fmt.tprint(any{data = data, id = type_info.id})
 		}
@@ -321,3 +321,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+
