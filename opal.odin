@@ -1210,10 +1210,8 @@ ctx_solve_sizes :: proc(self: ^Context) {
 	for root in self.layout_roots {
 		if root.absolute {
 			assert(root.layout_parent != nil)
-			if root.layout_parent.dirty {
-				root.size += root.layout_parent.size * root.relative_size
-				root.dirty = true
-			}
+			root.dirty |= root.layout_parent.dirty
+			root.size += root.layout_parent.size * root.relative_size
 		}
 		if !root.dirty {
 			continue
@@ -1346,13 +1344,15 @@ end_node :: proc() {
 		}
 	}
 
-	if self.size != self.last_size {
-		self.last_size = self.size
+	// Detect changes in size for resolving layout
+	if self.size != self.last_size || self.relative_size != self.last_relative_size {
 		self.dirty = true
-
 		draw_frames(1)
 	}
+	self.last_size = self.size
+	self.last_relative_size = self.relative_size
 
+	// Update scroll
 	node_update_scroll(self)
 
 	// Add scrollbars
@@ -1393,7 +1393,7 @@ end_node :: proc() {
 			).?
 			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
 			node.size.x += added_size
-			node.position.x -= added_size
+			node.exact_offset.x -= added_size
 			node.radius = node.size.x / 2
 		}
 

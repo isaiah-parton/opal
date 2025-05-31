@@ -39,6 +39,7 @@ Node_Style :: struct {
 	foreground:       Paint_Option,
 	font:             ^Font `fmt:"-"`,
 	shadow_color:     Color,
+	shadow_offset:    [2]f32,
 	stroke_width:     f32,
 	font_size:        f32,
 	shadow_size:      f32,
@@ -176,6 +177,9 @@ Node :: struct {
 
 	// The last size known at invocation
 	last_size:               [2]f32,
+
+	//
+	last_relative_size:      [2]f32,
 
 	// Cached size to reuse when no sizing pass occurs
 	cached_size:             [2]f32,
@@ -937,7 +941,12 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 	}
 
 	if self.shadow_color != {} {
-		kn.add_box_shadow(self.box, self.radius[0], self.shadow_size, self.shadow_color)
+		kn.add_box_shadow(
+			{self.box.lo + self.shadow_offset, self.box.hi + self.shadow_offset},
+			self.radius[0],
+			self.shadow_size,
+			self.shadow_color,
+		)
 	}
 
 	// Apply clipping
@@ -1047,5 +1056,9 @@ node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
 
 node_get_padded_box :: proc(self: ^Node) -> Box {
 	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
+}
+
+node_fit_to_content :: proc(self: ^Node) {
+	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
 }
 

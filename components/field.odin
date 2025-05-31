@@ -13,6 +13,7 @@ import "core:strings"
 Field_Descriptor :: struct {
 	using base:      opal.Node_Descriptor,
 	placeholder:     string,
+	format:          string,
 	value_data:      rawptr,
 	value_type_info: ^runtime.Type_Info,
 }
@@ -38,6 +39,7 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 		value_data = data,
 		value_type_info = type_info,
 		cursor = .Text,
+		format = "%v",
 	}
 }
 
@@ -54,7 +56,10 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		if edit {
 			text = strings.to_string(text_view.builder)
 		} else {
-			text = fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
+			text = fmt.tprintf(
+				desc.format,
+				any{data = desc.value_data, id = desc.value_type_info.id},
+			)
 		}
 
 		if desc.placeholder != "" && len(text) == 0 {

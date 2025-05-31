@@ -300,6 +300,7 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			desc.placeholder = "Once upon a time..."
 			desc.value_data = &app.edited_number
 			desc.value_type_info = type_info_of(f32)
+			desc.format = "%.2f"
 			desc.wrapped = true
 			desc.show_scrollbars = true
 			// Then add the node to the UI and perform the input logic

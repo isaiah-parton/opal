@@ -21,7 +21,7 @@ Inspector :: struct {
 }
 
 inspector_show :: proc(self: ^Inspector) {
-	self.min_size = {400, 500}
+	self.min_size = {300, 400}
 	self.size = linalg.max(self.size, self.min_size)
 	base_node := begin_node(
 		&{

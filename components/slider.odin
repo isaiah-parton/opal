@@ -27,35 +27,46 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 	desc.radius = radius
 	desc.background = tw.NEUTRAL_900
 	desc.interactive = true
+	desc.inherit_state = true
+	desc.padding = theme.base_size.y / 2 * [4]f32{1, 0, 1, 0}
 
 	body_node := begin_node(desc).?
 	time: f32 = clamp(f32(desc.value) / f32(desc.max - desc.min), 0.0, 1.0)
 
 	node_update_transition(body_node, 0, body_node.is_hovered, 0.1)
+	node_update_transition(body_node, 1, body_node.is_active, 0.1)
 
 	add_node(
 		&{
 			absolute = true,
 			relative_size = {time, 1},
 			radius = {radius, 0, radius, 0},
-			background = tw.EMERALD_500,
+			background = tw.WHITE,
 		},
 	)
+	begin_node(&{grow = true, max_size = INFINITY, inherit_state = true})
 
-	thumb_size := desc.max_size.y * (1.75 + body_node.transitions[0] * 0.25)
+	thumb_size := desc.max_size.y * (2 + body_node.transitions[0] * 0.25)
 	add_node(
 		&{
-			absolute = true,
+			absolute        = true,
 			relative_offset = {time, 0.5},
-			align = 0.5,
-			min_size = thumb_size,
-			radius = thumb_size / 2,
-			background = tw.NEUTRAL_900,
-			stroke = tw.EMERALD_500,
-			stroke_width = 2,
+			align           = 0.5,
+			min_size        = thumb_size,
+			radius          = thumb_size / 2,
+			background      = tw.WHITE,
+			// stroke = tw.EMERALD_500,
+			// stroke_width = 2,
+			shadow_size     = 10,
+			shadow_color    = fade(tw.BLACK, 0.5),
+			stroke          = fade(tw.WHITE, 0.1),
+			stroke_width    = 4 * body_node.transitions[1],
+			stroke_type     = .Outer,
+			interactive     = true,
 		},
 	)
 
+	end_node()
 	end_node()
 
 	if body_node.is_active {
