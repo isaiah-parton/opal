@@ -67,9 +67,9 @@ Node_Descriptor :: struct {
 
 	//
 	exact_offset:       [2]f32,
-	exact_size:         [2]f32,
 	relative_offset:    [2]f32,
 	relative_size:      [2]f32,
+	align:              [2]f32,
 
 	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
 	min_size:           [2]f32,
@@ -126,7 +126,7 @@ Node_Descriptor :: struct {
 	interactive:        bool,
 
 	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
-	owner:              ^Node `fmt:"-"`,
+	// owner:              ^Node `fmt:"-"`,
 
 	// Called after the default drawing behavior
 	on_draw:            proc(self: ^Node),
@@ -302,10 +302,6 @@ node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
 		node_propagate_input_recursively(node)
 		node_receive_propagated_input(self, node)
 	}
-	if self.owner != nil {
-		node_receive_propagated_input(self.owner, self)
-		self.owner.will_have_focused_child = self.has_focused_child | self.is_focused
-	}
 }
 
 node_get_text_box :: proc(self: ^Node) -> Box {
@@ -343,7 +339,9 @@ node_on_new_frame :: proc(self: ^Node) {
 
 	// Clear arrays and reserve memory
 	reserve(&self.children, 16)
+	reserve(&self.layout_children, 16)
 	clear(&self.children)
+	clear(&self.layout_children)
 
 	if self.scale == {} {
 		self.scale = 1
@@ -380,7 +378,9 @@ node_on_new_frame :: proc(self: ^Node) {
 
 		if self.enable_selection {
 			append(&self.text_view.nodes, self)
-			strings.write_string(&self.text_view.builder, self.text)
+			if !self.text_view.editing {
+				strings.write_string(&self.text_view.builder, self.text)
+			}
 		}
 
 		glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
@@ -459,17 +459,28 @@ node_on_new_frame :: proc(self: ^Node) {
 	// Root
 	if self.parent == nil {
 		append(&ctx.roots, self)
-		//
-		return
+	} else {
+		append(&self.parent.children, self)
 	}
 
-	// Child logic
-	append(&self.parent.children, self)
+	// Nodes with no layout parent get added to the layout roots, otherwise they still need a parent to be placed relative to
+	if self.absolute || self.layout_parent == nil {
+		append(&ctx.layout_roots, self)
+	}
+
+	if self.layout_parent != nil && !self.absolute {
+		append(&self.layout_parent.layout_children, self)
+	}
 }
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
+	// This is here because currently only root nodes are checked for dirtiness
+	if child.absolute {
+		return
+	}
+	// Propagate dirty state
 	self.dirty |= child.dirty
-	// Propagate content size up the tree in reverse breadth-first
+	// Propagate content size
 	if self.wrapped {
 		self.content_size = linalg.max(self.content_size, child.size)
 	} else {
@@ -510,6 +521,14 @@ node_receive_input_recursive :: proc(self: ^Node, z_index: u32 = 0) {
 }
 
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
+	if self.absolute {
+		assert(self.layout_parent != nil)
+		self.position =
+			self.layout_parent.box.lo +
+			self.layout_parent.size * self.relative_offset +
+			self.exact_offset
+		self.position -= self.size * self.align
+	}
 	self.box.lo = offset + self.position
 	if bounds, ok := self.bounds.?; ok {
 		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
@@ -554,7 +573,7 @@ node_solve_box_recursively :: proc(
 	clip_box = box_clamped(clip_box, self.box)
 
 	self.has_clipped_child = false
-	for node in self.children {
+	for node in self.layout_children {
 		node_solve_box_recursively(node, dirty, self.box.lo - self.scroll, clip_box)
 	}
 }
@@ -570,8 +589,9 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	i := int(self.vertical)
 	j := 1 - i
 
-	children := self.children[from:to]
+	children := self.layout_children[from:to]
 
+	// Array of growing nodes along the layout axis
 	growables := make(
 		[dynamic]^Node,
 		len = 0,
@@ -580,6 +600,8 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	)
 
 	length: f32
+
+	// Populate the array and accumulate node extent
 	for node in children {
 		length += node.size[i]
 		if node.grow[i] {
@@ -628,7 +650,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 		line_start: int
 		content_size: [2]f32
 
-		for child, child_index in self.children {
+		for child, child_index in self.layout_children {
 			if offset + child.size[i] > max_offset {
 				node_solve_sizes_in_range(
 					self,
@@ -648,7 +670,13 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			offset += child.size[i] + self.gap
 		}
 
-		node_solve_sizes_in_range(self, line_start, len(self.children), line_span, content_size[j])
+		node_solve_sizes_in_range(
+			self,
+			line_start,
+			len(self.layout_children),
+			line_span,
+			content_size[j],
+		)
 
 		content_size[j] += line_span + self.padding[j] + self.padding[j + 2]
 
@@ -669,7 +697,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 		node_solve_sizes_in_range(
 			self,
 			0,
-			len(self.children),
+			len(self.layout_children),
 			self.size[j] - self.padding[j] - self.padding[j + 2],
 			0,
 		)
@@ -743,7 +771,8 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 	needs_resolve = node_solve_sizes(self)
 
 	if self.wrapped {
-		for child in self.children {
+		for child in self.layout_children {
+			child.dirty |= self.dirty
 			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
 		}
 		if needs_resolve {
@@ -755,7 +784,8 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 
 		content_size: [2]f32
 
-		for child in self.children {
+		for child in self.layout_children {
+			child.dirty |= self.dirty
 			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
 
 			content_size[i] += child.size[i]
@@ -764,7 +794,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 
 		content_size += self.padding.xy + self.padding.zw
 
-		content_size[i] += self.gap * f32(len(self.children) - 1)
+		content_size[i] += self.gap * f32(len(self.layout_children) - 1)
 
 		if self.content_size != content_size {
 			self.content_size = content_size
@@ -788,13 +818,21 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 	}
 
 	// self.overflow = linalg.max(self.content_size - self.size, 0)
-	node_solve_sizes_in_range(self, 0, len(self.children), node_get_content_span(self), 0)
+	node_solve_sizes_in_range(self, 0, len(self.layout_children), node_get_span(self), 0)
 
-	for node in self.children {
+	for node in self.layout_children {
 		node_solve_sizes_recursive(node, depth + 1)
 	}
 
 	return
+}
+
+node_get_span :: proc(self: ^Node) -> f32 {
+	if self.vertical {
+		return self.size.x - self.padding.x - self.padding.z
+	} else {
+		return self.size.y - self.padding.y - self.padding.w
+	}
 }
 
 node_get_content_span :: proc(self: ^Node) -> f32 {

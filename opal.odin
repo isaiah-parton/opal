@@ -1081,6 +1081,7 @@ begin :: proc() {
 	assert(len(ctx.style_stack) == 0)
 	assert(len(ctx.node_stack) == 0)
 	clear(&ctx.roots)
+	clear(&ctx.layout_roots)
 	clear(&ctx.style_array)
 	clear(&ctx.glyphs)
 }
@@ -1206,7 +1207,14 @@ end :: proc() {
 }
 
 ctx_solve_sizes :: proc(self: ^Context) {
-	for root in self.roots {
+	for root in self.layout_roots {
+		if root.absolute {
+			assert(root.layout_parent != nil)
+			if root.layout_parent.dirty {
+				root.size += root.layout_parent.size * root.relative_size
+				root.dirty = true
+			}
+		}
 		if !root.dirty {
 			continue
 		}
@@ -1217,7 +1225,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 }
 
 ctx_solve_positions_and_draw :: proc(self: ^Context) {
-	for root in self.roots {
+	for root in self.layout_roots {
 		node_solve_box_recursively(root, root.dirty)
 	}
 
@@ -1299,6 +1307,7 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 
 		if !self.is_root {
 			self.parent = ctx.current_node
+			self.layout_parent = self.parent
 			assert(self != self.parent)
 		}
 
@@ -1331,6 +1340,7 @@ end_node :: proc() {
 
 	if self.fit != {} {
 		self.size = linalg.max(self.size, self.content_size * self.fit)
+
 		if self.square_fit {
 			self.size = max(self.size.x, self.size.y)
 		}
@@ -1339,6 +1349,7 @@ end_node :: proc() {
 	if self.size != self.last_size {
 		self.last_size = self.size
 		self.dirty = true
+
 		draw_frames(1)
 	}
 
@@ -1348,22 +1359,28 @@ end_node :: proc() {
 	if self.show_scrollbars && self.overflow != {} {
 		SCROLLBAR_SIZE :: 3
 		SCROLLBAR_PADDING :: 2
+
 		inner_box := box_shrink(self.box, 1)
+
 		push_id(self.id)
+
 		scrollbar_style := Node_Style {
 			background = ctx.colors[.Scrollbar_Background],
 			foreground = ctx.colors[.Scrollbar_Foreground],
 			radius     = SCROLLBAR_SIZE / 2,
 		}
+
 		corner_space: f32
+
 		if self.overflow.x > 0 && self.overflow.y > 0 {
 			corner_space = SCROLLBAR_SIZE + SCROLLBAR_PADDING
 		}
+
 		if self.overflow.y > 0 {
 			node := add_node(
 				&{
-					is_root = true,
-					owner = self,
+					absolute = true,
+					data = self,
 					relative_offset = {1, 0},
 					exact_offset = [2]f32{-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
 					relative_size = {0, 1},
@@ -1379,15 +1396,16 @@ end_node :: proc() {
 			node.position.x -= added_size
 			node.radius = node.size.x / 2
 		}
+
 		if self.overflow.x > 0 {
 			node := add_node(
 				&{
-					is_root = true,
-					owner = self,
+					absolute = true,
+					data = self,
 					relative_offset = {0, 1},
 					exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
 					relative_size = {1, 0},
-					exact_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					min_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
 					interactive = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
@@ -1398,6 +1416,7 @@ end_node :: proc() {
 			node.position.y -= added_size
 			node.radius = node.size.y / 2
 		}
+
 		pop_id()
 	}
 
@@ -1418,7 +1437,9 @@ add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_
 }
 
 scrollbar_on_draw :: proc(self: ^Node) {
-	assert(self.owner != nil)
+	assert(self.data != nil)
+
+	owner := (^Node)(self.data)
 
 	node_update_transition(self, 0, true, 0.1)
 	node_update_transition(self, 1, self.is_hovered || self.is_active, 0.1)
@@ -1427,13 +1448,10 @@ scrollbar_on_draw :: proc(self: ^Node) {
 	j := 1 - i
 
 	inner_box := Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
-	length := max(
-		(inner_box.hi[i] - inner_box.lo[i]) * self.owner.size[i] / self.owner.content_size[i],
-		30,
-	)
+	length := max((inner_box.hi[i] - inner_box.lo[i]) * owner.size[i] / owner.content_size[i], 30)
 
-	scroll_travel := max(self.owner.content_size[i] - self.owner.size[i], 0)
-	scroll_time := self.owner.scroll[i] / scroll_travel
+	scroll_travel := max(owner.content_size[i] - owner.size[i], 0)
+	scroll_time := owner.scroll[i] / scroll_travel
 
 	thumb_travel := (inner_box.hi[i] - inner_box.lo[i]) - length
 
@@ -1457,7 +1475,7 @@ scrollbar_on_draw :: proc(self: ^Node) {
 			}
 		}
 
-		self.owner.scroll[i] =
+		owner.scroll[i] =
 			clamp(
 				(global_ctx.mouse_position[i] -
 					(inner_box.lo[i] + global_ctx.node_click_offset[i])) /
@@ -1467,7 +1485,7 @@ scrollbar_on_draw :: proc(self: ^Node) {
 			) *
 			scroll_travel
 
-		self.owner.target_scroll[i] = self.owner.scroll[i]
+		owner.target_scroll[i] = owner.scroll[i]
 	}
 }
 

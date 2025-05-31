@@ -131,105 +131,36 @@ main :: proc() {
 						clip_content = true,
 						show_scrollbars = true,
 						vertical = true,
+						content_align = 0.5,
 					},
 				).?
 				{
-					add_button("Button 1")
-					add_chip("Chip")
-					begin_node(
-						&{
-							fit          = 1,
-							gap          = 5,
-							grow         = true,
-							max_size     = INFINITY,
-							wrapped      = true,
-							clip_content = true,
-							// padding  = 10,
-							// stroke = tw.INDIGO_500,
-							// stroke_width = 2,
-							// radius = 5,
-						},
-					)
-					{
-						do_text(
-							&{
-								grow = {true, true},
-								max_size = {300, 300},
-								min_size = {100, 150},
-								stroke = TEXT_STROKE_COLOR,
-								stroke_width = 2,
-								radius = 5,
-								padding = 10,
-								interactive = true,
-								clip_content = true,
-							},
-							FILLER_TEXT,
-							14,
-							&kn.DEFAULT_FONT,
-							TEXT_COLOR,
-						)
-						do_text(
-							&{
-								grow = {true, false},
-								max_size = INFINITY,
-								min_size = {300, 0},
-								fit = {1, 1},
-								stroke = TEXT_STROKE_COLOR,
-								stroke_width = 2,
-								radius = 5,
-								padding = 10,
-							},
-							FILLER_TEXT,
-							14,
-							&kn.DEFAULT_FONT,
-							TEXT_COLOR,
-						)
-						add_node(
-							&{
-								min_size = 80,
-								grow = true,
-								max_size = 120,
-								radius = 5,
-								background = tw.INDIGO_700,
-							},
-						)
-					}
-					end_node()
-					do_text(
-						&{
-							fit           = {1, 1},
-							grow          = {true, true},
-							max_size      = INFINITY,
-							stroke        = TEXT_STROKE_COLOR,
-							stroke_width  = 2,
-							radius        = 5,
-							// vertical      = true,
-							content_align = 0.5,
-							padding       = 10,
-							gap           = 5,
-							// min_size = {0, 500},
-						},
-						FILLER_TEXT,
-						12,
-						&kn.DEFAULT_FONT,
-						TEXT_COLOR,
-					)
-					do_text(
-						&{
-							grow = {true, true},
-							max_size = INFINITY,
-							fit = {0, 1},
-							stroke = TEXT_STROKE_COLOR,
-							stroke_width = 2,
-							radius = 5,
-							justify_between = true,
-							padding = 10,
-						},
-						FILLER_TEXT,
-						20,
-						&kn.DEFAULT_FONT,
-						TEXT_COLOR,
-					)
+					// begin_node(
+					// 	&{
+					// 		absolute = true,
+					// 		relative_offset = 0.5,
+					// 		relative_size = 0.25,
+					// 		align = 0.5,
+					// 		min_size = 20,
+					// 		background = tw.ROSE_800,
+					// 		z_index = 1,
+					// 	},
+					// )
+					// do_text(
+					// 	&{
+					// 		grow = true,
+					// 		max_size = INFINITY,
+					// 		stroke = tw.WHITE,
+					// 		stroke_width = 1,
+					// 		padding = 10,
+					// 	},
+					// 	FILLER_TEXT,
+					// 	14,
+					// 	&kn.DEFAULT_FONT,
+					// 	paint = tw.WHITE,
+					// )
+					// end_node()
+
 					do_text_editor(app)
 				}
 				end_node()
@@ -316,7 +247,7 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		&{
 			fit = 1,
 			grow = {true, false},
-			max_size = {INFINITY, INFINITY},
+			max_size = {700, INFINITY},
 			padding = 8,
 			background = tw.NEUTRAL_800,
 			radius = 7,
@@ -349,6 +280,11 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			// The toggle switch is a very simple component with fixed sizing so it can be added in one step
 			//
 			add_toggle_switch(&app.boolean)
+			//
+			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 10, value = app.edited_number, min_size = {200, 0}}).new_value.?;
+			   ok {
+				app.edited_number = new_value
+			}
 		}
 		end_node()
 		//
@@ -365,6 +301,7 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			desc.value_data = &app.edited_number
 			desc.value_type_info = type_info_of(f32)
 			desc.wrapped = true
+			desc.show_scrollbars = true
 			// Then add the node to the UI and perform the input logic
 			add_field(&desc)
 		}

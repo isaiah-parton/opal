@@ -60,7 +60,6 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	if is_open {
 		begin_node(
 			&{
-				owner = node,
 				is_root = true,
 				shadow_size = 5,
 				shadow_color = {0, 0, 0, 128},

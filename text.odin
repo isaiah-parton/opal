@@ -591,10 +591,14 @@ text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> 
 	}
 	append(&self.stack, text)
 
+	text.desc = desc
 	text.byte_length = 0
 	text.dead = false
 
-	strings.builder_reset(&text.builder)
+	if !text.editing {
+		strings.builder_reset(&text.builder)
+	}
+
 	clear(&text.glyphs)
 	clear(&text.nodes)
 
@@ -602,7 +606,11 @@ text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> 
 }
 
 text_agent_end_view :: proc(self: ^Text_Agent) {
-	pop(&self.stack)
+	if view, ok := text_agent_current_view(self); ok {
+		view.selection[0] = clamp(view.selection[0], 0, len(view.glyphs))
+		view.selection[1] = clamp(view.selection[1], 0, len(view.glyphs))
+		pop(&self.stack)
+	}
 }
 
 text_agent_on_mouse_down :: proc(self: ^Text_Agent, button: Mouse_Button) {
@@ -673,3 +681,4 @@ text_agent_get_selection_string :: proc(self: ^Text_Agent) -> string {
 	}
 	return ""
 }
+

@@ -43,10 +43,19 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 
 add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Field_Response) {
 	using opal
-	text_view := begin_text_view({id = hash_loc(loc), show_cursor = true}).?
 	cont_node := begin_node(desc).?
+
+	edit := cont_node.is_focused || cont_node.has_focused_child
+
+	text_view := begin_text_view({id = hash_loc(loc), show_cursor = true, editing = edit}).?
+
 	{
-		text := fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
+		text: string
+		if edit {
+			text = strings.to_string(text_view.builder)
+		} else {
+			text = fmt.tprint(any{data = desc.value_data, id = desc.value_type_info.id})
+		}
 
 		if desc.placeholder != "" && len(text) == 0 {
 			push_id(hash(loc))
@@ -61,7 +70,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			)
 			pop_id()
 		}
-
 
 		j := 1
 
