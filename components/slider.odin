@@ -21,14 +21,11 @@ Slider_Response :: struct($T: typeid) {
 add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 	using opal
 
-	desc.min_size.y = theme.base_size.y / 2
-	desc.max_size.y = theme.base_size.y / 2
-	radius := desc.min_size.y / 2
-	desc.radius = radius
-	desc.background = tw.NEUTRAL_900
+	desc.min_size.y = theme.base_size.y
+	radius := desc.min_size.y / 4
 	desc.interactive = true
 	desc.inherit_state = true
-	desc.padding = theme.base_size.y / 2 * [4]f32{1, 0, 1, 0}
+	desc.padding = theme.base_size.y * [4]f32{0, 0.25, 0, 0.25}
 
 	body_node := begin_node(desc).?
 	time: f32 = clamp(f32(desc.value) / f32(desc.max - desc.min), 0.0, 1.0)
@@ -36,17 +33,28 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 	node_update_transition(body_node, 0, body_node.is_hovered, 0.1)
 	node_update_transition(body_node, 1, body_node.is_active, 0.1)
 
+	begin_node(
+		&{
+			grow = true,
+			max_size = INFINITY,
+			inherit_state = true,
+			padding = theme.base_size.y * [4]f32{0.5, 0.25, 0.5, 0.25},
+			background = tw.NEUTRAL_900,
+			radius = radius,
+		},
+	)
 	add_node(
 		&{
 			absolute = true,
 			relative_size = {time, 1},
+			min_size = {radius * (1 - 2 * time), 0},
 			radius = {radius, 0, radius, 0},
 			background = tw.WHITE,
 		},
 	)
-	begin_node(&{grow = true, max_size = INFINITY, inherit_state = true})
+	begin_node(&{grow = true, max_size = INFINITY})
 
-	thumb_size := desc.max_size.y * (2 + body_node.transitions[0] * 0.25)
+	thumb_size := desc.min_size.y * (1 + body_node.transitions[0] * 0.25)
 	add_node(
 		&{
 			absolute        = true,
@@ -68,6 +76,7 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 
 	end_node()
 	end_node()
+	end_node()
 
 	if body_node.is_active {
 		new_time := clamp(
@@ -82,4 +91,3 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 
 	return
 }
-

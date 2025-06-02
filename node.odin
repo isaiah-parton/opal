@@ -517,10 +517,14 @@ node_receive_input :: proc(self: ^Node, z_index: u32) -> (mouse_overlap: bool) {
 
 node_receive_input_recursive :: proc(self: ^Node, z_index: u32 = 0) {
 	z_index := z_index + self.z_index
-	if node_receive_input(self, z_index) {
-		for node in self.children {
-			node_receive_input_recursive(node, z_index)
-		}
+	mouse_overlap := node_receive_input(self, z_index)
+
+	if !mouse_overlap && self.clip_content {
+		return
+	}
+
+	for node in self.children {
+		node_receive_input_recursive(node, z_index)
 	}
 }
 
@@ -1061,4 +1065,3 @@ node_get_padded_box :: proc(self: ^Node) -> Box {
 node_fit_to_content :: proc(self: ^Node) {
 	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
 }
-

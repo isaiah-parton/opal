@@ -1002,9 +1002,9 @@ begin :: proc() {
 		ctx.hovered_id = node.id
 
 		if node.enable_selection && node.text_view != nil && len(node.glyphs) > 0 {
-			if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
-				ctx.text_agent.hovered_view = node.text_view
-			}
+			// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
+			ctx.text_agent.hovered_view = node.text_view
+			// }
 		}
 
 		if node.interactive {
@@ -1211,7 +1211,9 @@ ctx_solve_sizes :: proc(self: ^Context) {
 		if root.absolute {
 			assert(root.layout_parent != nil)
 			root.dirty |= root.layout_parent.dirty
-			root.size += root.layout_parent.size * root.relative_size
+			root.size +=
+				(root.layout_parent.size if root.layout_parent.dirty else root.layout_parent.cached_size) *
+				root.relative_size
 		}
 		if !root.dirty {
 			continue
@@ -1349,8 +1351,8 @@ end_node :: proc() {
 		self.dirty = true
 		draw_frames(1)
 	}
-	self.last_size = self.size
 	self.last_relative_size = self.relative_size
+	self.last_size = self.size
 
 	// Update scroll
 	node_update_scroll(self)
@@ -1502,4 +1504,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-
