@@ -18,14 +18,23 @@ Slider_Response :: struct($T: typeid) {
 	new_value: Maybe(T),
 }
 
-add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
+add_slider :: proc(
+	desc: ^Slider_Descriptor($T),
+	loc := #caller_location,
+) -> (
+	res: Slider_Response(T),
+) {
 	using opal
+
+	push_id(hash(loc))
+	defer pop_id()
 
 	desc.min_size.y = theme.base_size.y
 	radius := desc.min_size.y / 4
 	desc.interactive = true
 	desc.inherit_state = true
 	desc.padding = theme.base_size.y * [4]f32{0, 0.25, 0, 0.25}
+	base_color :: tw.NEUTRAL_100
 
 	body_node := begin_node(desc).?
 	time: f32 = clamp(f32(desc.value) / f32(desc.max - desc.min), 0.0, 1.0)
@@ -49,7 +58,7 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 			relative_size = {time, 1},
 			min_size = {radius * (1 - 2 * time), 0},
 			radius = {radius, 0, radius, 0},
-			background = tw.WHITE,
+			background = base_color,
 		},
 	)
 	begin_node(&{grow = true, max_size = INFINITY})
@@ -62,11 +71,11 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 			align           = 0.5,
 			min_size        = thumb_size,
 			radius          = thumb_size / 2,
-			background      = tw.WHITE,
+			background      = base_color,
 			// stroke = tw.EMERALD_500,
 			// stroke_width = 2,
 			shadow_size     = 10,
-			shadow_color    = fade(tw.BLACK, 0.5),
+			shadow_color    = fade(tw.BLACK, 0.75),
 			stroke          = fade(tw.WHITE, 0.1),
 			stroke_width    = 4 * body_node.transitions[1],
 			stroke_type     = .Outer,
@@ -80,7 +89,7 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 
 	if body_node.is_active {
 		new_time := clamp(
-			(global_ctx.mouse_position.x - body_node.box.lo.x) / body_node.size.x,
+			(global_ctx.mouse_position.x - body_node.box.lo.x) / body_node.cached_size.x,
 			0,
 			1,
 		)
@@ -91,3 +100,4 @@ add_slider :: proc(desc: ^Slider_Descriptor($T)) -> (res: Slider_Response(T)) {
 
 	return
 }
+

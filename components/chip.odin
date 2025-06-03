@@ -12,7 +12,7 @@ add_chip :: proc(text: string) -> opal.Node_Result {
 	self := add_node(
 		&{
 			background = Color{255, 255, 255, 50},
-			stroke = theme.border_color,
+			stroke = theme.color.border,
 			stroke_width = 1,
 			padding = {12, 3, 12, 3},
 			fit = 1,
@@ -24,3 +24,4 @@ add_chip :: proc(text: string) -> opal.Node_Result {
 	self.radius = self.size.y / 2
 	return self
 }
+

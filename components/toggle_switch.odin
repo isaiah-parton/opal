@@ -10,15 +10,16 @@ import "core:math/ease"
 //
 // `value` must still be valid when `end()` is called
 //
-add_toggle_switch :: proc(value: ^bool) {
+add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 	using opal
+	push_id(hash(loc));defer pop_id()
 	base_size := [2]f32{45, 25}
 	self := begin_node(
 		&{
 			min_size    = base_size,
 			radius      = base_size.y / 2,
 			background  = tw.NEUTRAL_950,
-			stroke      = fade(tw.WHITE, 0.1),
+			stroke      = fade(theme.color.primary, 0.1),
 			stroke_type = .Outer,
 			interactive = true,
 			// on_draw = proc(self: ^Node) {
@@ -60,7 +61,7 @@ add_toggle_switch :: proc(value: ^bool) {
 			shadow_offset = {-2, 2},
 			shadow_size = 4,
 			shadow_color = fade(kn.BLACK, 0.5),
-			background = tw.WHITE,
+			background = theme.color.primary,
 			stroke = fade(tw.NEUTRAL_400, self.transitions[0]),
 			stroke_width = 1,
 			stroke_type = .Inner,

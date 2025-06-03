@@ -934,6 +934,20 @@ key_released :: proc(key: Keyboard_Key) -> bool {
 	return !ctx.key_down[key] && ctx.key_was_down[key]
 }
 
+ctx_on_input_received :: proc(ctx: ^Context) {
+	// Resolve input state
+	ctx.focused_node = nil
+	ctx.active_node = nil
+	ctx.scrollable_node = nil
+	ctx.hovered_node = nil
+
+	for root in ctx.roots {
+		node_receive_input_recursive(root)
+	}
+
+	text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
+}
+
 //
 // Clear the UI construction state for a new frame
 //
@@ -980,17 +994,7 @@ begin :: proc() {
 
 	// Check if this frame received input
 	if ctx.active {
-		// Resolve input state
-		ctx.focused_node = nil
-		ctx.active_node = nil
-		ctx.scrollable_node = nil
-		ctx.hovered_node = nil
-
-		for root in ctx.roots {
-			node_receive_input_recursive(root)
-		}
-
-		text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
+		ctx_on_input_received(ctx)
 	}
 
 	if !mouse_down(.Left) {
@@ -1053,7 +1057,7 @@ begin :: proc() {
 	// Propagate input
 	// TODO: Can this be done only when necessary?
 	for root in ctx.roots {
-		node_propagate_input_recursively(root)
+		node_propagate_input_recursive(root)
 	}
 
 	//
@@ -1074,12 +1078,16 @@ begin :: proc() {
 	}
 
 	//
-	// Purge text
+	// Catch problems before they cause undefined behavior
+	//
+	assert(len(ctx.style_stack) == 0)
+	assert(len(ctx.node_stack) == 0)
+
+	//
+	// Reset for new frame
 	//
 	text_agent_on_new_frame(&ctx.text_agent)
 
-	assert(len(ctx.style_stack) == 0)
-	assert(len(ctx.node_stack) == 0)
 	clear(&ctx.roots)
 	clear(&ctx.layout_roots)
 	clear(&ctx.style_array)
@@ -1208,12 +1216,9 @@ end :: proc() {
 
 ctx_solve_sizes :: proc(self: ^Context) {
 	for root in self.layout_roots {
-		if root.absolute {
+		if root.absolute && root.dirty {
 			assert(root.layout_parent != nil)
-			root.dirty |= root.layout_parent.dirty
-			root.size +=
-				(root.layout_parent.size if root.layout_parent.dirty else root.layout_parent.cached_size) *
-				root.relative_size
+			root.size += root.layout_parent.size * root.relative_size
 		}
 		if !root.dirty {
 			continue
@@ -1226,7 +1231,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 
 ctx_solve_positions_and_draw :: proc(self: ^Context) {
 	for root in self.layout_roots {
-		node_solve_box_recursively(root, root.dirty)
+		node_solve_box_recursive(root, root.dirty)
 	}
 
 	for root in self.roots {
@@ -1332,6 +1337,10 @@ end_node :: proc() {
 
 	i := int(self.vertical)
 
+
+	//
+	// Determine known size
+	//
 	if !self.wrapped {
 		self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
 	}
@@ -1346,13 +1355,22 @@ end_node :: proc() {
 		}
 	}
 
-	// Detect changes in size for resolving layout
+	//
+	// Determine dirty state from size changes in known metrics
+	//
 	if self.size != self.last_size || self.relative_size != self.last_relative_size {
 		self.dirty = true
 		draw_frames(1)
+	} else {
+		self.size = self.cached_size
 	}
+
 	self.last_relative_size = self.relative_size
 	self.last_size = self.size
+
+	//
+	// Handle scrolling
+	//
 
 	// Update scroll
 	node_update_scroll(self)
@@ -1504,3 +1522,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

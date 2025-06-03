@@ -298,12 +298,12 @@ node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
 	}
 }
 
-node_propagate_input_recursively :: proc(self: ^Node, depth := 0) {
+node_propagate_input_recursive :: proc(self: ^Node, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
 	node_update_propagated_input(self)
 	node_update_input(self)
 	for node in self.children {
-		node_propagate_input_recursively(node)
+		node_propagate_input_recursive(node)
 		node_receive_propagated_input(self, node)
 	}
 }
@@ -547,16 +547,15 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	// }
 }
 
-node_solve_box_recursively :: proc(
+node_solve_box_recursive :: proc(
 	self: ^Node,
 	dirty: bool,
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
-	if !dirty {
-		self.size = self.cached_size
+	if dirty {
+		self.cached_size = self.size
 	}
-	self.cached_size = self.size
 
 	node_solve_box(self, offset)
 
@@ -582,7 +581,7 @@ node_solve_box_recursively :: proc(
 
 	self.has_clipped_child = false
 	for node in self.layout_children {
-		node_solve_box_recursively(node, dirty, self.box.lo - self.scroll, clip_box)
+		node_solve_box_recursive(node, dirty, self.box.lo - self.scroll, clip_box)
 	}
 }
 
@@ -1065,3 +1064,4 @@ node_get_padded_box :: proc(self: ^Node) -> Box {
 node_fit_to_content :: proc(self: ^Node) {
 	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
 }
+

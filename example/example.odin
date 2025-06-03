@@ -256,7 +256,15 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		},
 	)
 	{
-		begin_node(&{fit = 1, gap = 8, content_align = {0, 0.5}})
+		begin_node(
+			&{
+				grow = {true, false},
+				max_size = {INFINITY, 0},
+				fit = {0, 1},
+				gap = 8,
+				content_align = {0, 0.5},
+			},
+		)
 		{
 			//
 			// Some text editing options
@@ -273,7 +281,7 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 					min_size = {2, 0},
 					max_size = {0, INFINITY},
 					grow = {false, true},
-					background = tw.NEUTRAL_700,
+					background = tw.NEUTRAL_900,
 				},
 			)
 			//
@@ -281,7 +289,11 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			//
 			add_toggle_switch(&app.boolean)
 			//
-			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 10, value = app.edited_number, min_size = {200, 0}}).new_value.?;
+			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 10, value = app.edited_number, max_size = {200, INFINITY}, grow = {true, false}}).new_value.?;
+			   ok {
+				app.edited_number = new_value
+			}
+			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 50, value = app.edited_number, max_size = {200, INFINITY}, grow = {true, false}}).new_value.?;
 			   ok {
 				app.edited_number = new_value
 			}
