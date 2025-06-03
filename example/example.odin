@@ -11,6 +11,7 @@ import "core:fmt"
 import "core:math"
 import "core:math/ease"
 import "core:mem"
+import "core:os"
 import "core:strings"
 import "core:time"
 import "vendor:sdl3"
@@ -20,15 +21,26 @@ import "../components"
 
 FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
 
-My_App :: struct {
-	using app:             sdl3app.App,
-	image:                 int,
-	edited_text:           string,
-	edited_number:         f32,
-	drag_offset:           [2]f32,
-	inspector_position:    [2]f32,
-	is_dragging_inspector: bool,
-	boolean:               bool,
+Item :: struct {
+	using file_info: os.File_Info,
+	children:        [dynamic]Item,
+}
+
+Explorer :: struct {
+	using app:     sdl3app.App,
+	toggle_switch: bool,
+	slider:        f32,
+	cwd:           string,
+	items:         [dynamic]Item,
+}
+
+explorer_refresh :: proc(self: ^Explorer) -> os.Error {
+	folder := os.open(self.cwd) or_return
+	files := os.read_dir(folder, -1) or_return
+	for file_info in files {
+		append(&self.items, Item{file_info = file_info})
+	}
+	return nil
 }
 
 main :: proc() {
@@ -53,14 +65,12 @@ main :: proc() {
 	}
 
 	sdl3app.state = new_clone(
-	My_App {
+	Explorer {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
-			app := (^My_App)(app)
-			app.edited_text = strings.clone(FILLER_TEXT)
+			app := (^Explorer)(app)
 			lucide.load()
 			components.theme.icon_font = &lucide.font
-			app.image = opal.load_image("image.png") or_else panic("Could not load image!")
 			opal.set_color(.Selection_Background, tw.SKY_500)
 			opal.set_color(.Selection_Foreground, tw.BLACK)
 			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
@@ -68,7 +78,7 @@ main :: proc() {
 			opal.global_ctx.snap_to_pixels = true
 		},
 		on_frame = proc(app: ^sdl3app.App) {
-			app := (^My_App)(app)
+			app := (^Explorer)(app)
 			using opal, components
 			window_radius :=
 				app.radius * f32(i32(.MAXIMIZED not_in sdl3.GetWindowFlags(app.window)))
@@ -76,7 +86,7 @@ main :: proc() {
 			begin_node(
 				&{
 					min_size = global_ctx.screen_size,
-					background = tw.NEUTRAL_950,
+					background = theme.color.background,
 					stroke = tw.NEUTRAL_600,
 					stroke_width = 1,
 					vertical = true,
@@ -135,33 +145,25 @@ main :: proc() {
 					},
 				).?
 				{
-					// begin_node(
-					// 	&{
-					// 		absolute = true,
-					// 		relative_offset = 0.5,
-					// 		relative_size = 0.25,
-					// 		align = 0.5,
-					// 		min_size = 20,
-					// 		background = tw.ROSE_800,
-					// 		z_index = 1,
-					// 	},
-					// )
-					// do_text(
-					// 	&{
-					// 		grow = true,
-					// 		max_size = INFINITY,
-					// 		stroke = tw.WHITE,
-					// 		stroke_width = 1,
-					// 		padding = 10,
-					// 	},
-					// 	FILLER_TEXT,
-					// 	14,
-					// 	&kn.DEFAULT_FONT,
-					// 	paint = tw.WHITE,
-					// )
-					// end_node()
-
-					do_text_editor(app)
+					begin_node(&{fit = 1, vertical = true, gap = 10})
+					{
+						begin_node(&{gap = 10, fit = 1})
+						for variant, i in Button_Variant {
+							push_id(i)
+							desc := make_button(fmt.tprint(variant), variant)
+							add_button(&desc)
+							pop_id()
+						}
+						end_node()
+						components.add_toggle_switch(&app.toggle_switch)
+						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider}).new_value.?;
+						   ok {
+							app.slider = new_value
+						}
+						//
+						components.add_radial_progress(&{size = 100, time = app.slider})
+					}
+					end_node()
 				}
 				end_node()
 			}
@@ -239,7 +241,7 @@ do_text :: proc(
 //
 //
 //
-do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
+do_text_editor :: proc(app: ^Explorer, loc := #caller_location) {
 	using opal, components
 	push_id(hash(loc))
 	defer pop_id()
@@ -287,16 +289,8 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 			//
 			// The toggle switch is a very simple component with fixed sizing so it can be added in one step
 			//
-			add_toggle_switch(&app.boolean)
+			// add_toggle_switch(&app.boolean)
 			//
-			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 10, value = app.edited_number, max_size = {200, INFINITY}, grow = {true, false}}).new_value.?;
-			   ok {
-				app.edited_number = new_value
-			}
-			if new_value, ok := add_slider(&Slider_Descriptor(f32){min = 0, max = 50, value = app.edited_number, max_size = {200, INFINITY}, grow = {true, false}}).new_value.?;
-			   ok {
-				app.edited_number = new_value
-			}
 		}
 		end_node()
 		//
@@ -304,19 +298,19 @@ do_text_editor :: proc(app: ^My_App, loc := #caller_location) {
 		//
 		{
 			// First, create the descriptor that will define the node as an editable input
-			desc := make_field_descriptor(&app.edited_text, type_info_of(type_of(app.edited_text)))
+			// desc := make_field_descriptor(&app.edited_text, type_info_of(type_of(app.edited_text)))
 			// Then apply my sizing preference
-			desc.min_size = {300, 200}
-			desc.grow = {true, false}
-			desc.max_size = {INFINITY, 0}
-			desc.placeholder = "Once upon a time..."
-			desc.value_data = &app.edited_number
-			desc.value_type_info = type_info_of(f32)
-			desc.format = "%.2f"
-			desc.wrapped = true
-			desc.show_scrollbars = true
+			// desc.min_size = {300, 200}
+			// desc.grow = {true, false}
+			// desc.max_size = {INFINITY, 0}
+			// desc.placeholder = "Once upon a time..."
+			// desc.value_data = &app.edited_number
+			// desc.value_type_info = type_info_of(f32)
+			// desc.format = "%.2f"
+			// desc.wrapped = true
+			// desc.show_scrollbars = true
 			// Then add the node to the UI and perform the input logic
-			add_field(&desc)
+			// add_field(&desc)
 		}
 	}
 	end_node()

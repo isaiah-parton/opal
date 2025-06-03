@@ -29,12 +29,12 @@ add_slider :: proc(
 	push_id(hash(loc))
 	defer pop_id()
 
+	desc.min_size.x = 100
 	desc.min_size.y = theme.base_size.y
 	radius := desc.min_size.y / 4
 	desc.interactive = true
-	desc.inherit_state = true
+	desc.group = true
 	desc.padding = theme.base_size.y * [4]f32{0, 0.25, 0, 0.25}
-	base_color :: tw.NEUTRAL_100
 
 	body_node := begin_node(desc).?
 	time: f32 = clamp(f32(desc.value) / f32(desc.max - desc.min), 0.0, 1.0)
@@ -46,9 +46,9 @@ add_slider :: proc(
 		&{
 			grow = true,
 			max_size = INFINITY,
-			inherit_state = true,
+			group = true,
 			padding = theme.base_size.y * [4]f32{0.5, 0.25, 0.5, 0.25},
-			background = tw.NEUTRAL_900,
+			background = tw.NEUTRAL_950,
 			radius = radius,
 		},
 	)
@@ -58,7 +58,7 @@ add_slider :: proc(
 			relative_size = {time, 1},
 			min_size = {radius * (1 - 2 * time), 0},
 			radius = {radius, 0, radius, 0},
-			background = base_color,
+			background = theme.color.secondary,
 		},
 	)
 	begin_node(&{grow = true, max_size = INFINITY})
@@ -71,11 +71,12 @@ add_slider :: proc(
 			align           = 0.5,
 			min_size        = thumb_size,
 			radius          = thumb_size / 2,
-			background      = base_color,
+			background      = theme.color.secondary_strong,
 			// stroke = tw.EMERALD_500,
 			// stroke_width = 2,
-			shadow_size     = 10,
-			shadow_color    = fade(tw.BLACK, 0.75),
+			shadow_size     = 4,
+			shadow_offset   = {-1, 2},
+			shadow_color    = fade(tw.BLACK, 0.5),
 			stroke          = fade(tw.WHITE, 0.1),
 			stroke_width    = 4 * body_node.transitions[1],
 			stroke_type     = .Outer,

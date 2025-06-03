@@ -17,7 +17,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			grow = {true, false},
 			content_align = {0, 0.5},
 			interactive = true,
-			inherit_state = true,
+			group = true,
 			style = {radius = 3},
 		},
 	).?

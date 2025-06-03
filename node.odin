@@ -46,94 +46,88 @@ Node_Style :: struct {
 }
 
 //
-// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  Many of these values change as the UI tree is built.
+// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  None of these values should be modified after initialization.
 //
 Node_Descriptor :: struct {
-	using style:        Node_Style,
+	using style:      Node_Style,
 
 	// Text
-	text:               string,
+	text:             string,
 
 	// Z index (higher values appear in front of lower ones), this value stacks down the tree
-	z_index:            u32,
+	z_index:          u32,
 
 	// The node's final box will be loosely bound within this box, maintaining its size
-	bounds:             Maybe(Box),
+	bounds:           Maybe(Box),
 
 	//
-	cursor:             Cursor,
+	cursor:           Cursor,
 
-	// Absolute nodes aren't affected by layout, they just get positioned and sized relative to their parent after its layout is known and then treated as roots
-	absolute:           bool,
+	// Absolute nodes aren't affected by their parent's layout
+	absolute:         bool,
 
 	//
-	exact_offset:       [2]f32,
-	relative_offset:    [2]f32,
-	relative_size:      [2]f32,
-	align:              [2]f32,
+	exact_offset:     [2]f32,
+	relative_offset:  [2]f32,
+	relative_size:    [2]f32,
+	align:            [2]f32,
 
 	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	min_size:           [2]f32,
+	min_size:         [2]f32,
 
 	// The maximum size the node is allowed to grow to
-	max_size:           [2]f32,
+	max_size:         [2]f32,
 
 	// If the node will be grown to fill available space
-	grow:               [2]bool,
+	grow:             [2]bool,
 
 	// If the node will grow to acommodate its contents
-	fit:                [2]f32,
+	fit:              [2]f32,
 
 	// Values for the node's children layout
-	padding:            [4]f32,
+	padding:          [4]f32,
 
 	// How the content will be aligned if there is extra space
-	content_align:      [2]f32,
+	content_align:    [2]f32,
 
 	// Spacing added between children
-	gap:                f32,
+	gap:              f32,
 
 	//
-	justify_between:    bool,
+	justify_between:  bool,
 
 	// If this node will inherit the combined state of its children
-	inherit_state:      bool,
+	group:            bool,
 
 	// If the node's children are arranged vertically
-	vertical:           bool,
+	vertical:         bool,
 
 	// Wraps contents
-	wrapped:            bool,
+	wrapped:          bool,
 
 	// Prevents the node from being adopted and instead adds it as a new root.
-	is_root:            bool,
+	is_root:          bool,
 
 	// If overflowing content is clipped
-	clip_content:       bool,
+	clip_content:     bool,
 
 	// If text content can be selected
-	enable_selection:   bool,
-
-	// Disallows inspection in the debug inspector
-	disable_inspection: bool,
+	enable_selection: bool,
 
 	// Show/hide scrollbars when content overflows
-	show_scrollbars:    bool,
+	show_scrollbars:  bool,
 
 	// Forces equal width and height when fitting to content size
-	square_fit:         bool,
+	square_fit:       bool,
 
 	//
-	interactive:        bool,
-
-	// An optional node that will behave as if it were this node's parent, when it doesn't in fact have one. Input state will be transfered to the owner.
-	// owner:              ^Node `fmt:"-"`,
+	interactive:      bool,
 
 	// Called after the default drawing behavior
-	on_draw:            proc(self: ^Node),
+	on_draw:          proc(self: ^Node),
 
 	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
-	data:               rawptr,
+	data:             rawptr,
 }
 
 Glyph :: struct {
@@ -147,99 +141,99 @@ Glyph :: struct {
 // Generic UI nodes, everything is a made out of these
 //
 Node :: struct {
-	using descriptor:        Node_Descriptor,
+	using descriptor:   Node_Descriptor,
 
 	// Node tree references
-	parent:                  ^Node,
-	children:                [dynamic]^Node `fmt:"-"`,
+	parent:             ^Node,
+	children:           [dynamic]^Node `fmt:"-"`,
 
 	// Layout tree references
-	layout_parent:           ^Node,
-	layout_children:         [dynamic]^Node `fmt:"-"`,
+	layout_parent:      ^Node,
+	layout_children:    [dynamic]^Node `fmt:"-"`,
 
 	// A simple kill switch that causes the node to be discarded
-	dead:                    bool,
+	dead:               bool,
 
 	// The node's size has changed and a sizing pass will be triggered
-	dirty:                   bool,
+	dirty:              bool,
 
 	// Last frame on which this node was invoked
-	frame:                   int,
-
-	// Unique identifier
-	id:                      Id `fmt:"x"`,
-
-	// The node's local position within its parent; or screen position if its a root
-	position:                [2]f32,
-
-	//
-	size:                    [2]f32,
-
-	// The last size known at invocation
-	last_size:               [2]f32,
-
-	//
-	last_relative_size:      [2]f32,
-
-	// Cached size to reuse when no sizing pass occurs
-	cached_size:             [2]f32,
-
-	// The content size minus the last calculated size
-	overflow:                [2]f32,
-
-	// This is computed as the minimum space required to fit all children or the node's text content with padding
-	content_size:            [2]f32,
-
-	// The `box` field represents the final position and size of the node and is only valid after `end()` has been called
-	box:                     Box,
-
-	// If this is the node with the highest z-index that the mouse overlaps
-	was_hovered:             bool,
-	is_hovered:              bool,
-	has_hovered_child:       bool,
-
-	// Active state (clicked)
-	was_active:              bool,
-	is_active:               bool,
-	has_active_child:        bool,
-
-	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
-	was_focused:             bool,
-	is_focused:              bool,
-	has_focused_child:       bool,
-	// TODO: WHYYYY?!?!
-	will_have_focused_child: bool,
-
-	// Times the node was clicked
-	click_count:             u8,
+	// Currently, this is only used to check for ID collisions
+	frame:              int,
 
 	// Time of last mouse down event over this node
-	last_click_time:         time.Time,
+	last_click_time:    time.Time,
 
-	// Interaction
-	is_toggled:              bool,
+	// Unique identifier
+	id:                 Id `fmt:"x"`,
+
+	// The node's local position within its parent; or screen position if its a root
+	position:           [2]f32,
+
+	// The accumulated size of the node on this frame. This value is unstable!
+	size:               [2]f32,
+
+	// The last known size; compared with the known size each frame to trigger a sizing pass
+	last_size:          [2]f32,
+
+	//
+	last_relative_size: [2]f32,
+
+	// Cached size from the last sizing pass
+	cached_size:        [2]f32,
+
+	// Amount of content overflow
+	// Computed at end of frame
+	overflow:           [2]f32,
+
+	// This is computed as the minimum space required to fit all children or the node's text content with padding
+	content_size:       [2]f32,
 
 	// The timestamp of the node's initialization in the context's arena
-	time_created:            time.Time,
+	// time_created:       time.Time,
 
 	// Text stuff
-	text_origin:             [2]f32,
-	text_size:               [2]f32,
-	text_view:               ^Text_View,
-	text_byte_index:         int,
-	text_glyph_index:        int,
-	glyphs:                  []Glyph `fmt:"-"`,
+	text_origin:        [2]f32,
+	text_size:          [2]f32,
+	text_view:          ^Text_View,
+	text_byte_index:    int,
+	text_glyph_index:   int,
+	glyphs:             []Glyph `fmt:"-"`,
 
 	// View offset of contents
-	scroll:                  [2]f32,
-	target_scroll:           [2]f32,
-
-	// Needs scissor
-	has_clipped_child:       bool,
-	is_clipped:              bool,
+	scroll:             [2]f32,
+	target_scroll:      [2]f32,
 
 	// Universal state transition values for smooth animations
-	transitions:             [3]f32,
+	transitions:        [3]f32,
+
+	// The node's final placement in screen coordinates
+	box:                Box,
+
+	// If this is the node with the highest z-index that the mouse overlaps
+	was_hovered:        bool,
+	is_hovered:         bool,
+	has_hovered_child:  bool,
+
+	// Active state (clicked)
+	was_active:         bool,
+	is_active:          bool,
+	has_active_child:   bool,
+
+	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
+	was_focused:        bool,
+	is_focused:         bool,
+	has_focused_child:  bool,
+
+	// Times the node was clicked
+	click_count:        u8,
+
+	// An arbitrary boolean state
+	is_toggled:         bool,
+
+	// Needs scissor
+	has_clipped_child:  bool,
+	is_clipped:         bool,
 }
 
 push_node :: proc(node: ^Node) {
@@ -282,16 +276,13 @@ node_update_input :: proc(self: ^Node) {
 node_update_propagated_input :: proc(self: ^Node) {
 	self.has_hovered_child = false
 	self.has_active_child = false
-
-	self.has_focused_child = self.will_have_focused_child
-	self.will_have_focused_child = false
 }
 
 node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
 	self.has_hovered_child |= child.is_hovered | child.has_hovered_child
 	self.has_active_child |= child.is_active | child.has_active_child
 	self.has_focused_child |= child.is_focused | child.has_focused_child
-	if self.inherit_state {
+	if self.group {
 		self.is_hovered |= self.has_hovered_child
 		self.is_active |= self.has_active_child
 		self.is_focused |= self.has_focused_child
@@ -629,7 +620,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	offset: f32 = self.padding[i]
 
 	for node in children {
-		node.position[i] = offset + (length_left + self.overflow[i]) * self.content_align[i]
+		node.position[i] = offset + (self.size[i] - self.content_size[i]) * self.content_align[i]
 
 		if node.grow[j] {
 			node.size[j] = min(span, node.max_size[j])

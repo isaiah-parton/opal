@@ -983,16 +983,19 @@ begin :: proc() {
 	ctx.frame_start_time = time.now()
 
 	//
-	// Reset UI state
+	// Reset ID stack
 	//
 	clear(&ctx.id_stack)
 	push_id(Id(FNV1A32_OFFSET_BASIS))
+
 	ctx.frame += 1
 	ctx.call_index = 0
 	ctx.widget_hovered = false
 	ctx.current_node = nil
 
-	// Check if this frame received input
+	//
+	// Process input received this frame
+	//
 	if ctx.active {
 		ctx_on_input_received(ctx)
 	}
@@ -1147,7 +1150,6 @@ end :: proc() {
 	//
 	// Draw debug widgets
 	//
-	// Draw debug lines
 	if self, ok := ctx.node_by_id[ctx.inspector.inspected_id]; ok {
 		too_smol: bool
 		if self.parent != nil {
@@ -1283,8 +1285,8 @@ get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
 		for &slot, slot_index in ctx.nodes {
 			if slot == nil {
 				ctx.nodes[slot_index] = Node {
-					id           = id,
-					time_created = time.now(),
+					id = id,
+					// time_created = time.now(),
 				}
 				node = &ctx.nodes[slot_index].?
 				ctx.node_by_id[id] = node

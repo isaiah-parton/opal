@@ -33,7 +33,7 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 		radius = 3,
 		clip_content = true,
 		interactive = true,
-		inherit_state = true,
+		group = true,
 		wrapped = true,
 		stroke_type = .Outer,
 		value_data = data,
@@ -264,3 +264,4 @@ field_output :: proc(
 
 	}
 	*/
+

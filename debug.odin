@@ -36,7 +36,6 @@ inspector_show :: proc(self: ^Inspector) {
 			stroke = tw.CYAN_800,
 			background = _BACKGROUND,
 			z_index = 1,
-			disable_inspection = true,
 			radius = 7,
 		},
 	).?
@@ -243,9 +242,6 @@ inspector_build_tree :: proc(self: ^Inspector) {
 		},
 	)
 	for root in global_ctx.roots {
-		if root.disable_inspection {
-			continue
-		}
 		inspector_build_node_widget(self, root)
 	}
 	end_node()
@@ -267,7 +263,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			padding = {4, 2, 4, 2},
 			fit = {0, 1},
 			interactive = true,
-			inherit_state = true,
+			group = true,
 		},
 	).?
 	add_node(&{min_size = 14, on_draw = nil if len(node.children) == 0 else proc(self: ^Node) {
@@ -310,6 +306,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 				grow = {true, false},
 				max_size = INFINITY,
 				fit = {0, ease.quadratic_in_out(button_node.transitions[0])},
+				content_align = {0, 1},
 				clip_content = true,
 				vertical = true,
 			},
