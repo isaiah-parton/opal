@@ -45,6 +45,46 @@ Node_Style :: struct {
 	shadow_size:      f32,
 }
 
+/*
+Node_Empty :: struct {
+	size: [2]f32,
+}
+
+Node_Text :: struct {
+	data: string,
+	size: f32,
+	font: ^Font,
+}
+
+Node_Arc :: struct {
+	fill:         Paint_Variant,
+	start_angle:  f32,
+	end_angle:    f32,
+	inner_radius: f32,
+	outer_radius: f32,
+	square:       bool,
+}
+
+Node_Rectangle :: struct {
+	fill:          Paint_Variant,
+	stroke:        Paint_Variant,
+	radii:         [4]f32,
+	size:          [2]f32,
+	shadow_color:  Color,
+	shadow_offset: [2]f32,
+	shadow_size:   f32,
+	stroke_width:  f32,
+	stroke_type:   Stroke_Type,
+}
+
+Node_Variant :: union #no_nil {
+	Node_Empty,
+	Node_Text,
+	Node_Arc,
+	Node_Rectangle,
+}
+*/
+
 //
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  None of these values should be modified after initialization.
 //
@@ -1055,4 +1095,3 @@ node_get_padded_box :: proc(self: ^Node) -> Box {
 node_fit_to_content :: proc(self: ^Node) {
 	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
 }
-

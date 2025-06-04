@@ -2,6 +2,7 @@ package components
 
 import ".."
 import kn "../../katana"
+import "core:fmt"
 import "core:math"
 
 Radial_Progress_Descriptor :: struct {
@@ -40,6 +41,17 @@ add_radial_progress :: proc(desc: ^Radial_Progress_Descriptor, loc := #caller_lo
 			paint = self.foreground.(Color),
 		)
 	}
-	add_node(&desc.base)
+	begin_node(&desc.base)
+	add_node(
+		&{
+			absolute = true,
+			relative_offset = 0.5,
+			align = 0.5,
+			text = fmt.tprintf("%i%%", int(desc.time * 100)),
+			font_size = 14,
+			foreground = theme.color.primary,
+			fit = 1,
+		},
+	)
+	end_node()
 }
-

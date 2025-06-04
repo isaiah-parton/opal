@@ -149,6 +149,8 @@ Mouse_Button :: enum {
 	Right,
 }
 
+Mouse_Buttons :: bit_set[Mouse_Button]
+
 Node_Relative_Placement :: struct {
 	node:            ^Node,
 	relative_offset: [2]f32,
@@ -207,6 +209,7 @@ Font :: kn.Font
 
 Node_Result :: Maybe(^Node)
 
+/*
 Rule_Background :: distinct Paint_Variant
 Rule_Foreground :: distinct Paint_Option
 Rule_Stroke :: distinct Paint_Option
@@ -252,6 +255,7 @@ Rules :: struct {
 	shadow_color:     Rule_Shadow_Color,
 	shadow_size:      Rule_Shadow_Size,
 }
+*/
 
 Context_Color :: enum {
 	Selection_Background,
@@ -312,8 +316,8 @@ Context :: struct {
 	node_click_offset:         Vector2,
 
 	// Current and previous states of mouse buttons
-	mouse_button_down:         [Mouse_Button]bool,
-	mouse_button_was_down:     [Mouse_Button]bool,
+	mouse_button_down:         Mouse_Buttons,
+	mouse_button_was_down:     Mouse_Buttons,
 
 	// Current and previous state of keyboard
 	key_down:                  [Keyboard_Key]bool,
@@ -328,7 +332,6 @@ Context :: struct {
 	// Transient pointers to interacted nodes
 	hovered_node:              ^Node,
 	focused_node:              ^Node,
-	active_node:               ^Node,
 
 	// Ids of interacted nodes
 	hovered_id:                Id,
@@ -878,7 +881,7 @@ handle_key_up :: proc(key: Keyboard_Key) {
 
 handle_mouse_down :: proc(button: Mouse_Button) {
 	ctx := global_ctx
-	ctx.mouse_button_down[button] = true
+	ctx.mouse_button_down += {button}
 	ctx.last_mouse_down_button = button
 	ctx.last_mouse_down_time = time.now()
 	draw_frames(2)
@@ -886,7 +889,7 @@ handle_mouse_down :: proc(button: Mouse_Button) {
 
 handle_mouse_up :: proc(button: Mouse_Button) {
 	ctx := global_ctx
-	ctx.mouse_button_down[button] = false
+	ctx.mouse_button_down -= {button}
 	draw_frames(2)
 }
 
@@ -906,17 +909,17 @@ handle_window_move :: proc() {
 
 mouse_down :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
-	return ctx.mouse_button_down[button]
+	return button in ctx.mouse_button_down
 }
 
 mouse_pressed :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
-	return ctx.mouse_button_down[button] && !ctx.mouse_button_was_down[button]
+	return button in ctx.mouse_button_down && button not_in ctx.mouse_button_was_down
 }
 
 mouse_released :: proc(button: Mouse_Button) -> bool {
 	ctx := global_ctx
-	return !ctx.mouse_button_down[button] && ctx.mouse_button_was_down[button]
+	return button not_in ctx.mouse_button_down && button in ctx.mouse_button_was_down
 }
 
 key_down :: proc(key: Keyboard_Key) -> bool {
@@ -936,10 +939,9 @@ key_released :: proc(key: Keyboard_Key) -> bool {
 
 ctx_on_input_received :: proc(ctx: ^Context) {
 	// Resolve input state
-	ctx.focused_node = nil
-	ctx.active_node = nil
 	ctx.scrollable_node = nil
 	ctx.hovered_node = nil
+	ctx.focused_node = nil
 
 	for root in ctx.roots {
 		node_receive_input_recursive(root)
@@ -965,7 +967,7 @@ begin :: proc() {
 	frame_interval := ctx.frame_interval
 
 	// Cap framerate to 30 after a short period of inactivity
-	if time.since(ctx.last_draw_time) > time.Millisecond * 500 {
+	if time.since(ctx.last_draw_time) > time.Millisecond * 200 {
 		frame_interval = time.Second / 20
 	}
 
@@ -977,7 +979,7 @@ begin :: proc() {
 
 	// Sleep to limit framerate
 	if ctx.interval_duration < frame_interval {
-		sdl3.DelayNS(u64(frame_interval - ctx.interval_duration))
+		time.sleep(frame_interval - ctx.interval_duration)
 	}
 
 	ctx.frame_start_time = time.now()
@@ -993,64 +995,68 @@ begin :: proc() {
 	ctx.widget_hovered = false
 	ctx.current_node = nil
 
+	do_mouse_input_pass :=
+		ctx.mouse_position != ctx.last_mouse_position ||
+		ctx.mouse_button_down != ctx.mouse_button_was_down
+
 	//
 	// Process input received this frame
 	//
-	if ctx.active {
+	if do_mouse_input_pass {
 		ctx_on_input_received(ctx)
-	}
 
-	if !mouse_down(.Left) {
-		ctx.text_agent.hovered_view = nil
-	}
-
-	if ctx.hovered_node != nil {
-		node := ctx.hovered_node
-		ctx.hovered_id = node.id
-
-		if node.enable_selection && node.text_view != nil && len(node.glyphs) > 0 {
-			// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
-			ctx.text_agent.hovered_view = node.text_view
-			// }
-		}
-
-		if node.interactive {
-			ctx.widget_hovered = true
-		}
-	} else {
-		ctx.hovered_id = 0
-	}
-
-	if mouse_pressed(.Left) {
-		// Individual node interaction
 		if ctx.hovered_node != nil {
-			ctx.active_node = ctx.hovered_node
-			// Reset click counter if there was too much delay
-			if time.since(ctx.hovered_node.last_click_time) > time.Millisecond * 300 {
-				ctx.hovered_node.click_count = 0
+			node := ctx.hovered_node
+			ctx.hovered_id = node.id
+
+			if node.enable_selection && node.text_view != nil && len(node.glyphs) > 0 {
+				// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
+				ctx.text_agent.hovered_view = node.text_view
+				// }
 			}
-			ctx.hovered_node.click_count += 1
-			ctx.node_click_offset = ctx.mouse_position - ctx.hovered_node.box.lo
-			ctx.hovered_node.last_click_time = time.now()
-			ctx.focused_id = ctx.hovered_node.id
+
+			if node.interactive {
+				ctx.widget_hovered = true
+			}
 		} else {
-			ctx.focused_id = 0
+			ctx.hovered_id = 0
 		}
 
-		text_agent_on_mouse_down(&ctx.text_agent, .Left)
+		// Active nodes deactivate when the mouse leaves them
+		if ctx.hovered_id != ctx.active_id {
+			ctx.active_id = 0
+		}
+
+		if mouse_released(.Left) {
+			ctx.text_agent.hovered_view = nil
+			ctx.active_id = 0
+			text_agent_on_mouse_up(&ctx.text_agent)
+		}
+
+		if mouse_pressed(.Left) {
+			// Individual node interaction
+			if ctx.hovered_node != nil {
+				ctx.active_id = ctx.hovered_node.id
+				// Reset click counter if there was too much delay
+				if time.since(ctx.hovered_node.last_click_time) > time.Millisecond * 300 {
+					ctx.hovered_node.click_count = 0
+				}
+				ctx.hovered_node.click_count += 1
+				ctx.node_click_offset = ctx.mouse_position - ctx.hovered_node.box.lo
+				ctx.hovered_node.last_click_time = time.now()
+				ctx.focused_id = ctx.hovered_node.id
+			} else {
+				ctx.focused_id = 0
+			}
+
+			text_agent_on_mouse_down(&ctx.text_agent, .Left)
+		}
+
+		if mouse_down(.Left) {
+			text_agent_when_mouse_down(&ctx.text_agent)
+		}
 	}
 
-	if mouse_down(.Left) {
-		text_agent_when_mouse_down(&ctx.text_agent)
-	}
-
-	if ctx.active_node != nil {
-		ctx.active_id = ctx.active_node.id
-	} else if mouse_released(.Left) {
-		ctx.active_id = 0
-
-		text_agent_on_mouse_up(&ctx.text_agent)
-	}
 
 	// Receive mouse wheel input
 	if ctx.scrollable_node != nil {
@@ -1524,4 +1530,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-

@@ -80,7 +80,7 @@ add_slider :: proc(
 			stroke          = fade(tw.WHITE, 0.1),
 			stroke_width    = 4 * body_node.transitions[1],
 			stroke_type     = .Outer,
-			interactive     = true,
+			// interactive     = true,
 		},
 	)
 
@@ -101,4 +101,3 @@ add_slider :: proc(
 
 	return
 }
-
