@@ -14,6 +14,7 @@ Field_Descriptor :: struct {
 	using base:      opal.Node_Descriptor,
 	placeholder:     string,
 	format:          string,
+	multiline:       bool,
 	value_data:      rawptr,
 	value_type_info: ^runtime.Type_Info,
 }
@@ -30,15 +31,15 @@ make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Fi
 		stroke_width = 1,
 		font_size = 16,
 		padding = 4,
-		radius = 3,
+		radius = 5,
 		clip_content = true,
 		interactive = true,
+		enable_selection = true,
 		group = true,
 		wrapped = true,
 		stroke_type = .Outer,
 		value_data = data,
 		value_type_info = type_info,
-		cursor = .Text,
 		format = "%v",
 	}
 }
@@ -49,7 +50,9 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	edit := cont_node.is_focused || cont_node.has_focused_child
 
-	text_view := begin_text_view({id = hash_loc(loc), show_cursor = true, editing = edit}).?
+	text_view := begin_text_view(
+		{id = hash_loc(loc), show_cursor = true, editing = edit, container_node = cont_node},
+	).?
 
 	{
 		text: string
@@ -62,7 +65,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			)
 		}
 
-		if desc.placeholder != "" && len(text) == 0 {
+		if len(desc.placeholder) > 0 && len(text) == 0 {
 			push_id(hash(loc))
 			add_node(
 				&{
@@ -74,6 +77,20 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 				},
 			)
 			pop_id()
+		}
+
+		if len(text) == 0 {
+			add_node(
+				&{
+					font = desc.font,
+					font_size = desc.font_size,
+					foreground = tw.WHITE,
+					text = "\u0000",
+					fit = 1,
+					interactive = true,
+					enable_selection = true,
+				},
+			)
 		}
 
 		j := 1
@@ -96,7 +113,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					fit = 1,
 					interactive = true,
 					enable_selection = true,
-					cursor = .Text,
 				},
 			)
 			pop_id()
@@ -104,11 +120,10 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			j += 1
 			text = text[i:]
 		}
-
 	}
 
-	end_node()
 	end_text_view()
+	end_node()
 
 	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
 	node_update_transition(cont_node, 1, cont_node.is_focused, 0.1)
@@ -140,13 +155,13 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
 		if key_pressed(.Enter) {
 			cmd = .New_Line
-			// if self.is_multiline {
-			// 	if control_down {
-			// 		res.was_confirmed = true
-			// 	}
-			// } else {
-			// 	res.was_confirmed = true
-			// }
+			if desc.multiline {
+				if control_down {
+					res.was_confirmed = true
+				}
+			} else {
+				res.was_confirmed = true
+			}
 		}
 		if key_pressed(.Left) {
 			if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
@@ -170,9 +185,9 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		if key_pressed(.End) {
 			cmd = .Select_Line_End if control_down else .Line_End
 		}
-		// if !self.is_multiline && (cmd in MULTILINE_COMMANDS) {
-		// 	cmd = .None
-		// }
+		if !desc.multiline && (cmd in MULTILINE_COMMANDS) {
+			cmd = .None
+		}
 		if cmd != .None {
 			text_view_execute(text_view, cmd)
 			if cmd in EDIT_COMMANDS {

@@ -161,6 +161,9 @@ Node_Descriptor :: struct {
 	square_fit:       bool,
 
 	//
+	sticky:           bool,
+
+	//
 	interactive:      bool,
 
 	// Called after the default drawing behavior
@@ -1095,3 +1098,4 @@ node_get_padded_box :: proc(self: ^Node) -> Box {
 node_fit_to_content :: proc(self: ^Node) {
 	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
 }
+

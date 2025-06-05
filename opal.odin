@@ -337,6 +337,7 @@ Context :: struct {
 	hovered_id:                Id,
 	focused_id:                Id,
 	active_id:                 Id,
+	active_is_sticky:          bool,
 
 	// Private cursor state
 	cursor:                    Cursor,
@@ -946,8 +947,6 @@ ctx_on_input_received :: proc(ctx: ^Context) {
 	for root in ctx.roots {
 		node_receive_input_recursive(root)
 	}
-
-	text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
 }
 
 //
@@ -1009,7 +1008,7 @@ begin :: proc() {
 			node := ctx.hovered_node
 			ctx.hovered_id = node.id
 
-			if node.enable_selection && node.text_view != nil && len(node.glyphs) > 0 {
+			if node.enable_selection && node.text_view != nil {
 				// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
 				ctx.text_agent.hovered_view = node.text_view
 				// }
@@ -1018,12 +1017,12 @@ begin :: proc() {
 			if node.interactive {
 				ctx.widget_hovered = true
 			}
-		} else {
-			ctx.hovered_id = 0
 		}
 
+		text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
+
 		// Active nodes deactivate when the mouse leaves them
-		if ctx.hovered_id != ctx.active_id {
+		if ctx.hovered_id != ctx.active_id && !ctx.active_is_sticky {
 			ctx.active_id = 0
 		}
 
@@ -1037,6 +1036,7 @@ begin :: proc() {
 			// Individual node interaction
 			if ctx.hovered_node != nil {
 				ctx.active_id = ctx.hovered_node.id
+				ctx.active_is_sticky = ctx.hovered_node.sticky
 				// Reset click counter if there was too much delay
 				if time.since(ctx.hovered_node.last_click_time) > time.Millisecond * 300 {
 					ctx.hovered_node.click_count = 0
@@ -1074,6 +1074,10 @@ begin :: proc() {
 	//
 	for id, node in ctx.node_by_id {
 		if node.dead {
+			// TODO: Uhhhhh
+			if ctx.focused_id == node.id && node.parent != nil && node.parent.group {
+				ctx.focused_id = node.parent.id
+			}
 			delete_key(&ctx.node_by_id, node.id)
 			node_destroy(node)
 			(^Maybe(Node))(node)^ = nil
@@ -1530,3 +1534,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

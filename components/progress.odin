@@ -49,9 +49,10 @@ add_radial_progress :: proc(desc: ^Radial_Progress_Descriptor, loc := #caller_lo
 			align = 0.5,
 			text = fmt.tprintf("%i%%", int(desc.time * 100)),
 			font_size = 14,
-			foreground = theme.color.primary,
+			foreground = theme.color.base_foreground,
 			fit = 1,
 		},
 	)
 	end_node()
 }
+

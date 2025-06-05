@@ -33,6 +33,7 @@ add_slider :: proc(
 	desc.min_size.y = theme.base_size.y
 	radius := desc.min_size.y / 4
 	desc.interactive = true
+	desc.sticky = true
 	desc.group = true
 	desc.padding = theme.base_size.y * [4]f32{0, 0.25, 0, 0.25}
 
@@ -101,3 +102,4 @@ add_slider :: proc(
 
 	return
 }
+

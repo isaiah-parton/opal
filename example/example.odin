@@ -30,6 +30,7 @@ Explorer :: struct {
 	using app:     sdl3app.App,
 	toggle_switch: bool,
 	slider:        f32,
+	text:          string,
 	cwd:           string,
 	items:         [dynamic]Item,
 }
@@ -161,7 +162,13 @@ main :: proc() {
 							app.slider = new_value
 						}
 						//
-						components.add_radial_progress(&{size = 100, time = app.slider})
+						components.add_radial_progress(&{size = 70, time = app.slider})
+						//
+						desc := make_field_descriptor(&app.text, type_info_of(string))
+						desc.min_size = {200, 26}
+						desc.multiline = true
+						desc.fit = {0, 1}
+						components.add_field(&desc)
 					}
 					end_node()
 				}

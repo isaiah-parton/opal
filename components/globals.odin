@@ -24,6 +24,7 @@ Colors :: struct {
 	accent:               opal.Color,
 	background:           opal.Color,
 	base_strong:          opal.Color,
+	base_foreground:      opal.Color,
 }
 
 theme: Theme = {
@@ -41,6 +42,7 @@ theme: Theme = {
 		secondary_foreground = tw.NEUTRAL_950,
 		secondary_strong = tw.NEUTRAL_600,
 		border = tw.NEUTRAL_500,
+		base_foreground = tw.NEUTRAL_50,
 	},
 }
 

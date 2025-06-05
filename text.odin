@@ -80,9 +80,10 @@ Translation :: enum u32 {
 
 //
 Text_View_Descriptor :: struct {
-	id:          Id,
-	show_cursor: bool,
-	editing:     bool,
+	id:             Id,
+	show_cursor:    bool,
+	editing:        bool,
+	container_node: ^Node,
 }
 
 //
@@ -594,6 +595,10 @@ text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> 
 	text.desc = desc
 	text.byte_length = 0
 	text.dead = false
+
+	if text.container_node != nil {
+		text.container_node.text_view = text
+	}
 
 	if !text.editing {
 		strings.builder_reset(&text.builder)
