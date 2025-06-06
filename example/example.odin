@@ -71,12 +71,16 @@ main :: proc() {
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
 			lucide.load()
-			components.theme.icon_font = &lucide.font
+			components.theme.icon_font = lucide.font
 			opal.set_color(.Selection_Background, tw.SKY_500)
 			opal.set_color(.Selection_Foreground, tw.BLACK)
 			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
 			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
 			opal.global_ctx.snap_to_pixels = true
+			components.theme.font, _ = kn.load_font_from_files(
+				"Lexend-Regular.png",
+				"Lexend-Regular.json",
+			)
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
@@ -431,7 +435,7 @@ do_text_editor :: proc(app: ^Explorer, loc := #caller_location) {
 		self := add_node(
 			&{
 				text = string_from_rune(icon),
-				font = theme.icon_font,
+				font = &theme.icon_font,
 				font_size = 24,
 				foreground = tw.WHITE,
 				fit = 1,
@@ -454,7 +458,7 @@ do_text_editor :: proc(app: ^Explorer, loc := #caller_location) {
 		self := add_node(
 			&{
 				text = string_from_rune(icon),
-				font = theme.icon_font,
+				font = &theme.icon_font,
 				font_size = 24,
 				foreground = tw.WHITE,
 				fit = 1,

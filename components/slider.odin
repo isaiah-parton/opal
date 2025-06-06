@@ -67,21 +67,15 @@ add_slider :: proc(
 	thumb_size := desc.min_size.y * (1 - body_node.transitions[1] * 0.15)
 	add_node(
 		&{
-			absolute        = true,
+			absolute = true,
 			relative_offset = {time, 0.5},
-			align           = 0.5,
-			min_size        = thumb_size,
-			radius          = thumb_size / 2,
-			background      = theme.color.secondary_strong,
-			// stroke = tw.EMERALD_500,
-			// stroke_width = 2,
-			shadow_size     = 4,
-			shadow_offset   = {-1, 2},
-			shadow_color    = fade(tw.BLACK, 0.5),
-			// stroke          = fade(tw.WHITE, 0.1),
-			// stroke_width    = 4 * body_node.transitions[1],
-			// stroke_type     = .Outer,
-			// interactive     = true,
+			align = 0.5,
+			min_size = thumb_size,
+			radius = thumb_size / 2,
+			background = theme.color.secondary_strong,
+			shadow_size = 4,
+			shadow_offset = {-1, 2},
+			shadow_color = fade(tw.BLACK, 0.5),
 		},
 	)
 

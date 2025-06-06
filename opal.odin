@@ -1424,10 +1424,10 @@ end_node :: proc() {
 					vertical = true,
 				},
 			).?
-			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
-			node.size.x += added_size
+			added_size := SCROLLBAR_SIZE * node.transitions[1]
+			node.min_size.x += added_size
 			node.exact_offset.x -= added_size
-			node.radius = node.size.x / 2
+			node.radius = node.min_size.x / 2
 		}
 
 		if self.overflow.x > 0 {

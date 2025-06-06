@@ -31,7 +31,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		&{
 			text = string_from_rune(icon),
 			fit = 1,
-			style = {foreground = tw.NEUTRAL_300, font_size = 14, font = theme.icon_font},
+			style = {foreground = tw.NEUTRAL_300, font_size = 14, font = &theme.icon_font},
 		},
 	)
 	add_node(&{text = label, fit = 1, style = {font_size = 12, foreground = tw.NEUTRAL_300}})

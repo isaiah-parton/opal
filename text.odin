@@ -103,6 +103,9 @@ Text_View :: struct {
 	// Selection in glyph indices
 	selection:        [2]int,
 
+	//
+	last_selection:   [2]int,
+
 	// Anchor for word selection
 	anchor:           int,
 
@@ -522,6 +525,27 @@ text_view_get_selection_string :: proc(
 	return strings.to_string(b)
 }
 
+text_view_update_viewport :: proc(self: ^Text_View) {
+	if self.container_node == nil {
+		return
+	}
+
+	node := self.container_node
+
+	// Make sure to clip the cursor
+	padded_box := node_get_padded_box(node)
+	left := max(0, padded_box.lo.x - self.cursor_box.lo.x)
+	top := max(0, padded_box.lo.y - self.cursor_box.lo.y)
+	right := max(0, self.cursor_box.hi.x - padded_box.hi.x)
+	bottom := max(0, self.cursor_box.hi.y - padded_box.hi.y)
+	node.has_clipped_child |= max(left, right) > 0
+	node.has_clipped_child |= max(top, bottom) > 0
+
+	// Scroll to bring cursor into view
+	node.target_scroll.x += right - left
+	node.target_scroll.y += bottom - top
+}
+
 // text_view_draw_highlight_shape :: proc(self: ^Text_View) {
 // 	selection := text_view_get_ordered_selection(self)
 
@@ -612,30 +636,35 @@ Text_Agent :: struct {
 }
 
 text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> Maybe(^Text_View) {
-	text, ok := self.dict[desc.id]
+	view, ok := self.dict[desc.id]
 	if !ok {
 		append(&self.array, Text_View{desc = desc})
-		text = &self.array[len(self.array) - 1]
-		self.dict[desc.id] = text
+		view = &self.array[len(self.array) - 1]
+		self.dict[desc.id] = view
 	}
-	append(&self.stack, text)
+	append(&self.stack, view)
 
-	text.desc = desc
-	text.byte_length = 0
-	text.dead = false
+	view.desc = desc
+	view.byte_length = 0
+	view.dead = false
 
-	if text.container_node != nil {
-		text.container_node.text_view = text
+	if view.selection != view.last_selection {
+		text_view_update_viewport(view)
+	}
+	view.last_selection = view.selection
+
+	if view.container_node != nil {
+		view.container_node.text_view = view
 	}
 
-	if !text.editing {
-		strings.builder_reset(&text.builder)
+	if !view.editing {
+		strings.builder_reset(&view.builder)
 	}
 
-	clear(&text.glyphs)
-	clear(&text.nodes)
+	clear(&view.glyphs)
+	clear(&view.nodes)
 
-	return text
+	return view
 }
 
 text_agent_end_view :: proc(self: ^Text_Agent) {

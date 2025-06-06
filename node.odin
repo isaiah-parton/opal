@@ -675,6 +675,9 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	}
 }
 
+//
+// Solve wrapped or normal layout
+//
 node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 	i := int(self.vertical)
 	j := 1 - i
@@ -698,8 +701,12 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 				)
 				line_start = child_index
 
-				content_size[i] = max(content_size[i], offset)
-				offset = 0
+				if offset == 0 {
+					content_size[i] = max(content_size[i], offset + child.size[i])
+				} else {
+					content_size[i] = max(content_size[i], offset)
+					offset = 0
+				}
 				content_size[j] += line_span + self.gap
 				line_span = 0
 			}
@@ -719,8 +726,10 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			content_size[j],
 		)
 
-		content_size[j] += line_span + self.padding[j] + self.padding[j + 2]
+		content_size += self.padding.xy + self.padding.zw
+		content_size[j] += line_span
 
+		// TODO: Remove or keep this
 		// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
 		// if self.parent != nil && self.parent.vertical == self.vertical {
 		// 	line_offset = min(
@@ -868,6 +877,11 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 	return
 }
 
+//
+// Procedures for transforming nodes
+//
+
+
 node_get_span :: proc(self: ^Node) -> f32 {
 	if self.vertical {
 		return self.size.x - self.padding.x - self.padding.z
@@ -937,27 +951,6 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 		(self.has_clipped_child ||
 				max(self.overflow.x, self.overflow.y) > 0.1 ||
 				max(abs(self.scroll.x), abs(self.scroll.y)) > 0.1)
-
-	// Compute text selection state if enabled
-	// if self.enable_selection {
-	// 	cursor_box := text_get_cursor_box(&self.text_layout, text_origin)
-
-	// 	// Make sure to clip the cursor
-	// 	padded_box := node_get_padded_box(self)
-	// 	left := max(0, padded_box.lo.x - cursor_box.lo.x)
-	// 	top := max(0, padded_box.lo.y - cursor_box.lo.y)
-	// 	right := max(0, cursor_box.hi.x - padded_box.hi.x)
-	// 	bottom := max(0, cursor_box.hi.y - padded_box.hi.y)
-	// 	enable_scissor |= max(left, right) > 0
-	// 	enable_scissor |= max(top, bottom) > 0
-
-	// 	// Scroll to bring cursor into view
-	// 	if self.is_focused && self.editor.selection != self.last_selection {
-	// 		self.target_scroll.x += right - left
-	// 		self.target_scroll.y += bottom - top
-	// 	}
-	// }
-	//
 
 	z_index := z_index + self.z_index
 

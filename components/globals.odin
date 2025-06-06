@@ -4,8 +4,9 @@ import ".."
 import tw "../tailwind_colors"
 
 Theme :: struct {
-	font:            ^opal.Font,
-	icon_font:       ^opal.Font,
+	font:            opal.Font,
+	monospace_font:  opal.Font,
+	icon_font:       opal.Font,
 	radius_small:    f32,
 	radius_big:      f32,
 	color:           Colors,

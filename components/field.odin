@@ -30,6 +30,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	assert(desc != nil)
 
+	ctx := global_ctx
+
 	desc.background = tw.NEUTRAL_950
 	desc.stroke = tw.NEUTRAL_500
 	desc.font_size = 14
@@ -52,6 +54,71 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	text_view := begin_text_view(
 		{id = hash_loc(loc), show_cursor = true, editing = edit, container_node = cont_node},
 	).?
+
+	if edit {
+		cmd: Command
+		control_down := key_down(.Left_Control) || key_down(.Right_Control)
+		shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
+		if control_down {
+			if key_pressed(.A) do cmd = .Select_All
+			if key_pressed(.C) do cmd = .Copy
+			if key_pressed(.V) do cmd = .Paste
+			if key_pressed(.X) do cmd = .Cut
+			if key_pressed(.Z) do cmd = .Undo
+			if key_pressed(.Y) do cmd = .Redo
+		}
+		if len(ctx.text_input) > 0 {
+			for char, c in ctx.text_input {
+				text_view_insert_runes(text_view, {char})
+				draw_frames(1)
+				res.was_changed = true
+			}
+		}
+		if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
+		if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
+		if key_pressed(.Enter) {
+			cmd = .New_Line
+			if desc.multiline {
+				if control_down {
+					res.was_confirmed = true
+				}
+			} else {
+				res.was_confirmed = true
+			}
+		}
+		if key_pressed(.Left) {
+			if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
+			else do cmd = .Word_Left if control_down else .Left
+		}
+		if key_pressed(.Right) {
+			if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
+			else do cmd = .Word_Right if control_down else .Right
+		}
+		if key_pressed(.Up) {
+			if shift_down do cmd = .Select_Up
+			else do cmd = .Up
+		}
+		if key_pressed(.Down) {
+			if shift_down do cmd = .Select_Down
+			else do cmd = .Down
+		}
+		if key_pressed(.Home) {
+			cmd = .Select_Line_Start if control_down else .Line_Start
+		}
+		if key_pressed(.End) {
+			cmd = .Select_Line_End if control_down else .Line_End
+		}
+		if !desc.multiline && (cmd in MULTILINE_COMMANDS) {
+			cmd = .None
+		}
+		if cmd != .None {
+			text_view_execute(text_view, cmd)
+			if cmd in EDIT_COMMANDS {
+				res.was_changed = true
+			}
+			draw_frames(1)
+		}
+	}
 
 	{
 		text: string
@@ -132,73 +199,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	node_update_transition(cont_node, 1, edit, 0.1)
 	cont_node.style.stroke = tw.LIME_500
 	cont_node.style.stroke_width = 3 * cont_node.transitions[1]
-
-	ctx := global_ctx
-
-	if edit {
-		cmd: Command
-		control_down := key_down(.Left_Control) || key_down(.Right_Control)
-		shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)
-		if control_down {
-			if key_pressed(.A) do cmd = .Select_All
-			if key_pressed(.C) do cmd = .Copy
-			if key_pressed(.V) do cmd = .Paste
-			if key_pressed(.X) do cmd = .Cut
-			if key_pressed(.Z) do cmd = .Undo
-			if key_pressed(.Y) do cmd = .Redo
-		}
-		if len(ctx.text_input) > 0 {
-			for char, c in ctx.text_input {
-				text_view_insert_runes(text_view, {char})
-				draw_frames(1)
-				res.was_changed = true
-			}
-		}
-		if key_pressed(.Backspace) do cmd = .Delete_Word_Left if control_down else .Backspace
-		if key_pressed(.Delete) do cmd = .Delete_Word_Right if control_down else .Delete
-		if key_pressed(.Enter) {
-			cmd = .New_Line
-			if desc.multiline {
-				if control_down {
-					res.was_confirmed = true
-				}
-			} else {
-				res.was_confirmed = true
-			}
-		}
-		if key_pressed(.Left) {
-			if shift_down do cmd = .Select_Word_Left if control_down else .Select_Left
-			else do cmd = .Word_Left if control_down else .Left
-		}
-		if key_pressed(.Right) {
-			if shift_down do cmd = .Select_Word_Right if control_down else .Select_Right
-			else do cmd = .Word_Right if control_down else .Right
-		}
-		if key_pressed(.Up) {
-			if shift_down do cmd = .Select_Up
-			else do cmd = .Up
-		}
-		if key_pressed(.Down) {
-			if shift_down do cmd = .Select_Down
-			else do cmd = .Down
-		}
-		if key_pressed(.Home) {
-			cmd = .Select_Line_Start if control_down else .Line_Start
-		}
-		if key_pressed(.End) {
-			cmd = .Select_Line_End if control_down else .Line_End
-		}
-		if !desc.multiline && (cmd in MULTILINE_COMMANDS) {
-			cmd = .None
-		}
-		if cmd != .None {
-			text_view_execute(text_view, cmd)
-			if cmd in EDIT_COMMANDS {
-				res.was_changed = true
-			}
-			draw_frames(1)
-		}
-	}
 
 	if res.was_changed {
 		field_output(desc.value_data, desc.value_type_info, strings.to_string(text_view.builder))
