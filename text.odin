@@ -106,6 +106,9 @@ Text_View :: struct {
 	// Anchor for word selection
 	anchor:           int,
 
+	//
+	cursor_box:       Box,
+
 	// Interactive nodes with text
 	nodes:            [dynamic]^Node,
 
@@ -396,6 +399,11 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 	}
 }
 
+text_view_get_glyph_position :: proc(self: ^Text_View, index: int) -> [2]f32 {
+	glyph := self.glyphs[index]
+	return node_get_glyph_position(glyph.node, index - glyph.node.text_glyph_index)
+}
+
 text_view_on_mouse_down :: proc(self: ^Text_View, index: int) {
 	self.selection = self.hover_index
 	self.anchor = self.hover_index
@@ -455,6 +463,26 @@ text_view_get_ordered_selection :: proc(self: ^Text_View) -> [2]int {
 		return self.selection.yx
 	}
 	return self.selection
+}
+
+text_view_update_cursor_box :: proc(self: ^Text_View) {
+	cursor_index := self.selection[1]
+
+	if len(self.glyphs) > 0 && cursor_index >= 0 && cursor_index <= len(self.glyphs) {
+		glyph := self.glyphs[min(cursor_index, len(self.glyphs) - 1)]
+
+		assert(glyph.node != nil)
+
+		line_height := glyph.node.font.line_height * glyph.node.font_size
+
+		top_left := node_get_glyph_position(glyph.node, cursor_index - glyph.node.text_glyph_index)
+
+		if cursor_index == len(self.glyphs) {
+			// top_left.x += glyph.advance * glyph.node.font_size
+		}
+
+		self.cursor_box = {{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}}
+	}
 }
 
 text_view_collect_range :: proc(self: ^Text_View, from, to: int, w: io.Writer) {
@@ -614,6 +642,7 @@ text_agent_end_view :: proc(self: ^Text_Agent) {
 	if view, ok := text_agent_current_view(self); ok {
 		view.selection[0] = clamp(view.selection[0], 0, len(view.glyphs))
 		view.selection[1] = clamp(view.selection[1], 0, len(view.glyphs))
+		text_view_update_cursor_box(view)
 		pop(&self.stack)
 	}
 }

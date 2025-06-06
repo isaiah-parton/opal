@@ -28,7 +28,7 @@ Colors :: struct {
 }
 
 theme: Theme = {
-	base_size = 16,
+	base_size = 12,
 	radius_small = 6,
 	radius_big = 12,
 	font_size_small = 14,

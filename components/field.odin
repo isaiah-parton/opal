@@ -6,6 +6,7 @@ import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
 import "core:io"
+import "core:math"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
@@ -24,28 +25,26 @@ Field_Response :: struct {
 	was_confirmed: bool,
 }
 
-make_field_descriptor :: proc(data: rawptr, type_info: ^runtime.Type_Info) -> Field_Descriptor {
-	return {
-		background = tw.NEUTRAL_950,
-		stroke = tw.NEUTRAL_500,
-		stroke_width = 1,
-		font_size = 16,
-		padding = 4,
-		radius = 5,
-		clip_content = true,
-		interactive = true,
-		enable_selection = true,
-		group = true,
-		wrapped = true,
-		stroke_type = .Outer,
-		value_data = data,
-		value_type_info = type_info,
-		format = "%v",
-	}
-}
-
 add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Field_Response) {
 	using opal
+
+	assert(desc != nil)
+
+	desc.background = tw.NEUTRAL_950
+	desc.stroke = tw.NEUTRAL_500
+	desc.font_size = 14
+	desc.padding = 4
+	desc.radius = 5
+	desc.clip_content = true
+	desc.interactive = true
+	desc.enable_selection = true
+	desc.wrapped = true
+	desc.stroke_type = .Outer
+	if desc.format == "" {
+		desc.format = "%v"
+	}
+
+	push_id(hash(loc))
 	cont_node := begin_node(desc).?
 
 	edit := cont_node.is_focused || cont_node.has_focused_child
@@ -66,7 +65,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		}
 
 		if len(desc.placeholder) > 0 && len(text) == 0 {
-			push_id(hash(loc))
 			add_node(
 				&{
 					font = desc.font,
@@ -74,21 +72,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					foreground = tw.NEUTRAL_500,
 					text = desc.placeholder,
 					fit = 1,
-				},
-			)
-			pop_id()
-		}
-
-		if len(text) == 0 {
-			add_node(
-				&{
-					font = desc.font,
-					font_size = desc.font_size,
-					foreground = tw.WHITE,
-					text = "\u0000",
-					fit = 1,
-					interactive = true,
-					enable_selection = true,
 				},
 			)
 		}
@@ -123,16 +106,36 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	}
 
 	end_text_view()
+
+	// Cursor placeholder
+	if edit && len(text_view.glyphs) == 0 {
+		push_id(text_view.id)
+		add_node(
+			&{
+				min_size = {2, 0},
+				grow = {false, true},
+				max_size = INFINITY,
+				background = fade(
+					global_ctx.colors[.Selection_Background],
+					math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
+				),
+			},
+		)
+		pop_id()
+		draw_frames(1)
+	}
+
 	end_node()
+	pop_id()
 
 	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
-	node_update_transition(cont_node, 1, cont_node.is_focused, 0.1)
+	node_update_transition(cont_node, 1, edit, 0.1)
 	cont_node.style.stroke = tw.LIME_500
 	cont_node.style.stroke_width = 3 * cont_node.transitions[1]
 
 	ctx := global_ctx
 
-	if cont_node.is_focused {
+	if edit {
 		cmd: Command
 		control_down := key_down(.Left_Control) || key_down(.Right_Control)
 		shift_down := key_down(.Left_Shift) || key_down(.Right_Shift)

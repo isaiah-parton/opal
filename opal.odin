@@ -5,7 +5,7 @@ package opal
 // 	- Abstract away the functional components of a Node (Descriptor, Retained_State, Transient_State) to allow for transient nodes wihout hashed ids or interaction logic. Flex layouts need only a descriptor and some transient state, while inline layouts need additional retained state for caching their size. Ids will become retained state as they are only required by interactive nodes.
 //
 // TODO:
-// 	[ ] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
+// 	[X] Change from `parent` and `owner` to a more explicit `layout_parent` and `state_parent`
 //  [ ] Add inner shadows (to katana)
 //  [X] Wrapped wrapped layouts
 // 	[X] Make the `Node` struct smalllerrr
@@ -1004,6 +1004,10 @@ begin :: proc() {
 	if do_mouse_input_pass {
 		ctx_on_input_received(ctx)
 
+		if !key_down(.Left) {
+			ctx.text_agent.hovered_view = nil
+		}
+
 		if ctx.hovered_node != nil {
 			node := ctx.hovered_node
 			ctx.hovered_id = node.id
@@ -1075,9 +1079,9 @@ begin :: proc() {
 	for id, node in ctx.node_by_id {
 		if node.dead {
 			// TODO: Uhhhhh
-			if ctx.focused_id == node.id && node.parent != nil && node.parent.group {
-				ctx.focused_id = node.parent.id
-			}
+			// if ctx.focused_id == node.id && node.parent != nil && node.parent.group {
+			// 	ctx.focused_id = node.parent.id
+			// }
 			delete_key(&ctx.node_by_id, node.id)
 			node_destroy(node)
 			(^Maybe(Node))(node)^ = nil
@@ -1185,9 +1189,6 @@ end :: proc() {
 			}
 		}
 		if !too_smol {
-			// box := Box{self.box.lo - self.scroll, {}}
-			// box.hi = box.lo + linalg.max(self.content_size, self.size)
-			// box.hi = box.lo + self.size
 			box := self.box
 			padding_paint := kn.paint_index_from_option(Color{0, 0, 255, 128})
 			if self.padding.x > 0 {
@@ -1242,7 +1243,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 }
 
 ctx_solve_positions_and_draw :: proc(self: ^Context) {
-	for root in self.layout_roots {
+	for root in self.roots {
 		node_solve_box_recursive(root, root.dirty)
 	}
 

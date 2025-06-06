@@ -29,18 +29,18 @@ add_slider :: proc(
 	push_id(hash(loc))
 	defer pop_id()
 
-	desc.min_size.x = 100
-	desc.min_size.y = theme.base_size.y
+	desc.min_size.x = max(desc.min_size.x, 100)
+	desc.min_size.y = theme.base_size.y * 2
 	radius := desc.min_size.y / 4
 	desc.interactive = true
 	desc.sticky = true
 	desc.group = true
-	desc.padding = theme.base_size.y * [4]f32{0, 0.25, 0, 0.25}
+	desc.padding = desc.min_size.y * [4]f32{0, 0.25, 0, 0.25}
 
 	body_node := begin_node(desc).?
 	time: f32 = clamp(f32(desc.value) / f32(desc.max - desc.min), 0.0, 1.0)
 
-	node_update_transition(body_node, 0, body_node.is_hovered, 0.1)
+	// node_update_transition(body_node, 0, body_node.is_hovered, 0.1)
 	node_update_transition(body_node, 1, body_node.is_active, 0.1)
 
 	begin_node(
@@ -64,7 +64,7 @@ add_slider :: proc(
 	)
 	begin_node(&{grow = true, max_size = INFINITY})
 
-	thumb_size := desc.min_size.y * (1 + body_node.transitions[0] * 0.25)
+	thumb_size := desc.min_size.y * (1 - body_node.transitions[1] * 0.15)
 	add_node(
 		&{
 			absolute        = true,
@@ -78,9 +78,9 @@ add_slider :: proc(
 			shadow_size     = 4,
 			shadow_offset   = {-1, 2},
 			shadow_color    = fade(tw.BLACK, 0.5),
-			stroke          = fade(tw.WHITE, 0.1),
-			stroke_width    = 4 * body_node.transitions[1],
-			stroke_type     = .Outer,
+			// stroke          = fade(tw.WHITE, 0.1),
+			// stroke_width    = 4 * body_node.transitions[1],
+			// stroke_type     = .Outer,
 			// interactive     = true,
 		},
 	)

@@ -319,6 +319,7 @@ node_update_input :: proc(self: ^Node) {
 node_update_propagated_input :: proc(self: ^Node) {
 	self.has_hovered_child = false
 	self.has_active_child = false
+	self.has_focused_child = false
 }
 
 node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
@@ -565,10 +566,7 @@ node_receive_input_recursive :: proc(self: ^Node, z_index: u32 = 0) {
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	if self.absolute {
 		assert(self.layout_parent != nil)
-		self.position =
-			self.layout_parent.box.lo +
-			self.layout_parent.size * self.relative_offset +
-			self.exact_offset
+		self.position = self.layout_parent.size * self.relative_offset + self.exact_offset
 		self.position -= self.size * self.align
 	}
 	self.box.lo = offset + self.position
@@ -596,14 +594,7 @@ node_solve_box_recursive :: proc(
 	clip_box := clip_box
 
 	if self.parent != nil {
-		clip := box_get_rounded_clip(
-			self.box,
-			clip_box,
-			max(
-				self.parent.radius.x,
-				max(self.parent.radius.y, max(self.parent.radius.z, self.parent.radius.w)),
-			),
-		)
+		clip := box_get_rounded_clip(self.box, clip_box, self.parent.radius.x)
 		self.parent.has_clipped_child |= clip != .None
 		self.is_clipped = clip == .Full
 		when ODIN_DEBUG {
@@ -614,8 +605,13 @@ node_solve_box_recursive :: proc(
 	clip_box = box_clamped(clip_box, self.box)
 
 	self.has_clipped_child = false
-	for node in self.layout_children {
-		node_solve_box_recursive(node, dirty, self.box.lo - self.scroll, clip_box)
+	for node in self.children {
+		node_solve_box_recursive(
+			node,
+			dirty,
+			self.box.lo - self.scroll * f32(i32(!node.absolute)),
+			clip_box,
+		)
 	}
 }
 
@@ -660,10 +656,10 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 	spacing := (length_left / f32(len(children) - 1)) if self.justify_between else self.gap
 
-	offset: f32 = self.padding[i]
+	offset: f32 = self.padding[i] + max(length_left, 0) * self.content_align[i]
 
 	for node in children {
-		node.position[i] = offset + (self.size[i] - self.content_size[i]) * self.content_align[i]
+		node.position[i] = offset
 
 		if node.grow[j] {
 			node.size[j] = min(span, node.max_size[j])
@@ -709,6 +705,10 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			}
 			line_span = max(line_span, child.size[j])
 			offset += child.size[i] + self.gap
+		}
+
+		if line_span == 0 {
+			line_span = node_get_span(self)
 		}
 
 		node_solve_sizes_in_range(
@@ -1042,9 +1042,8 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
-				top_left := node_get_glyph_position(self, cursor_index)
 				kn.add_box(
-					{{top_left.x, top_left.y}, {top_left.x + 2, top_left.y + line_height}},
+					self.text_view.cursor_box,
 					paint = global_ctx.colors[.Selection_Background],
 				)
 			}

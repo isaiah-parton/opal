@@ -148,15 +148,34 @@ main :: proc() {
 				{
 					begin_node(&{fit = 1, vertical = true, gap = 10})
 					{
+						begin_section("Settings")
+						components.add_field(
+							&{
+								value_data = &theme.base_size.x,
+								value_type_info = type_info_of(f32),
+								min_size = {200, 20},
+								multiline = true,
+								fit = {0, 1},
+							},
+						)
+						components.add_field(
+							&{
+								value_data = &theme.base_size.y,
+								value_type_info = type_info_of(f32),
+								min_size = {200, 20},
+								multiline = true,
+								fit = {0, 1},
+							},
+						)
+						end_section()
+						//
 						begin_section("Buttons")
-						begin_node(&{gap = 10, fit = 1})
 						for variant, i in Button_Variant {
 							push_id(i)
 							desc := make_button(fmt.tprint(variant), variant)
 							add_button(&desc)
 							pop_id()
 						}
-						end_node()
 						end_section()
 						//
 						begin_section("Boolean")
@@ -164,7 +183,7 @@ main :: proc() {
 						end_section()
 						//
 						begin_section("Slider")
-						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider}).new_value.?;
+						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, min_size = {300, 0}}).new_value.?;
 						   ok {
 							app.slider = new_value
 						}
@@ -172,14 +191,19 @@ main :: proc() {
 						//
 						begin_section("Progress")
 						components.add_radial_progress(&{size = 70, time = app.slider})
+						components.add_progress_bar(&{time = app.slider})
 						end_section()
 						//
 						begin_section("Input fields")
-						desc := make_field_descriptor(&app.text, type_info_of(string))
-						desc.min_size = {200, 26}
-						desc.multiline = true
-						desc.fit = {0, 1}
-						components.add_field(&desc)
+						components.add_field(
+							&{
+								value_data = &app.text,
+								value_type_info = type_info_of(string),
+								min_size = {200, 20},
+								multiline = true,
+								fit = {0, 1},
+							},
+						)
 						end_section()
 					}
 					end_node()
@@ -214,7 +238,6 @@ begin_section :: proc(name: string, loc := #caller_location) {
 		&{
 			background = tw.NEUTRAL_800,
 			radius = 10,
-			padding = 10,
 			vertical = true,
 			fit = 1,
 			grow = {true, false},
@@ -228,6 +251,7 @@ begin_section :: proc(name: string, loc := #caller_location) {
 			max_size = INFINITY,
 			justify_between = true,
 			interactive = true,
+			padding = 10,
 		},
 	).?
 	if title_node.is_hovered && title_node.was_active && !title_node.is_active {
@@ -237,13 +261,33 @@ begin_section :: proc(name: string, loc := #caller_location) {
 	node_update_transition(title_node, 1, title_node.is_hovered, 0.2)
 	text_color := mix(title_node.transitions[1], tw.NEUTRAL_600, tw.NEUTRAL_400)
 	add_node(&{text = name, foreground = text_color, font_size = 14, fit = 1})
-	add_node(&{text = "+", foreground = text_color, font_size = 14, fit = 1})
+	add_node(
+		&{
+			grow = {false, true},
+			min_size = {20, 0},
+			max_size = INFINITY,
+			font_size = 14,
+			fit = 1,
+			data = title_node,
+			foreground = text_color,
+			on_draw = proc(self: ^Node) {
+				kn.add_arrow(
+					box_center(self.box),
+					5,
+					2,
+					(2 - (^Node)(self.data).transitions[0]) * math.PI * 0.5,
+					paint = self.foreground,
+				)
+			},
+		},
+	)
 	end_node()
 	begin_node(
 		&{
 			fit = {1, ease.circular_in_out(title_node.transitions[0])},
 			clip_content = true,
-			padding = {0, 10, 0, 0},
+			gap = 10,
+			padding = 10,
 		},
 	)
 }
