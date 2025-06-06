@@ -681,8 +681,6 @@ text_agent_on_mouse_down :: proc(self: ^Text_Agent, button: Mouse_Button) {
 	self.active_id = self.hovered_id
 
 	if self.active_view != nil {
-		self.active_view.active = true
-
 		if time.since(self.last_click_time) < time.Millisecond * 400 {
 			self.click_index = (self.click_index + 1) % 3
 		} else {
@@ -692,27 +690,26 @@ text_agent_on_mouse_down :: proc(self: ^Text_Agent, button: Mouse_Button) {
 		self.last_click_time = time.now()
 
 		text_view_on_mouse_down(self.active_view, self.click_index)
-	} else if self.focused_view != nil {
-		self.focused_view.active = false
 	}
 
 	self.focused_view = self.hovered_view
 }
 
 text_agent_on_mouse_up :: proc(self: ^Text_Agent) {
-	self.active_id = 0
-	self.active_view = nil
+	// self.active_id = 0
+	// self.active_view = nil
 }
 
 text_agent_on_new_frame :: proc(self: ^Text_Agent) {
-	for &text, i in self.array {
-		if text.dead {
-			delete(text.glyphs)
-			delete(text.nodes)
-			delete_key(&self.dict, text.id)
+	for &view, i in self.array {
+		if view.dead {
+			delete(view.glyphs)
+			delete(view.nodes)
+			delete_key(&self.dict, view.id)
 			unordered_remove(&self.array, i)
 		} else {
-			text.dead = true
+			view.dead = true
+			view.active = self.active_view == &view
 		}
 	}
 

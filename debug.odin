@@ -35,7 +35,7 @@ inspector_show :: proc(self: ^Inspector) {
 			stroke_width = 2,
 			stroke = tw.CYAN_800,
 			background = _BACKGROUND,
-			z_index = 1,
+			layer = 1,
 			radius = 7,
 		},
 	).?

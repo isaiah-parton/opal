@@ -85,17 +85,37 @@ Node_Variant :: union #no_nil {
 }
 */
 
+Sizing_Descriptor :: struct {
+	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
+	base:     [2]f32,
+
+	// Relative to parent
+	relative: [2]f32,
+
+	// The maximum size the node is allowed to grow to
+	max:      [2]f32,
+
+	// If the node will grow to acommodate its contents
+	fit:      [2]f32,
+
+	// If the node will be grown to fill available space
+	grow:     [2]bool,
+}
+
 //
 // The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  None of these values should be modified after initialization.
 //
 Node_Descriptor :: struct {
 	using style:      Node_Style,
 
+	// Sizing
+	sizing:           Sizing_Descriptor,
+
 	// Text
 	text:             string,
 
 	// Z index (higher values appear in front of lower ones), this value stacks down the tree
-	z_index:          u32,
+	layer:            i32,
 
 	// The node's final box will be loosely bound within this box, maintaining its size
 	bounds:           Maybe(Box),
@@ -306,7 +326,7 @@ node_update_input :: proc(self: ^Node) {
 	self.is_hovered = ctx.hovered_id == self.id
 
 	self.was_active = self.is_active
-	self.is_active = ctx.active_id == self.id
+	self.is_active = ctx.node_activation != nil && ctx.node_activation.?.which == self.id
 
 	self.was_focused = self.is_focused
 	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
@@ -533,14 +553,14 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	}
 }
 
-node_receive_input :: proc(self: ^Node, z_index: u32) -> (mouse_overlap: bool) {
+node_receive_input :: proc(self: ^Node, layer: i32) -> (mouse_overlap: bool) {
 	ctx := global_ctx
 	if ctx.mouse_position.x >= self.box.lo.x &&
 	   ctx.mouse_position.x <= self.box.hi.x &&
 	   ctx.mouse_position.y >= self.box.lo.y &&
 	   ctx.mouse_position.y <= self.box.hi.y {
 		mouse_overlap = true
-		if self.interactive && !(ctx.hovered_node != nil && ctx.hovered_node.z_index > z_index) {
+		if self.interactive && !(ctx.hovered_node != nil && ctx.hovered_node.layer > layer) {
 			ctx.hovered_node = self
 			if node_is_scrollable(self) {
 				ctx.scrollable_node = self
@@ -550,16 +570,16 @@ node_receive_input :: proc(self: ^Node, z_index: u32) -> (mouse_overlap: bool) {
 	return
 }
 
-node_receive_input_recursive :: proc(self: ^Node, z_index: u32 = 0) {
-	z_index := z_index + self.z_index
-	mouse_overlap := node_receive_input(self, z_index)
+node_receive_input_recursive :: proc(self: ^Node, layer: i32 = 0) {
+	layer := layer + self.layer
+	mouse_overlap := node_receive_input(self, layer)
 
 	if !mouse_overlap && self.clip_content {
 		return
 	}
 
 	for node in self.children {
-		node_receive_input_recursive(node, z_index)
+		node_receive_input_recursive(node, layer)
 	}
 }
 
@@ -939,7 +959,7 @@ node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Pa
 	return 0
 }
 
-node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
+node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
 
 	if self.is_clipped {
@@ -952,13 +972,13 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 				max(self.overflow.x, self.overflow.y) > 0.1 ||
 				max(abs(self.scroll.x), abs(self.scroll.y)) > 0.1)
 
-	z_index := z_index + self.z_index
+	layer := layer + self.layer
 
 	// Is transformation necessary?
 	is_transformed :=
 		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
 
-	kn.set_draw_order(int(z_index))
+	kn.set_draw_order(int(layer))
 
 	// Perform transformations
 	if is_transformed {
@@ -1049,7 +1069,7 @@ node_draw_recursive :: proc(self: ^Node, z_index: u32 = 0, depth := 0) {
 
 	// Draw children
 	for node in self.children {
-		node_draw_recursive(node, z_index, depth + 1)
+		node_draw_recursive(node, layer, depth + 1)
 	}
 
 	if enable_scissor {

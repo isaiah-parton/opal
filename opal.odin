@@ -68,88 +68,10 @@ Cursor :: enum {
 	Move,
 }
 
-Keyboard_Key :: enum i32 {
-	Zero,
-	One,
-	Two,
-	Three,
-	Four,
-	Five,
-	Six,
-	Seven,
-	Eight,
-	Nine,
-	A,
-	B,
-	C,
-	D,
-	E,
-	F,
-	G,
-	H,
-	I,
-	J,
-	K,
-	L,
-	M,
-	N,
-	O,
-	P,
-	Q,
-	R,
-	S,
-	T,
-	U,
-	V,
-	W,
-	X,
-	Y,
-	Z,
-	F1,
-	F2,
-	F3,
-	F4,
-	F5,
-	F6,
-	F7,
-	F8,
-	F9,
-	F10,
-	F11,
-	F12,
-	Tab,
-	Space,
-	Left_Control,
-	Left_Alt,
-	Left_Shift,
-	Right_Control,
-	Right_Alt,
-	Right_Shift,
-	Menu,
-	Escape,
-	Enter,
-	Backspace,
-	Delete,
-	Left,
-	Right,
-	Up,
-	Down,
-	Home,
-	End,
-}
-
 On_Set_Cursor_Proc :: #type proc(cursor: Cursor, data: rawptr) -> bool
 On_Set_Clipboard_Proc :: #type proc(data: rawptr, text: string) -> bool
 On_Get_Clipboard_Proc :: #type proc(data: rawptr) -> (string, bool)
 On_Get_Screen_Size_Proc :: #type proc(data: rawptr) -> [2]f32
-
-Mouse_Button :: enum {
-	Left,
-	Middle,
-	Right,
-}
-
-Mouse_Buttons :: bit_set[Mouse_Button]
 
 Node_Relative_Placement :: struct {
 	node:            ^Node,
@@ -331,13 +253,13 @@ Context :: struct {
 
 	// Transient pointers to interacted nodes
 	hovered_node:              ^Node,
-	focused_node:              ^Node,
 
 	// Ids of interacted nodes
 	hovered_id:                Id,
 	focused_id:                Id,
-	active_id:                 Id,
-	active_is_sticky:          bool,
+
+	//
+	node_activation:           Maybe(Node_Activation),
 
 	// Private cursor state
 	cursor:                    Cursor,
@@ -942,7 +864,6 @@ ctx_on_input_received :: proc(ctx: ^Context) {
 	// Resolve input state
 	ctx.scrollable_node = nil
 	ctx.hovered_node = nil
-	ctx.focused_node = nil
 
 	for root in ctx.roots {
 		node_receive_input_recursive(root)
@@ -1026,21 +947,29 @@ begin :: proc() {
 		text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
 
 		// Active nodes deactivate when the mouse leaves them
-		if ctx.hovered_id != ctx.active_id && !ctx.active_is_sticky {
-			ctx.active_id = 0
+		if activation, ok := ctx.node_activation.?; ok {
+			if ctx.hovered_id != activation.which && !activation.captured {
+				ctx.node_activation = nil
+			}
+
+			if mouse_released(.Left) {
+				ctx.node_activation = nil
+			}
 		}
 
 		if mouse_released(.Left) {
 			ctx.text_agent.hovered_view = nil
-			ctx.active_id = 0
 			text_agent_on_mouse_up(&ctx.text_agent)
 		}
 
 		if mouse_pressed(.Left) {
 			// Individual node interaction
 			if ctx.hovered_node != nil {
-				ctx.active_id = ctx.hovered_node.id
-				ctx.active_is_sticky = ctx.hovered_node.sticky
+				// Set activation status
+				ctx.node_activation = Node_Activation {
+					which    = ctx.hovered_node.id,
+					captured = ctx.hovered_node.sticky,
+				}
 				// Reset click counter if there was too much delay
 				if time.since(ctx.hovered_node.last_click_time) > time.Millisecond * 300 {
 					ctx.hovered_node.click_count = 0
@@ -1229,12 +1158,12 @@ end :: proc() {
 
 ctx_solve_sizes :: proc(self: ^Context) {
 	for root in self.layout_roots {
-		if root.absolute && root.dirty {
-			assert(root.layout_parent != nil)
-			root.size += root.layout_parent.size * root.relative_size
-		}
 		if !root.dirty {
 			continue
+		}
+		if root.absolute {
+			assert(root.layout_parent != nil)
+			root.size += root.layout_parent.size * root.relative_size
 		}
 		if node_solve_sizes_and_wrap_recursive(root) {
 			node_solve_sizes_recursive(root)
@@ -1271,7 +1200,7 @@ is_frame_active :: proc() -> bool {
 //
 try_hover_node :: proc(node: ^Node) {
 	ctx := global_ctx
-	if ctx.hovered_node != nil && ctx.hovered_node.z_index > node.z_index {
+	if ctx.hovered_node != nil && ctx.hovered_node.layer > node.layer {
 		return
 	}
 	ctx.hovered_node = node
@@ -1373,13 +1302,12 @@ end_node :: proc() {
 	//
 	if self.size != self.last_size || self.relative_size != self.last_relative_size {
 		self.dirty = true
+		self.last_size = self.size
+		self.last_relative_size = self.relative_size
 		draw_frames(1)
 	} else {
 		self.size = self.cached_size
 	}
-
-	self.last_relative_size = self.relative_size
-	self.last_size = self.size
 
 	//
 	// Handle scrolling

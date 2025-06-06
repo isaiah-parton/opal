@@ -39,6 +39,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	desc.radius = 5
 	desc.clip_content = true
 	desc.interactive = true
+	desc.sticky = true
 	desc.enable_selection = true
 	desc.wrapped = true
 	desc.stroke_type = .Outer
