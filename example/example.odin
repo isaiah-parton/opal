@@ -148,6 +148,7 @@ main :: proc() {
 				{
 					begin_node(&{fit = 1, vertical = true, gap = 10})
 					{
+						begin_section("Buttons")
 						begin_node(&{gap = 10, fit = 1})
 						for variant, i in Button_Variant {
 							push_id(i)
@@ -156,19 +157,30 @@ main :: proc() {
 							pop_id()
 						}
 						end_node()
+						end_section()
+						//
+						begin_section("Boolean")
 						components.add_toggle_switch(&app.toggle_switch)
+						end_section()
+						//
+						begin_section("Slider")
 						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider}).new_value.?;
 						   ok {
 							app.slider = new_value
 						}
+						end_section()
 						//
+						begin_section("Progress")
 						components.add_radial_progress(&{size = 70, time = app.slider})
+						end_section()
 						//
+						begin_section("Input fields")
 						desc := make_field_descriptor(&app.text, type_info_of(string))
 						desc.min_size = {200, 26}
 						desc.multiline = true
 						desc.fit = {0, 1}
 						components.add_field(&desc)
+						end_section()
 					}
 					end_node()
 				}
@@ -193,6 +205,54 @@ main :: proc() {
 	)
 
 	free(sdl3app.state)
+}
+
+begin_section :: proc(name: string, loc := #caller_location) {
+	using opal
+	push_id(hash_loc(loc))
+	begin_node(
+		&{
+			background = tw.NEUTRAL_800,
+			radius = 10,
+			padding = 10,
+			vertical = true,
+			fit = 1,
+			grow = {true, false},
+			max_size = INFINITY,
+		},
+	)
+	title_node := begin_node(
+		&{
+			fit = {0, 1},
+			grow = {true, false},
+			max_size = INFINITY,
+			justify_between = true,
+			interactive = true,
+		},
+	).?
+	if title_node.is_hovered && title_node.was_active && !title_node.is_active {
+		title_node.is_toggled = !title_node.is_toggled
+	}
+	node_update_transition(title_node, 0, title_node.is_toggled, 0.2)
+	node_update_transition(title_node, 1, title_node.is_hovered, 0.2)
+	text_color := mix(title_node.transitions[1], tw.NEUTRAL_600, tw.NEUTRAL_400)
+	add_node(&{text = name, foreground = text_color, font_size = 14, fit = 1})
+	add_node(&{text = "+", foreground = text_color, font_size = 14, fit = 1})
+	end_node()
+	begin_node(
+		&{
+			fit = {1, ease.circular_in_out(title_node.transitions[0])},
+			clip_content = true,
+			padding = {0, 10, 0, 0},
+		},
+	)
+}
+
+end_section :: proc(loc := #caller_location) {
+	using opal
+	end_node()
+	end_node()
+	pop_id()
 }
 
 //
