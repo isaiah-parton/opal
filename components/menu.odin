@@ -11,10 +11,8 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	self := begin_node(
 		&{
 			padding = {3, 3, 12, 3},
-			fit = 1,
+			sizing = {fit = 1, max = INFINITY, grow = {true, false}},
 			gap = 6,
-			max_size = INFINITY,
-			grow = {true, false},
 			content_align = {0, 0.5},
 			interactive = true,
 			group = true,
@@ -30,11 +28,13 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	add_node(
 		&{
 			text = string_from_rune(icon),
-			fit = 1,
+			sizing = {fit = 1},
 			style = {foreground = tw.NEUTRAL_300, font_size = 14, font = &theme.icon_font},
 		},
 	)
-	add_node(&{text = label, fit = 1, style = {font_size = 12, foreground = tw.NEUTRAL_300}})
+	add_node(
+		&{text = label, sizing = {fit = 1}, style = {font_size = 12, foreground = tw.NEUTRAL_300}},
+	)
 	end_node()
 	pop_id()
 }
@@ -44,7 +44,14 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 	using opal
 	push_id(hash(loc))
 	node := add_node(
-		&{padding = 3, radius = 3, fit = 1, text = label, font_size = 12, interactive = true},
+		&{
+			padding = 3,
+			radius = 3,
+			sizing = {fit = 1},
+			text = label,
+			font_size = 12,
+			interactive = true,
+		},
 	).?
 	node.style.background = fade(tw.NEUTRAL_600, (node.transitions[0] + node.transitions[1]) * 0.3)
 	node.style.foreground =
@@ -64,8 +71,8 @@ do_menu :: proc(label: string, loc := #caller_location) -> bool {
 				shadow_size = 5,
 				shadow_color = {0, 0, 0, 128},
 				bounds = get_screen_box(),
-				z_index = 999,
-				fit = 1,
+				layer = 999,
+				sizing = {fit = 1},
 				padding = 4,
 				radius = 5,
 				background = tw.NEUTRAL_900,
@@ -88,4 +95,3 @@ __do_menu :: proc(is_open: bool) {
 		end_node()
 	}
 }
-

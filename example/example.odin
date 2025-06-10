@@ -90,7 +90,7 @@ main :: proc() {
 			begin()
 			begin_node(
 				&{
-					min_size = global_ctx.screen_size,
+					sizing = {exact = global_ctx.screen_size},
 					background = theme.color.background,
 					stroke = tw.NEUTRAL_600,
 					stroke_width = 1,
@@ -104,17 +104,19 @@ main :: proc() {
 			{
 				begin_node(
 					&{
-						fit = {0, 1},
-						min_size = {0, 20},
-						max_size = INFINITY,
-						grow = {true, false},
+						sizing = {
+							fit = {0, 1},
+							exact = {0, 20},
+							max = INFINITY,
+							grow = {true, false},
+						},
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_800},
 					},
 				)
 				{
 					grab_node := add_node(
-						&{grow = true, max_size = INFINITY, interactive = true},
+						&{sizing = {grow = true, max = INFINITY}, interactive = true},
 					).?
 					sdl3app.app_use_node_for_window_grabbing(app, grab_node)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
@@ -138,8 +140,7 @@ main :: proc() {
 
 				node := begin_node(
 					&{
-						max_size = INFINITY,
-						grow = true,
+						sizing = {max = INFINITY, grow = true},
 						gap = 5,
 						padding = 20,
 						interactive = true,
@@ -150,25 +151,33 @@ main :: proc() {
 					},
 				).?
 				{
-					begin_node(&{fit = 1, vertical = true, gap = 10})
+					begin_node(&{sizing = {fit = 1}, vertical = true, gap = 10})
 					{
 						begin_section("Settings")
 						components.add_field(
 							&{
 								value_data = &theme.base_size.x,
 								value_type_info = type_info_of(f32),
-								min_size = {200, 20},
 								multiline = true,
-								fit = {0, 1},
+								sizing = {
+									fit = {0, 1},
+									exact = {100, 20},
+									max = {200, 20},
+									grow = {true, false},
+								},
 							},
 						)
 						components.add_field(
 							&{
 								value_data = &theme.base_size.y,
 								value_type_info = type_info_of(f32),
-								min_size = {200, 20},
 								multiline = true,
-								fit = {0, 1},
+								sizing = {
+									fit = {0, 1},
+									exact = {100, 20},
+									max = {200, 20},
+									grow = {true, false},
+								},
 							},
 						)
 						end_section()
@@ -187,7 +196,7 @@ main :: proc() {
 						end_section()
 						//
 						begin_section("Slider")
-						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, min_size = {300, 0}}).new_value.?;
+						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, sizing = {exact = {300, 0}}}).new_value.?;
 						   ok {
 							app.slider = new_value
 						}
@@ -203,9 +212,8 @@ main :: proc() {
 							&{
 								value_data = &app.text,
 								value_type_info = type_info_of(string),
-								min_size = {200, 20},
 								multiline = true,
-								fit = {0, 1},
+								sizing = {fit = {0, 1}, exact = {200, 20}},
 							},
 						)
 						end_section()
@@ -243,16 +251,12 @@ begin_section :: proc(name: string, loc := #caller_location) {
 			background = tw.NEUTRAL_800,
 			radius = 10,
 			vertical = true,
-			fit = 1,
-			grow = {true, false},
-			max_size = INFINITY,
+			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
 		},
 	)
 	title_node := begin_node(
 		&{
-			fit = {0, 1},
-			grow = {true, false},
-			max_size = INFINITY,
+			sizing = {fit = {0, 1}, grow = {true, false}, max = INFINITY},
 			justify_between = true,
 			interactive = true,
 			padding = 10,
@@ -270,16 +274,13 @@ begin_section :: proc(name: string, loc := #caller_location) {
 			foreground = text_color,
 			font = &components.theme.font,
 			font_size = 16,
-			fit = 1,
+			sizing = {fit = 1},
 		},
 	)
 	add_node(
 		&{
-			grow = {false, true},
-			min_size = {20, 0},
-			max_size = INFINITY,
 			font_size = 14,
-			fit = 1,
+			sizing = {fit = 1, exact = {20, 0}, max = INFINITY, grow = {false, true}},
 			data = title_node,
 			foreground = text_color,
 			on_draw = proc(self: ^Node) {
@@ -296,7 +297,11 @@ begin_section :: proc(name: string, loc := #caller_location) {
 	end_node()
 	begin_node(
 		&{
-			fit = {1, ease.circular_in_out(title_node.transitions[0])},
+			sizing = {
+				fit = {1, ease.circular_in_out(title_node.transitions[0])},
+				grow = {true, false},
+				max = INFINITY,
+			},
 			clip_content = true,
 			gap = 10,
 			padding = 10,
@@ -344,12 +349,12 @@ do_text :: proc(
 		push_id(int(i))
 		add_node(
 			&{
-				foreground       = paint,
-				fit              = 1,
-				text             = s[:until],
-				font             = font,
-				font_size        = size,
-				interactive      = true,
+				foreground = paint,
+				sizing = {fit = 1},
+				text = s[:until],
+				font = font,
+				font_size = size,
+				interactive = true,
 				enable_selection = true,
 				// static_text = true,
 			},
@@ -361,4 +366,3 @@ do_text :: proc(
 	}
 	end_node()
 }
-

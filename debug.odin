@@ -26,7 +26,7 @@ inspector_show :: proc(self: ^Inspector) {
 	base_node := begin_node(
 		&{
 			exact_offset = self.position,
-			min_size = self.size,
+			sizing = {exact = self.size},
 			bounds = get_screen_box(),
 			vertical = true,
 			padding = 1,
@@ -42,11 +42,9 @@ inspector_show :: proc(self: ^Inspector) {
 	total_nodes := len(global_ctx.node_by_id)
 	handle_node := begin_node(
 		&{
-			fit = 1,
+			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
 			padding = 5,
 			style = {background = _FOREGROUND},
-			grow = {true, false},
-			max_size = INFINITY,
 			interactive = true,
 			vertical = true,
 			data = global_ctx,
@@ -65,8 +63,8 @@ inspector_show :: proc(self: ^Inspector) {
 	).?
 	{
 		desc := Node_Descriptor {
-			fit        = 1,
-			font_size  = 12,
+			sizing = {fit = 1},
+			font_size = 12,
 			foreground = _TEXT,
 		}
 		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
@@ -86,6 +84,8 @@ inspector_show :: proc(self: ^Inspector) {
 			len(global_ctx.node_by_id),
 		)
 		add_node(&desc)
+		desc.text = fmt.tprintf("Sizing passes: %i", global_ctx.sizing_passes)
+		add_node(&desc)
 	}
 	end_node()
 	panel_update(self, base_node, handle_node)
@@ -94,10 +94,8 @@ inspector_show :: proc(self: ^Inspector) {
 	if self.selected_id != 0 {
 		begin_node(
 			&{
-				min_size = {0, 200},
-				grow = {true, true},
+				sizing = {exact = {0, 200}, grow = true, max = INFINITY},
 				padding = 4,
-				max_size = INFINITY,
 				clip_content = true,
 				show_scrollbars = true,
 				style = {background = tw.NEUTRAL_950},
@@ -105,7 +103,7 @@ inspector_show :: proc(self: ^Inspector) {
 				vertical = true,
 			},
 		)
-		begin_node(&{grow = {true, false}, fit = 1, max_size = INFINITY, vertical = true})
+		begin_node(&{sizing = {grow = {true, false}, fit = 1, max = INFINITY}, vertical = true})
 		add_value_node("Node", &self.inspected_node, type_info_of(Node))
 		end_node()
 		end_node()
@@ -139,9 +137,7 @@ inspector_show :: proc(self: ^Inspector) {
 
 		node := begin_node(
 			&{
-				max_size = INFINITY,
-				grow = {true, false},
-				fit = 1,
+				sizing = {max = INFINITY, grow = {true, false}, fit = 1},
 				padding = 2,
 				interactive = true,
 				justify_between = true,
@@ -153,13 +149,15 @@ inspector_show :: proc(self: ^Inspector) {
 					foreground = tw.ORANGE_500,
 					font_size = 12,
 					text = fmt.tprintf("%c%s", '-' if node.is_toggled else '+', name),
-					fit = 1,
+					sizing = {fit = 1},
 				},
 			)
 		} else {
-			add_node(&{foreground = _TEXT, font_size = 12, text = name, fit = 1})
+			add_node(&{foreground = _TEXT, font_size = 12, text = name, sizing = {fit = 1}})
 			if text != "" {
-				add_node(&{text = text, foreground = tw.INDIGO_600, font_size = 12, fit = 1})
+				add_node(
+					&{text = text, foreground = tw.INDIGO_600, font_size = 12, sizing = {fit = 1}},
+				)
 			}
 		}
 		end_node()
@@ -173,9 +171,11 @@ inspector_show :: proc(self: ^Inspector) {
 				begin_node(
 					&{
 						padding = {10, 0, 0, 0},
-						grow = {true, false},
-						max_size = INFINITY,
-						fit = {0, ease.quadratic_in_out(node.transitions[0])},
+						sizing = {
+							grow = {true, false},
+							max = INFINITY,
+							fit = {0, ease.quadratic_in_out(node.transitions[0])},
+						},
 						clip_content = true,
 						vertical = true,
 					},
@@ -233,9 +233,8 @@ inspector_show :: proc(self: ^Inspector) {
 inspector_build_tree :: proc(self: ^Inspector) {
 	begin_node(
 		&{
+			sizing = {max = INFINITY, grow = true},
 			vertical = true,
-			max_size = INFINITY,
-			grow = true,
 			clip_content = true,
 			show_scrollbars = true,
 			interactive = true,
@@ -258,22 +257,22 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		&{
 			content_align = {0, 0.5},
 			gap = 4,
-			grow = {true, false},
-			max_size = INFINITY,
+			sizing = {grow = {true, false}, max = INFINITY, fit = {0, 1}},
 			padding = {4, 2, 4, 2},
-			fit = {0, 1},
 			interactive = true,
 			group = true,
 		},
 	).?
-	add_node(&{min_size = 14, on_draw = nil if len(node.children) == 0 else proc(self: ^Node) {
+	add_node(
+		&{sizing = {exact = 14}, on_draw = nil if len(node.children) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
 				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
-			}})
+			}},
+	)
 	add_node(
 		&{
 			text = node.text if len(node.text) > 0 else fmt.tprintf("%x", node.id),
-			fit = 1,
+			sizing = {fit = 1},
 			style = {
 				font_size = 14,
 				foreground = tw.EMERALD_500 if self.selected_id == node.id else kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.children) > 0))),
@@ -303,9 +302,11 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		begin_node(
 			&{
 				padding = {10, 0, 0, 0},
-				grow = {true, false},
-				max_size = INFINITY,
-				fit = {0, ease.quadratic_in_out(button_node.transitions[0])},
+				sizing = {
+					grow = {true, false},
+					max = INFINITY,
+					fit = {0, ease.quadratic_in_out(button_node.transitions[0])},
+				},
 				content_align = {0, 1},
 				clip_content = true,
 				vertical = true,
@@ -318,4 +319,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

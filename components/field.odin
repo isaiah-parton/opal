@@ -139,7 +139,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					font_size = desc.font_size,
 					foreground = tw.NEUTRAL_500,
 					text = desc.placeholder,
-					fit = 1,
+					sizing = {fit = 1},
 				},
 			)
 		}
@@ -161,7 +161,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					font_size = desc.font_size,
 					foreground = tw.WHITE,
 					text = text[:i],
-					fit = 1,
+					sizing = {fit = 1},
 					interactive = true,
 					enable_selection = true,
 				},
@@ -180,9 +180,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		push_id(text_view.id)
 		add_node(
 			&{
-				min_size = {2, 0},
-				grow = {false, true},
-				max_size = INFINITY,
+				sizing = {max = INFINITY, exact = {2, 0}, grow = {false, true}},
 				background = fade(
 					global_ctx.colors[.Selection_Background],
 					math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
@@ -283,4 +281,3 @@ field_output :: proc(
 
 	}
 	*/
-

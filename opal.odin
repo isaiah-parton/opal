@@ -336,6 +336,7 @@ Context :: struct {
 
 	// How many nodes are hidden. Debug only.
 	drawn_nodes:               int,
+	sizing_passes:             int,
 
 	// How many frames are queued for drawing
 	queued_frames:             int,
@@ -1157,16 +1158,26 @@ end :: proc() {
 }
 
 ctx_solve_sizes :: proc(self: ^Context) {
+	when ODIN_DEBUG {
+		self.sizing_passes = 0
+	}
+
 	for root in self.layout_roots {
 		if !root.dirty {
-			continue
+			// continue
 		}
+
 		if root.absolute {
 			assert(root.layout_parent != nil)
-			root.size += root.layout_parent.size * root.relative_size
+			root.size += root.layout_parent.size * root.sizing.relative
 		}
+
 		if node_solve_sizes_and_wrap_recursive(root) {
 			node_solve_sizes_recursive(root)
+		}
+
+		when ODIN_DEBUG {
+			self.sizing_passes += 1
 		}
 	}
 }
@@ -1250,7 +1261,8 @@ begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (se
 		if self.absolute || ctx.current_node == nil {
 			self.position = self.exact_offset
 		}
-		self.size = self.min_size
+
+		self.size = self.sizing.exact
 
 		if !self.is_root {
 			self.parent = ctx.current_node
@@ -1279,7 +1291,6 @@ end_node :: proc() {
 
 	i := int(self.vertical)
 
-
 	//
 	// Determine known size
 	//
@@ -1289,8 +1300,8 @@ end_node :: proc() {
 
 	self.content_size += self.padding.xy + self.padding.zw
 
-	if self.fit != {} {
-		self.size = linalg.max(self.size, self.content_size * self.fit)
+	if self.sizing.fit != {} {
+		self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
 
 		if self.square_fit {
 			self.size = max(self.size.x, self.size.y)
@@ -1300,14 +1311,16 @@ end_node :: proc() {
 	//
 	// Determine dirty state from size changes in known metrics
 	//
-	if self.size != self.last_size || self.relative_size != self.last_relative_size {
+	if self.size != self.last_size {
 		self.dirty = true
-		self.last_size = self.size
-		self.last_relative_size = self.relative_size
+	}
+
+	if self.dirty {
 		draw_frames(1)
 	} else {
-		self.size = self.cached_size
+		// self.size = self.cached_size
 	}
+	self.last_size = self.size
 
 	//
 	// Handle scrolling
@@ -1344,8 +1357,10 @@ end_node :: proc() {
 					data = self,
 					relative_offset = {1, 0},
 					exact_offset = [2]f32{-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
-					relative_size = {0, 1},
-					min_size = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+					sizing = {
+						relative = {0, 1},
+						exact = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+					},
 					interactive = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
@@ -1353,9 +1368,9 @@ end_node :: proc() {
 				},
 			).?
 			added_size := SCROLLBAR_SIZE * node.transitions[1]
-			node.min_size.x += added_size
+			node.sizing.exact.x += added_size
 			node.exact_offset.x -= added_size
-			node.radius = node.min_size.x / 2
+			node.radius = node.sizing.exact.x / 2
 		}
 
 		if self.overflow.x > 0 {
@@ -1365,8 +1380,10 @@ end_node :: proc() {
 					data = self,
 					relative_offset = {0, 1},
 					exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
-					relative_size = {1, 0},
-					min_size = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					sizing = {
+						relative = {1, 0},
+						exact = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					},
 					interactive = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
@@ -1463,4 +1480,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-

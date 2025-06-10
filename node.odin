@@ -86,8 +86,8 @@ Node_Variant :: union #no_nil {
 */
 
 Sizing_Descriptor :: struct {
-	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	base:     [2]f32,
+	// The node's exact initial size
+	exact:    [2]f32,
 
 	// Relative to parent
 	relative: [2]f32,
@@ -129,20 +129,7 @@ Node_Descriptor :: struct {
 	//
 	exact_offset:     [2]f32,
 	relative_offset:  [2]f32,
-	relative_size:    [2]f32,
 	align:            [2]f32,
-
-	// The node's actual size, this is subject to change until the end of the frame. The initial value is effectively the node's minimum size
-	min_size:         [2]f32,
-
-	// The maximum size the node is allowed to grow to
-	max_size:         [2]f32,
-
-	// If the node will be grown to fill available space
-	grow:             [2]bool,
-
-	// If the node will grow to acommodate its contents
-	fit:              [2]f32,
 
 	// Values for the node's children layout
 	padding:          [4]f32,
@@ -204,99 +191,96 @@ Glyph :: struct {
 // Generic UI nodes, everything is a made out of these
 //
 Node :: struct {
-	using descriptor:   Node_Descriptor,
+	using descriptor:  Node_Descriptor,
 
 	// Node tree references
-	parent:             ^Node,
-	children:           [dynamic]^Node `fmt:"-"`,
+	parent:            ^Node,
+	children:          [dynamic]^Node `fmt:"-"`,
 
 	// Layout tree references
-	layout_parent:      ^Node,
-	layout_children:    [dynamic]^Node `fmt:"-"`,
+	layout_parent:     ^Node,
+	layout_children:   [dynamic]^Node `fmt:"-"`,
 
 	// A simple kill switch that causes the node to be discarded
-	dead:               bool,
+	dead:              bool,
 
 	// The node's size has changed and a sizing pass will be triggered
-	dirty:              bool,
+	dirty:             bool,
 
 	// Last frame on which this node was invoked
 	// Currently, this is only used to check for ID collisions
-	frame:              int,
+	frame:             int,
 
 	// Time of last mouse down event over this node
-	last_click_time:    time.Time,
+	last_click_time:   time.Time,
 
 	// Unique identifier
-	id:                 Id `fmt:"x"`,
+	id:                Id `fmt:"x"`,
 
 	// The node's local position within its parent; or screen position if its a root
-	position:           [2]f32,
+	position:          [2]f32,
 
 	// The accumulated size of the node on this frame. This value is unstable!
-	size:               [2]f32,
+	size:              [2]f32,
 
 	// The last known size; compared with the known size each frame to trigger a sizing pass
-	last_size:          [2]f32,
-
-	//
-	last_relative_size: [2]f32,
+	last_size:         [2]f32,
 
 	// Cached size from the last sizing pass
-	cached_size:        [2]f32,
+	cached_size:       [2]f32,
 
 	// Amount of content overflow
 	// Computed at end of frame
-	overflow:           [2]f32,
+	overflow:          [2]f32,
 
 	// This is computed as the minimum space required to fit all children or the node's text content with padding
-	content_size:       [2]f32,
+	content_size:      [2]f32,
 
 	// The timestamp of the node's initialization in the context's arena
 	// time_created:       time.Time,
 
 	// Text stuff
-	text_origin:        [2]f32,
-	text_size:          [2]f32,
-	text_view:          ^Text_View,
-	text_byte_index:    int,
-	text_glyph_index:   int,
-	glyphs:             []Glyph `fmt:"-"`,
+	text_origin:       [2]f32,
+	text_size:         [2]f32,
+	text_view:         ^Text_View,
+	text_byte_index:   int,
+	text_glyph_index:  int,
+	glyphs:            []Glyph `fmt:"-"`,
 
 	// View offset of contents
-	scroll:             [2]f32,
-	target_scroll:      [2]f32,
+	scroll:            [2]f32,
+	target_scroll:     [2]f32,
 
 	// Universal state transition values for smooth animations
-	transitions:        [3]f32,
+	transitions:       [3]f32,
 
 	// The node's final placement in screen coordinates
-	box:                Box,
+	box:               Box,
 
 	// If this is the node with the highest z-index that the mouse overlaps
-	was_hovered:        bool,
-	is_hovered:         bool,
-	has_hovered_child:  bool,
+	was_hovered:       bool,
+	is_hovered:        bool,
+	has_hovered_child: bool,
 
 	// Active state (clicked)
-	was_active:         bool,
-	is_active:          bool,
-	has_active_child:   bool,
+	was_active:        bool,
+	is_active:         bool,
+	has_active_child:  bool,
 
 	// Focused state: by default, a node is focused when clicked and loses focus when another node is clicked
-	was_focused:        bool,
-	is_focused:         bool,
-	has_focused_child:  bool,
+	was_focused:       bool,
+	is_focused:        bool,
+	has_focused_child: bool,
 
 	// Times the node was clicked
-	click_count:        u8,
+	click_count:       u8,
 
 	// An arbitrary boolean state
-	is_toggled:         bool,
+	is_toggled:        bool,
 
 	// Needs scissor
-	has_clipped_child:  bool,
-	is_clipped:         bool,
+	has_clipped_child: bool,
+	is_clipped:        bool,
 }
 
 push_node :: proc(node: ^Node) {
@@ -617,9 +601,10 @@ node_solve_box_recursive :: proc(
 		clip := box_get_rounded_clip(self.box, clip_box, self.parent.radius.x)
 		self.parent.has_clipped_child |= clip != .None
 		self.is_clipped = clip == .Full
-		when ODIN_DEBUG {
-			global_ctx.drawn_nodes += int(!self.is_clipped)
-		}
+	}
+
+	when ODIN_DEBUG {
+		global_ctx.drawn_nodes += int(!self.is_clipped)
 	}
 
 	clip_box = box_clamped(clip_box, self.box)
@@ -661,7 +646,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	// Populate the array and accumulate node extent
 	for node in children {
 		length += node.size[i]
-		if node.grow[i] {
+		if node.sizing.grow[i] {
 			append(&growables, node)
 		}
 	}
@@ -681,8 +666,8 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	for node in children {
 		node.position[i] = offset
 
-		if node.grow[j] {
-			node.size[j] = min(span, node.max_size[j])
+		if node.sizing.grow[j] {
+			node.size[j] = min(span, node.sizing.max[j])
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
 
@@ -760,7 +745,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 
 		if self.wrapped && self.content_size != content_size {
 			self.content_size = content_size
-			self.size = linalg.max(self.size, self.content_size * self.fit)
+			self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
 			needs_resolve = true
 		}
 	} else {
@@ -809,7 +794,7 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 		// Add that amount to every eligable child
 		for node, node_index in array {
 			if node.size[i] == smallest {
-				size_to_add := min(size_to_add, node.max_size[i] - node.size[i])
+				size_to_add := min(size_to_add, node.sizing.max[i] - node.size[i])
 
 				// Remove the node when it's done growing
 				if size_to_add <= 0 {
@@ -868,7 +853,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 
 		if self.content_size != content_size {
 			self.content_size = content_size
-			self.size = linalg.max(self.size, self.content_size * self.fit)
+			self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
 		}
 	}
 
@@ -974,7 +959,6 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 	layer := layer + self.layer
 
-	// Is transformation necessary?
 	is_transformed :=
 		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
 
@@ -1108,6 +1092,11 @@ node_get_padded_box :: proc(self: ^Node) -> Box {
 }
 
 node_fit_to_content :: proc(self: ^Node) {
-	self.size = linalg.max(linalg.min(self.content_size * self.fit, self.max_size), self.size)
+	if self.sizing.fit == {} {
+		return
+	}
+	self.size = linalg.max(
+		linalg.min(self.content_size * self.sizing.fit, self.sizing.max),
+		self.size,
+	)
 }
-

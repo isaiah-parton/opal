@@ -21,14 +21,13 @@ make_button :: proc(label: union #no_nil {
 	}, variant: Button_Variant = .Secondary) -> Button_Descriptor {
 	using opal
 	desc := Button_Descriptor {
-		padding     = {7, 5, 7, 5},
-		radius      = theme.radius_small,
-		fit         = 1,
-		text        = label.(string) or_else string_from_rune(label.(rune)),
-		font_size   = theme.font_size_small,
-		foreground  = tw.NEUTRAL_300,
-		font        = &theme.font,
-		max_size    = INFINITY,
+		padding = {7, 5, 7, 5},
+		radius = theme.radius_small,
+		sizing = {fit = 1, max = INFINITY},
+		text = label.(string) or_else string_from_rune(label.(rune)),
+		font_size = theme.font_size_small,
+		foreground = tw.NEUTRAL_300,
+		font = &theme.font,
 		interactive = true,
 		shade_color = fade(tw.BLACK, 0.1),
 	}
@@ -65,12 +64,11 @@ do_window_button :: proc(icon: rune, color: opal.Color, loc := #caller_location)
 	self := add_node(
 		&{
 			padding = 3,
-			fit = 1,
+			sizing = {fit = 1, max = INFINITY},
 			text = string_from_rune(icon),
 			font_size = 20,
 			foreground = tw.NEUTRAL_300,
 			font = &theme.icon_font,
-			max_size = INFINITY,
 			interactive = true,
 		},
 		loc = loc,
@@ -82,4 +80,3 @@ do_window_button :: proc(icon: rune, color: opal.Color, loc := #caller_location)
 	assert(self != nil)
 	return self.was_active && !self.is_active && self.is_hovered
 }
-

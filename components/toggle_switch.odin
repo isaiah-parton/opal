@@ -16,7 +16,7 @@ add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 	base_size := [2]f32{45, 25}
 	self := begin_node(
 		&{
-			min_size = base_size,
+			sizing = {exact = base_size},
 			radius = base_size.y / 2,
 			background = tw.NEUTRAL_950,
 			interactive = true,
@@ -27,14 +27,13 @@ add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 			absolute = true,
 			relative_offset = {self.transitions[0], 0},
 			exact_offset = {-base_size.y * self.transitions[0], 0},
-			min_size = base_size.y,
+			sizing = {exact = base_size.y},
 			padding = 2 + self.transitions[1],
 		},
 	)
 	add_node(
 		&{
-			max_size = INFINITY,
-			grow = true,
+			sizing = {max = INFINITY, grow = true},
 			radius = (base_size.y - 4) / 2,
 			shadow_offset = {-1, 2},
 			shadow_size = 4,
@@ -61,4 +60,3 @@ add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 		value^ = !value^
 	}
 }
-

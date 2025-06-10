@@ -23,7 +23,7 @@ add_radial_progress :: proc(desc: ^Radial_Progress_Descriptor, loc := #caller_lo
 	assert(desc != nil)
 	desc.base.foreground = desc.color.? or_else theme.color.accent
 	desc.base.radius[0] = desc.time
-	desc.base.min_size = desc.size
+	desc.base.sizing.exact = desc.size
 	desc.base.on_draw = proc(self: ^Node) {
 		using opal
 		center := box_center(self.box)
@@ -56,7 +56,7 @@ add_radial_progress :: proc(desc: ^Radial_Progress_Descriptor, loc := #caller_lo
 			text = fmt.tprintf("%i%%", int(desc.time * 100)),
 			font_size = 14,
 			foreground = theme.color.base_foreground,
-			fit = 1,
+			sizing = {fit = 1},
 		},
 	)
 	end_node()
@@ -66,14 +66,14 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor, loc := #caller_location
 	using opal
 	assert(desc != nil)
 	desc.base.background = theme.color.base_strong
-	desc.base.min_size = theme.base_size * {8, 1}
-	desc.base.radius = desc.base.min_size.y / 2
+	desc.base.sizing.exact = theme.base_size * {8, 1}
+	desc.base.radius = desc.base.sizing.exact.y / 2
 	desc.base.clip_content = true
 	begin_node(&desc.base)
 	add_node(
 		&{
 			absolute = true,
-			relative_size = {clamp(desc.time, 0, 1), 1},
+			sizing = {relative = {clamp(desc.time, 0, 1), 1}},
 			background = desc.color.? or_else theme.color.accent,
 		},
 	)
@@ -90,4 +90,3 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor, loc := #caller_location
 	// )
 	end_node()
 }
-
