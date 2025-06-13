@@ -1009,9 +1009,9 @@ begin :: proc() {
 	for id, node in ctx.node_by_id {
 		if node.dead {
 			// TODO: Uhhhhh
-			// if ctx.focused_id == node.id && node.parent != nil && node.parent.group {
-			// 	ctx.focused_id = node.parent.id
-			// }
+			if ctx.focused_id == node.id && node.parent != nil && node.parent.group {
+				ctx.focused_id = node.parent.id
+			}
 			delete_key(&ctx.node_by_id, node.id)
 			node_destroy(node)
 			(^Maybe(Node))(node)^ = nil
@@ -1164,7 +1164,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 
 	for root in self.layout_roots {
 		if !root.dirty {
-			// continue
+			continue
 		}
 
 		if root.absolute {
@@ -1249,20 +1249,21 @@ get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
 	return nil
 }
 
-begin_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
+begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
 	ctx := global_ctx
 	self = get_or_create_node(hash_loc(loc))
 
 	if self, ok := self.?; ok {
-		if descriptor != nil {
-			self.descriptor = descriptor^
+		if desc != nil {
+			if desc.sizing != self.sizing {
+				self.dirty = true
+			}
+			self.descriptor = desc^
 		}
 
 		if self.absolute || ctx.current_node == nil {
 			self.position = self.exact_offset
 		}
-
-		self.size = self.sizing.exact
 
 		if !self.is_root {
 			self.parent = ctx.current_node
@@ -1300,6 +1301,12 @@ end_node :: proc() {
 
 	self.content_size += self.padding.xy + self.padding.zw
 
+	if self.dirty {
+		self.size = self.sizing.exact
+	} else {
+		// self.size = self.cached_size
+	}
+
 	if self.sizing.fit != {} {
 		self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
 
@@ -1314,13 +1321,13 @@ end_node :: proc() {
 	if self.size != self.last_size {
 		self.dirty = true
 	}
+	self.last_size = self.size
 
 	if self.dirty {
 		draw_frames(1)
 	} else {
-		// self.size = self.cached_size
+		self.size = self.cached_size
 	}
-	self.last_size = self.size
 
 	//
 	// Handle scrolling
