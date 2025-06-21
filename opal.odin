@@ -920,6 +920,11 @@ begin :: proc() {
 		ctx.mouse_position != ctx.last_mouse_position ||
 		ctx.mouse_button_down != ctx.mouse_button_was_down
 
+	// Receive mouse wheel input
+	if ctx.scrollable_node != nil {
+		ctx.scrollable_node.target_scroll -= ctx.mouse_scroll * 24
+	}
+
 	//
 	// Process input received this frame
 	//
@@ -989,12 +994,6 @@ begin :: proc() {
 		if mouse_down(.Left) {
 			text_agent_when_mouse_down(&ctx.text_agent)
 		}
-	}
-
-
-	// Receive mouse wheel input
-	if ctx.scrollable_node != nil {
-		ctx.scrollable_node.target_scroll -= ctx.mouse_scroll * 24
 	}
 
 	// Propagate input
@@ -1095,53 +1094,30 @@ end :: proc() {
 	// Draw debug widgets
 	//
 	if self, ok := ctx.node_by_id[ctx.inspector.inspected_id]; ok {
-		too_smol: bool
-		if self.parent != nil {
-			if box_width(self.box) == 0 {
-				too_smol = true
-				kn.add_box(
-					{
-						{self.parent.box.lo.x + self.parent.padding.x, self.box.lo.y},
-						{self.parent.box.hi.x - self.parent.padding.z, self.box.hi.y},
-					},
-					paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-				)
-			}
-			if box_height(self.box) == 0 {
-				too_smol = true
-				kn.add_box(
-					{
-						{self.box.lo.x, self.parent.box.lo.y + self.parent.padding.y},
-						{self.box.hi.x, self.parent.box.hi.y - self.parent.padding.w},
-					},
-					paint = kn.fade(kn.GREEN_YELLOW, 0.5),
-				)
-			}
+		box := self.box
+		padding_paint := kn.paint_index_from_option(Color{0, 0, 255, 128})
+		if self.padding.x > 0 {
+			kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
 		}
-		if !too_smol {
-			box := self.box
-			padding_paint := kn.paint_index_from_option(Color{0, 0, 255, 128})
-			if self.padding.x > 0 {
-				kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
-			}
-			if self.padding.y > 0 {
-				kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
-			}
-			if self.padding.z > 0 {
-				kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
-			}
-			if self.padding.w > 0 {
-				kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
-			}
-			kn.add_box(box, paint = Color{0, 255, 0, 100})
-			kn.add_box_lines(self.box, 1, paint = Color{0, 255, 0, 255})
+		if self.padding.y > 0 {
+			kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
 		}
+		if self.padding.z > 0 {
+			kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
+		}
+		if self.padding.w > 0 {
+			kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
+		}
+		kn.add_box(box, paint = Color{0, 255, 0, 100})
+		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
 	}
 
+	// Set text cursor when hovering selectable text
 	if ctx.text_agent.hovered_view != nil {
 		set_cursor(.Text)
 	}
 
+	// Invoke callback to set cursor if necessary
 	if ctx.on_set_cursor != nil && ctx.cursor != ctx.last_cursor {
 		if ctx.on_set_cursor(ctx.cursor, ctx.callback_data) {
 			ctx.last_cursor = ctx.cursor
@@ -1149,6 +1125,7 @@ end :: proc() {
 	}
 	ctx.cursor = .Normal
 
+	// Reset some input state
 	ctx.mouse_button_was_down = ctx.mouse_button_down
 	ctx.last_mouse_position = ctx.mouse_position
 	ctx.key_was_down = ctx.key_down
@@ -1276,6 +1253,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 		}
 
 		node_on_new_frame(self)
+
 		push_node(self)
 	}
 
@@ -1303,8 +1281,6 @@ end_node :: proc() {
 
 	if self.dirty {
 		self.size = self.sizing.exact
-	} else {
-		// self.size = self.cached_size
 	}
 
 	if self.sizing.fit != {} {
@@ -1318,15 +1294,13 @@ end_node :: proc() {
 	//
 	// Determine dirty state from size changes in known metrics
 	//
-	if self.size != self.last_size {
+	if !self.absolute && self.size != self.last_size {
 		self.dirty = true
 	}
 	self.last_size = self.size
 
 	if self.dirty {
 		draw_frames(1)
-	} else {
-		self.size = self.cached_size
 	}
 
 	//

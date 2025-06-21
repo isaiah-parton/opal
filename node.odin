@@ -511,13 +511,15 @@ node_on_new_frame :: proc(self: ^Node) {
 		append(&ctx.layout_roots, self)
 	}
 
-	if self.layout_parent != nil && !self.absolute {
-		append(&self.layout_parent.layout_children, self)
+	if self.layout_parent != nil {
+		self.dirty |= self.layout_parent.dirty
+		if !self.absolute {
+			append(&self.layout_parent.layout_children, self)
+		}
 	}
 }
 
 node_on_child_end :: proc(self: ^Node, child: ^Node) {
-	// This is here because currently only root nodes are checked for dirtiness
 	if child.absolute {
 		return
 	}
@@ -568,19 +570,30 @@ node_receive_input_recursive :: proc(self: ^Node, layer: i32 = 0) {
 }
 
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
+	if self.dirty {
+		self.cached_size = self.size
+	}
+
+	// Nodes' cached sizes are used here because at this point they should represent the actual sizes
 	if self.absolute {
 		assert(self.layout_parent != nil)
-		self.position = self.layout_parent.size * self.relative_offset + self.exact_offset
-		self.position -= self.size * self.align
+		self.position = self.layout_parent.cached_size * self.relative_offset + self.exact_offset
+		self.position -= self.cached_size * self.align
 	}
 	self.box.lo = offset + self.position
 	if bounds, ok := self.bounds.?; ok {
-		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
+		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.cached_size)
 	}
-	self.box.hi = self.box.lo + self.size
+	self.box.hi = self.box.lo + self.cached_size
+
+	// Re-implement this
 	// if global_ctx.snap_to_pixels {
 	// 	box_snap(&self.box)
 	// }
+}
+
+node_get_is_size_affected_by_parent :: proc(self: ^Node) -> bool {
+	return !self.absolute
 }
 
 node_solve_box_recursive :: proc(
@@ -827,7 +840,6 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 
 	if self.wrapped {
 		for child in self.layout_children {
-			child.dirty |= self.dirty
 			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
 		}
 		if needs_resolve {
@@ -840,7 +852,6 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 		content_size: [2]f32
 
 		for child in self.layout_children {
-			child.dirty |= self.dirty
 			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
 
 			content_size[i] += child.size[i]
@@ -1070,6 +1081,12 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 				int(self.style.stroke_type) + int(kn.Shape_Outline.Inner_Stroke),
 			),
 		)
+	}
+
+	when ODIN_DEBUG {
+		if global_ctx.inspector.shown && self.dirty {
+			kn.add_box(self.box, paint = fade(kn.RED, 0.1))
+		}
 	}
 
 	if is_transformed {

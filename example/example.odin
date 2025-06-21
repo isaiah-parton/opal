@@ -219,6 +219,13 @@ main :: proc() {
 						end_section()
 					}
 					end_node()
+					do_text(
+						&{sizing = {fit = 1, grow = {true, false}, max = INFINITY}},
+						FILLER_TEXT,
+						12,
+						&theme.font,
+						paint = kn.WHITE,
+					)
 				}
 				end_node()
 			}
