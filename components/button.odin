@@ -11,8 +11,8 @@ Button_Descriptor :: struct {
 }
 
 Button_Variant :: enum {
-	Secondary,
 	Primary,
+	Secondary,
 }
 
 make_button :: proc(label: union #no_nil {
@@ -20,6 +20,7 @@ make_button :: proc(label: union #no_nil {
 		rune,
 	}, variant: Button_Variant = .Secondary) -> Button_Descriptor {
 	using opal
+
 	desc := Button_Descriptor {
 		padding = {7, 5, 7, 5},
 		radius = theme.radius_small,
@@ -80,3 +81,4 @@ do_window_button :: proc(icon: rune, color: opal.Color, loc := #caller_location)
 	assert(self != nil)
 	return self.was_active && !self.is_active && self.is_hovered
 }
+

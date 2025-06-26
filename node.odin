@@ -338,7 +338,9 @@ node_receive_propagated_input :: proc(self: ^Node, child: ^Node) {
 }
 
 node_propagate_input_recursive :: proc(self: ^Node, depth := 0) {
-	assert(depth < MAX_TREE_DEPTH)
+	if depth >= MAX_TREE_DEPTH {
+		return
+	}
 	node_update_propagated_input(self)
 	node_update_input(self)
 	for node in self.children {
@@ -374,148 +376,6 @@ node_update_scroll :: proc(self: ^Node) {
 	)
 	if max(abs(self.scroll.x - previous_scroll.x), abs(self.scroll.y - previous_scroll.y)) > 0.01 {
 		draw_frames(1)
-	}
-}
-
-node_on_new_frame :: proc(self: ^Node) {
-	ctx := global_ctx
-
-	// Clear arrays and reserve memory
-	reserve(&self.children, 16)
-	reserve(&self.layout_children, 16)
-	clear(&self.children)
-	clear(&self.layout_children)
-
-	if self.scale == {} {
-		self.scale = 1
-	}
-
-	// Keep alive this frame
-	self.dead = false
-
-	// Reset some state
-	self.content_size = 0
-
-	// Initialize string reader for text construction
-	string_reader: strings.Reader
-	reader: Maybe(io.Reader)
-	if len(self.text) > 0 {
-		reader = strings.to_reader(&string_reader, self.text)
-	}
-
-	// Assign a default font for safety
-	if self.style.font == nil {
-		self.style.font = &kn.DEFAULT_FONT
-		assert(self.style.font != nil)
-	}
-
-	self.text_view = get_current_text() or_else panic("No text context initialized!")
-
-	// Create text layout
-	if reader, ok := reader.?; ok {
-
-		self.text_size = 0
-		self.text_glyph_index =
-			len(self.text_view.glyphs) if self.enable_selection else len(ctx.glyphs)
-		self.text_byte_index = self.text_view.byte_length
-
-		if self.enable_selection {
-			append(&self.text_view.nodes, self)
-			if !self.text_view.editing {
-				strings.write_string(&self.text_view.builder, self.text)
-			}
-		}
-
-		glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
-
-		for {
-			char, length, err := io.read_rune(reader)
-
-			if err == .EOF {
-				break
-			}
-
-			if char == '\t' {
-				append(
-					glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						offset = {self.text_size.x, 0},
-					},
-				)
-				self.text_size.x += self.font.space_advance * self.font_size * 2
-			} else if char == '\n' {
-				append(
-					glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						offset = {self.text_size.x, 0},
-						glyph = {advance = self.font.space_advance},
-					},
-				)
-				self.text_size.x += self.font.space_advance * self.font_size
-			} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-				append(
-					glyphs,
-					Glyph {
-						node = self,
-						index = self.text_view.byte_length,
-						glyph = glyph,
-						offset = {self.text_size.x, 0},
-					},
-				)
-				self.text_size.x += glyph.advance * self.font_size
-			} else {
-				for char in fmt.tprintf("<0x%x>", char) {
-					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-						append(
-							glyphs,
-							Glyph {
-								node = self,
-								index = self.text_view.byte_length,
-								glyph = glyph,
-								offset = {self.text_size.x, 0},
-							},
-						)
-						self.text_size.x += glyph.advance * self.font_size
-					}
-				}
-			}
-
-			self.text_size.x += self.gap
-
-			if self.enable_selection {
-				self.text_view.byte_length += length
-			}
-		}
-
-		self.text_size.x -= self.gap
-		self.text_size.y = self.font.line_height * self.font_size
-
-		self.glyphs = glyphs[self.text_glyph_index:]
-
-		self.content_size = linalg.max(self.content_size, self.text_size)
-	}
-
-	// Root
-	if self.parent == nil {
-		append(&ctx.roots, self)
-	} else {
-		append(&self.parent.children, self)
-	}
-
-	// Nodes with no layout parent get added to the layout roots, otherwise they still need a parent to be placed relative to
-	if self.absolute || self.layout_parent == nil {
-		append(&ctx.layout_roots, self)
-	}
-
-	if self.layout_parent != nil {
-		self.dirty |= self.layout_parent.dirty
-		if !self.absolute {
-			append(&self.layout_parent.layout_children, self)
-		}
 	}
 }
 
@@ -570,16 +430,13 @@ node_receive_input_recursive :: proc(self: ^Node, layer: i32 = 0) {
 }
 
 node_solve_box :: proc(self: ^Node, offset: [2]f32) {
-	if self.dirty {
-		self.cached_size = self.size
-	}
-
 	// Nodes' cached sizes are used here because at this point they should represent the actual sizes
 	if self.absolute {
 		assert(self.layout_parent != nil)
 		self.position = self.layout_parent.cached_size * self.relative_offset + self.exact_offset
 		self.position -= self.cached_size * self.align
 	}
+
 	self.box.lo = offset + self.position
 	if bounds, ok := self.bounds.?; ok {
 		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.cached_size)
@@ -596,13 +453,18 @@ node_get_is_size_affected_by_parent :: proc(self: ^Node) -> bool {
 	return !self.absolute
 }
 
+node_solve_absolute_size :: proc(self: ^Node) {
+	assert(self.layout_parent != nil)
+	self.size += self.layout_parent.cached_size * self.sizing.relative
+}
+
 node_solve_box_recursive :: proc(
 	self: ^Node,
 	dirty: bool,
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
-	if dirty {
+	if self.dirty {
 		self.cached_size = self.size
 	}
 
@@ -758,7 +620,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 
 		if self.wrapped && self.content_size != content_size {
 			self.content_size = content_size
-			self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
+			node_fit_to_content(self)
 			needs_resolve = true
 		}
 	} else {
@@ -834,7 +696,9 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 // Walks down the tree, calculating node sizes, wrapping contents and then propagating size changes back up the tree for an optional second pass
 //
 node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_resolve: bool) {
-	assert(depth < MAX_TREE_DEPTH)
+	if depth >= MAX_TREE_DEPTH {
+		return
+	}
 
 	needs_resolve = node_solve_sizes(self)
 
@@ -864,7 +728,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 
 		if self.content_size != content_size {
 			self.content_size = content_size
-			self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
+			node_fit_to_content(self)
 		}
 	}
 
@@ -877,7 +741,9 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 // Second pass
 //
 node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
-	assert(depth < MAX_TREE_DEPTH)
+	if depth >= MAX_TREE_DEPTH {
+		return
+	}
 
 	if self.wrapped {
 		return
@@ -1050,10 +916,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
-				kn.add_box(
-					self.text_view.cursor_box,
-					paint = global_ctx.colors[.Selection_Background],
-				)
+				kn.add_box(self.text_view.cursor_box, paint = get_text_cursor_color())
 			}
 		}
 	}
@@ -1112,8 +975,328 @@ node_fit_to_content :: proc(self: ^Node) {
 	if self.sizing.fit == {} {
 		return
 	}
-	self.size = linalg.max(
-		linalg.min(self.content_size * self.sizing.fit, self.sizing.max),
-		self.size,
-	)
+	self.size = linalg.max(self.content_size * self.sizing.fit, self.size)
+	if self.square_fit {
+		self.size = max(self.size.x, self.size.y)
+	}
 }
+
+//
+// Get an existing node by its id or create a new one
+//
+get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
+	ctx := global_ctx
+	if node, ok := ctx.node_by_id[id]; ok {
+		return node
+	} else {
+		for &slot, slot_index in ctx.nodes {
+			if slot == nil {
+				ctx.nodes[slot_index] = Node {
+					id = id,
+					// time_created = time.now(),
+				}
+				node = &ctx.nodes[slot_index].?
+				ctx.node_by_id[id] = node
+				draw_frames(1)
+				return node
+			}
+		}
+	}
+	return nil
+}
+
+begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
+	ctx := global_ctx
+	self = get_or_create_node(hash_loc(loc))
+
+	if self, ok := self.?; ok {
+		if desc != nil {
+			if desc.sizing != self.sizing {
+				self.dirty = true
+			}
+			self.descriptor = desc^
+		}
+
+		if self.absolute || ctx.current_node == nil {
+			self.position = self.exact_offset
+		}
+
+		if !self.is_root {
+			self.parent = ctx.current_node
+			assert(self != self.parent)
+
+			self.layout_parent = self.parent
+
+			if self.layout_parent != nil {
+				if !self.absolute {
+					append(&self.layout_parent.layout_children, self)
+				}
+
+				self.dirty |= self.layout_parent.dirty
+			}
+		}
+
+		// Nodes with no layout parent get added to the layout roots, otherwise they still need a parent to be placed relative to
+		if self.absolute || self.layout_parent == nil {
+			append(&ctx.layout_roots, self)
+		}
+
+		// Root
+		if self.parent == nil {
+			append(&ctx.roots, self)
+			begin_text_view({id = self.id})
+		} else {
+			append(&self.parent.children, self)
+		}
+
+		// Clear arrays and reserve memory
+		reserve(&self.children, 16)
+		reserve(&self.layout_children, 16)
+		clear(&self.children)
+		clear(&self.layout_children)
+
+		if self.scale == {} {
+			self.scale = 1
+		}
+
+		// Keep alive this frame
+		self.dead = false
+
+		// Reset some state
+		self.content_size = 0
+
+		// Initialize string reader for text construction
+		string_reader: strings.Reader
+		reader: Maybe(io.Reader)
+		if len(self.text) > 0 {
+			reader = strings.to_reader(&string_reader, self.text)
+		}
+
+		// Assign a default font for safety
+		if self.style.font == nil {
+			self.style.font = &kn.DEFAULT_FONT
+			assert(self.style.font != nil)
+		}
+
+		self.text_view = get_current_text() or_else panic("No text context initialized!")
+
+		// Create text layout
+		if reader, ok := reader.?; ok {
+
+			self.text_size = 0
+			self.text_glyph_index =
+				len(self.text_view.glyphs) if self.enable_selection else len(ctx.glyphs)
+			self.text_byte_index = self.text_view.byte_length
+
+			if self.enable_selection {
+				append(&self.text_view.nodes, self)
+				if !self.text_view.editing {
+					strings.write_string(&self.text_view.builder, self.text)
+				}
+			}
+
+			glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
+
+			for {
+				char, length, err := io.read_rune(reader)
+
+				if err == .EOF {
+					break
+				}
+
+				if char == '\t' {
+					append(
+						glyphs,
+						Glyph {
+							node = self,
+							index = self.text_view.byte_length,
+							offset = {self.text_size.x, 0},
+						},
+					)
+					self.text_size.x += self.font.space_advance * self.font_size * 2
+				} else if char == '\n' {
+					append(
+						glyphs,
+						Glyph {
+							node = self,
+							index = self.text_view.byte_length,
+							offset = {self.text_size.x, 0},
+							glyph = {advance = self.font.space_advance},
+						},
+					)
+					self.text_size.x += self.font.space_advance * self.font_size
+				} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+					append(
+						glyphs,
+						Glyph {
+							node = self,
+							index = self.text_view.byte_length,
+							glyph = glyph,
+							offset = {self.text_size.x, 0},
+						},
+					)
+					self.text_size.x += glyph.advance * self.font_size
+				} else {
+					for char in fmt.tprintf("<0x%x>", char) {
+						if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+							append(
+								glyphs,
+								Glyph {
+									node = self,
+									index = self.text_view.byte_length,
+									glyph = glyph,
+									offset = {self.text_size.x, 0},
+								},
+							)
+							self.text_size.x += glyph.advance * self.font_size
+						}
+					}
+				}
+
+				self.text_size.x += self.gap
+
+				if self.enable_selection {
+					self.text_view.byte_length += length
+				}
+			}
+
+			self.text_size.x -= self.gap
+			self.text_size.y = self.font.line_height * self.font_size
+
+			self.glyphs = glyphs[self.text_glyph_index:]
+
+			self.content_size = linalg.max(self.content_size, self.text_size)
+		}
+
+		push_node(self)
+	}
+
+	return
+}
+
+end_node :: proc() {
+	ctx := global_ctx
+	self := ctx.current_node
+
+	if self == nil {
+		return
+	}
+
+	i := int(self.vertical)
+
+	//
+	// Determine known size
+	//
+	if !self.wrapped {
+		self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
+	}
+
+	self.content_size += self.padding.xy + self.padding.zw
+
+	self.size = self.sizing.exact
+	node_fit_to_content(self)
+
+	//
+	// Determine dirty state from size changes in known metrics
+	//
+	if self.size != self.last_size {
+		self.dirty = true
+	}
+	self.last_size = self.size
+
+	if self.dirty {
+		draw_frames(1)
+	}
+
+	//
+	// Handle scrolling
+	//
+
+	// Update scroll
+	node_update_scroll(self)
+
+	// Add scrollbars
+	if self.show_scrollbars && self.overflow != {} {
+		SCROLLBAR_SIZE :: 3
+		SCROLLBAR_PADDING :: 2
+
+		inner_box := box_shrink(self.box, 1)
+
+		push_id(self.id)
+
+		scrollbar_style := Node_Style {
+			background = ctx.colors[.Scrollbar_Background],
+			foreground = ctx.colors[.Scrollbar_Foreground],
+			radius     = SCROLLBAR_SIZE / 2,
+		}
+
+		corner_space: f32
+
+		if self.overflow.x > 0 && self.overflow.y > 0 {
+			corner_space = SCROLLBAR_SIZE + SCROLLBAR_PADDING
+		}
+
+		if self.overflow.y > 0 {
+			node := add_node(
+				&{
+					absolute = true,
+					data = self,
+					relative_offset = {1, 0},
+					exact_offset = [2]f32{-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
+					sizing = {
+						relative = {0, 1},
+						exact = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+					},
+					interactive = true,
+					style = scrollbar_style,
+					on_draw = scrollbar_on_draw,
+					vertical = true,
+				},
+			).?
+			added_size := SCROLLBAR_SIZE * node.transitions[1]
+			node.sizing.exact.x += added_size
+			node.exact_offset.x -= added_size
+			node.radius = node.sizing.exact.x / 2
+		}
+
+		if self.overflow.x > 0 {
+			node := add_node(
+				&{
+					absolute = true,
+					data = self,
+					relative_offset = {0, 1},
+					exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
+					sizing = {
+						relative = {1, 0},
+						exact = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+					},
+					interactive = true,
+					style = scrollbar_style,
+					on_draw = scrollbar_on_draw,
+				},
+			).?
+			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
+			node.size.y += added_size
+			node.position.y -= added_size
+			node.radius = node.size.y / 2
+		}
+
+		pop_id()
+	}
+
+	pop_node()
+	if self.parent == nil {
+		end_text_view()
+	} else {
+		node_on_child_end(self.parent, self)
+	}
+}
+
+add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_Result {
+	self := begin_node(descriptor, loc)
+	if self != nil {
+		end_node()
+	}
+	return self
+}
+

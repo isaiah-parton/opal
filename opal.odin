@@ -1145,8 +1145,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 		}
 
 		if root.absolute {
-			assert(root.layout_parent != nil)
-			root.size += root.layout_parent.size * root.sizing.relative
+			node_solve_absolute_size(root)
 		}
 
 		if node_solve_sizes_and_wrap_recursive(root) {
@@ -1198,202 +1197,18 @@ default_node_style :: proc() -> Node_Style {
 	return {background = kn.BLACK, foreground = kn.WHITE, stroke = kn.DIM_GRAY, stroke_width = 1}
 }
 
+get_text_cursor_color :: proc() -> Color {
+	draw_frames(1)
+	return fade(
+		global_ctx.colors[.Selection_Background],
+		math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
+	)
+}
+
 text_node_style :: proc() -> Node_Style {
 	return {stroke_width = 1}
 }
 
-//
-// Get an existing node by its id or create a new one
-//
-get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
-	ctx := global_ctx
-	if node, ok := ctx.node_by_id[id]; ok {
-		return node
-	} else {
-		for &slot, slot_index in ctx.nodes {
-			if slot == nil {
-				ctx.nodes[slot_index] = Node {
-					id = id,
-					// time_created = time.now(),
-				}
-				node = &ctx.nodes[slot_index].?
-				ctx.node_by_id[id] = node
-				draw_frames(1)
-				return node
-			}
-		}
-	}
-	return nil
-}
-
-begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
-	ctx := global_ctx
-	self = get_or_create_node(hash_loc(loc))
-
-	if self, ok := self.?; ok {
-		if desc != nil {
-			if desc.sizing != self.sizing {
-				self.dirty = true
-			}
-			self.descriptor = desc^
-		}
-
-		if self.absolute || ctx.current_node == nil {
-			self.position = self.exact_offset
-		}
-
-		if !self.is_root {
-			self.parent = ctx.current_node
-			self.layout_parent = self.parent
-			assert(self != self.parent)
-		}
-
-		if self.parent == nil {
-			begin_text_view({id = self.id})
-		}
-
-		node_on_new_frame(self)
-
-		push_node(self)
-	}
-
-	return
-}
-
-end_node :: proc() {
-	ctx := global_ctx
-	self := ctx.current_node
-
-	if self == nil {
-		return
-	}
-
-	i := int(self.vertical)
-
-	//
-	// Determine known size
-	//
-	if !self.wrapped {
-		self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
-	}
-
-	self.content_size += self.padding.xy + self.padding.zw
-
-	if self.dirty {
-		self.size = self.sizing.exact
-	}
-
-	if self.sizing.fit != {} {
-		self.size = linalg.max(self.size, self.content_size * self.sizing.fit)
-
-		if self.square_fit {
-			self.size = max(self.size.x, self.size.y)
-		}
-	}
-
-	//
-	// Determine dirty state from size changes in known metrics
-	//
-	if !self.absolute && self.size != self.last_size {
-		self.dirty = true
-	}
-	self.last_size = self.size
-
-	if self.dirty {
-		draw_frames(1)
-	}
-
-	//
-	// Handle scrolling
-	//
-
-	// Update scroll
-	node_update_scroll(self)
-
-	// Add scrollbars
-	if self.show_scrollbars && self.overflow != {} {
-		SCROLLBAR_SIZE :: 3
-		SCROLLBAR_PADDING :: 2
-
-		inner_box := box_shrink(self.box, 1)
-
-		push_id(self.id)
-
-		scrollbar_style := Node_Style {
-			background = ctx.colors[.Scrollbar_Background],
-			foreground = ctx.colors[.Scrollbar_Foreground],
-			radius     = SCROLLBAR_SIZE / 2,
-		}
-
-		corner_space: f32
-
-		if self.overflow.x > 0 && self.overflow.y > 0 {
-			corner_space = SCROLLBAR_SIZE + SCROLLBAR_PADDING
-		}
-
-		if self.overflow.y > 0 {
-			node := add_node(
-				&{
-					absolute = true,
-					data = self,
-					relative_offset = {1, 0},
-					exact_offset = [2]f32{-SCROLLBAR_SIZE - SCROLLBAR_PADDING, SCROLLBAR_PADDING},
-					sizing = {
-						relative = {0, 1},
-						exact = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
-					},
-					interactive = true,
-					style = scrollbar_style,
-					on_draw = scrollbar_on_draw,
-					vertical = true,
-				},
-			).?
-			added_size := SCROLLBAR_SIZE * node.transitions[1]
-			node.sizing.exact.x += added_size
-			node.exact_offset.x -= added_size
-			node.radius = node.sizing.exact.x / 2
-		}
-
-		if self.overflow.x > 0 {
-			node := add_node(
-				&{
-					absolute = true,
-					data = self,
-					relative_offset = {0, 1},
-					exact_offset = {SCROLLBAR_PADDING, -SCROLLBAR_SIZE - SCROLLBAR_PADDING},
-					sizing = {
-						relative = {1, 0},
-						exact = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
-					},
-					interactive = true,
-					style = scrollbar_style,
-					on_draw = scrollbar_on_draw,
-				},
-			).?
-			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
-			node.size.y += added_size
-			node.position.y -= added_size
-			node.radius = node.size.y / 2
-		}
-
-		pop_id()
-	}
-
-	pop_node()
-	if self.parent == nil {
-		end_text_view()
-	} else {
-		node_on_child_end(self.parent, self)
-	}
-}
-
-add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_Result {
-	self := begin_node(descriptor, loc)
-	if self != nil {
-		end_node()
-	}
-	return self
-}
 
 scrollbar_on_draw :: proc(self: ^Node) {
 	assert(self.data != nil)
@@ -1461,3 +1276,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

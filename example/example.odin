@@ -213,7 +213,7 @@ main :: proc() {
 								value_data = &app.text,
 								value_type_info = type_info_of(string),
 								multiline = true,
-								sizing = {fit = {0, 1}, exact = {200, 20}},
+								sizing = {fit = 1, exact = {50, 20}},
 							},
 						)
 						end_section()
@@ -373,3 +373,4 @@ do_text :: proc(
 	}
 	end_node()
 }
+

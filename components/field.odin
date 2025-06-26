@@ -181,14 +181,10 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		add_node(
 			&{
 				sizing = {max = INFINITY, exact = {2, 0}, grow = {false, true}},
-				background = fade(
-					global_ctx.colors[.Selection_Background],
-					math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
-				),
+				background = get_text_cursor_color(),
 			},
 		)
 		pop_id()
-		draw_frames(1)
 	}
 
 	end_node()
@@ -281,3 +277,4 @@ field_output :: proc(
 
 	}
 	*/
+

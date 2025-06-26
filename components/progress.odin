@@ -90,3 +90,4 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor, loc := #caller_location
 	// )
 	end_node()
 }
+
