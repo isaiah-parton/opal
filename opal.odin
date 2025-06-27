@@ -321,20 +321,12 @@ Context :: struct {
 	// Debug only.
 	frame_duration_sum:        time.Duration,
 	frame_duration_avg:        time.Duration,
-
-	//
 	interval_start_time:       time.Time,
 	interval_duration:         time.Duration,
-
-	//
 	compute_start_time:        time.Time,
 	compute_duration:          time.Duration,
-
-	// Debug only.
 	compute_duration_sum:      time.Duration,
 	compute_duration_avg:      time.Duration,
-
-	// How many nodes are hidden. Debug only.
 	drawn_nodes:               int,
 	sizing_passes:             int,
 
@@ -464,13 +456,17 @@ box_shrink :: proc(self: Box, amount: f32) -> Box {
 	return {self.lo + amount, self.hi - amount}
 }
 
+box_is_real :: proc(box: Box) -> bool {
+	return box.lo.x < box.hi.x && box.lo.y < box.hi.y
+}
+
 // If `a` is inside of `b`
 point_in_box :: proc(point: [2]f32, box: Box) -> bool {
 	return(
 		(point.x >= box.lo.x) &&
-		(point.x < box.hi.x) &&
+		(point.x <= box.hi.x) &&
 		(point.y >= box.lo.y) &&
-		(point.y < box.hi.y) \
+		(point.y <= box.hi.y) \
 	)
 }
 
@@ -1088,6 +1084,26 @@ end :: proc() {
 	ctx_solve_sizes(ctx)
 	if ctx.active {
 		ctx_solve_positions_and_draw(ctx)
+	}
+
+	for &view in ctx.text_agent.array {
+		// if len(view.points) > 3 {
+		// 	kn.begin_path()
+		// 	for point, i in view.points {
+		// 		if i == 0 {
+		// 			kn.move_to(point)
+		// 		} else {
+		// 			kn.line_to(point)
+		// 		}
+		// 		// kn.add_circle(point, 3, paint = kn.WHITE)
+		// 	}
+		// 	kn.close_path()
+		// 	kn.fill_path(kn.WHITE)
+		// }
+		for i in 0 ..< len(view.points) {
+			j := (i + 1) % len(view.points)
+			kn.add_line(view.points[i], view.points[j], 2, kn.WHITE)
+		}
 	}
 
 	//

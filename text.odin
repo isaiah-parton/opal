@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:io"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import "core:unicode"
@@ -117,6 +118,9 @@ Text_View :: struct {
 
 	// All glyphs, interactive or not
 	glyphs:           [dynamic]Glyph,
+
+	// Selection shape
+	points:           [dynamic][2]f32,
 
 	// Text
 	builder:          strings.Builder,
@@ -546,6 +550,114 @@ text_view_update_viewport :: proc(self: ^Text_View) {
 	node.target_scroll.y += bottom - top
 }
 
+text_view_update_hightlight_shape :: proc(self: ^Text_View) {
+	selection := text_view_get_ordered_selection(self)
+
+	Point :: struct {
+		pos:   [2]f32,
+		idx:   int,
+		angle: f32,
+		dist:  f32,
+	}
+
+	points: [dynamic]Point
+	boxes: [dynamic]Box
+	defer delete(points)
+	defer delete(boxes)
+
+	for node in self.nodes {
+		box := node_get_text_selection_box(node)
+		if box_is_real(box) {
+			append(&boxes, Box{box.lo - 2, box.hi + 2})
+		}
+	}
+
+	join_overlapping_boxes_recursive :: proc(
+		box: ^Box,
+		excluded_index: int,
+		array: ^[dynamic]Box,
+		depth := 0,
+	) {
+		if depth > 10 {
+			return
+		}
+		for len(array) > 0 {
+			found := false
+			for &other, i in array {
+				if i == excluded_index {
+					continue
+				}
+				left := max(-0.5, other.lo.x - box.hi.x)
+				right := max(-0.5, other.hi.x - box.lo.x)
+				if box.lo.y == other.lo.y && box.hi.y == other.hi.y && max(left, right) >= 0 {
+					box.lo.x = min(other.lo.x, box.lo.x)
+					box.hi.x = max(other.hi.x, box.hi.x)
+					ordered_remove(array, i)
+					found = true
+				}
+			}
+			if !found {
+				break
+			}
+		}
+	}
+
+	for &box, i in boxes {
+		join_overlapping_boxes_recursive(&box, i, &boxes)
+	}
+
+	for box, i in boxes {
+		append(
+			&points,
+			Point{pos = box.lo, idx = i},
+			Point{pos = {box.hi.x, box.lo.y}, idx = i},
+			Point{pos = box.hi, idx = i},
+			Point{pos = {box.lo.x, box.hi.y}, idx = i},
+		)
+	}
+
+	clear(&self.points)
+
+	sum: [2]f32
+
+	for &point, i in points {
+		overlapped: bool
+		for j := 0; j < len(boxes); j += 1 {
+			if j == point.idx {
+				continue
+			}
+			box := boxes[j]
+
+			if point.pos.y >= box.lo.y && point.pos.y <= box.hi.y {
+				if point.pos.x == box.lo.x || point.pos.x == box.hi.x {
+					overlapped = true
+					break
+				} else if point.pos.x > box.lo.x && point.pos.x < box.hi.x {
+					top := max(0, point.pos.y - box.lo.y)
+					bottom := max(0, box.hi.y - point.pos.y)
+					if top < bottom {
+						point.pos.y -= top
+					} else {
+						point.pos.y += bottom
+					}
+				}
+			}
+		}
+		if overlapped {
+			ordered_remove(&points, i)
+		} else {
+			sum += point.pos
+		}
+	}
+
+	avg := sum / f32(len(points))
+
+	for &point in points {
+		point.angle = math.atan2(point.pos.x - avg.x, point.pos.y - avg.y)
+		point.dist = linalg.distance(point.pos, avg)
+	}
+}
+
 // text_view_draw_highlight_shape :: proc(self: ^Text_View) {
 // 	selection := text_view_get_ordered_selection(self)
 
@@ -651,7 +763,11 @@ text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> 
 	if view.selection != view.last_selection {
 		text_view_update_viewport(view)
 	}
-	view.last_selection = view.selection
+
+	if view.selection != view.last_selection {
+		view.last_selection = view.selection
+		text_view_update_hightlight_shape(view)
+	}
 
 	if view.container_node != nil {
 		view.container_node.text_view = view

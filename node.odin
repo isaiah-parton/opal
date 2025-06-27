@@ -85,6 +85,19 @@ Node_Variant :: union #no_nil {
 }
 */
 
+clone_recursive :: proc(target, source: rawptr, type_info: ^runtime.Type_Info) {
+	type_info := runtime.type_info_base(type_info)
+	#partial switch v in type_info.variant {
+	case (runtime.Type_Info_String):
+		if v.is_cstring {
+			(^cstring)(target)^ = strings.clone_to_cstring(string((^cstring)(source)^))
+		} else {
+			(^string)(target)^ = strings.clone(string((^string)(source)^))
+		}
+	case (runtime.Type_Info_Dynamic_Array):
+	}
+}
+
 Sizing_Descriptor :: struct {
 	// The node's exact initial size
 	exact:    [2]f32,
@@ -464,7 +477,7 @@ node_solve_box_recursive :: proc(
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
-	if self.dirty {
+	if self.dirty || (dirty && !self.absolute) {
 		self.cached_size = self.size
 	}
 

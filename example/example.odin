@@ -12,6 +12,7 @@ import "core:math"
 import "core:math/ease"
 import "core:mem"
 import "core:os"
+import "core:reflect"
 import "core:strings"
 import "core:time"
 import "vendor:sdl3"
@@ -87,6 +88,7 @@ main :: proc() {
 			using opal, components
 			window_radius :=
 				app.radius * f32(i32(.MAXIMIZED not_in sdl3.GetWindowFlags(app.window)))
+
 			begin()
 			begin_node(
 				&{
@@ -115,10 +117,10 @@ main :: proc() {
 					},
 				)
 				{
-					grab_node := add_node(
-						&{sizing = {grow = true, max = INFINITY}, interactive = true},
-					).?
-					sdl3app.app_use_node_for_window_grabbing(app, grab_node)
+					sdl3app.app_use_node_for_window_grabbing(
+						app,
+						add_node(&{sizing = {grow = true, max = INFINITY}, interactive = true}).?,
+					)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
 						sdl3.MinimizeWindow(app.window)
 					}
