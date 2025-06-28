@@ -120,7 +120,7 @@ Text_View :: struct {
 	glyphs:           [dynamic]Glyph,
 
 	// Selection shape
-	points:           [dynamic][2]f32,
+	selection_boxes:  [dynamic]Box,
 
 	// Text
 	builder:          strings.Builder,
@@ -553,34 +553,16 @@ text_view_update_viewport :: proc(self: ^Text_View) {
 text_view_update_hightlight_shape :: proc(self: ^Text_View) {
 	selection := text_view_get_ordered_selection(self)
 
-	Point :: struct {
-		pos:   [2]f32,
-		idx:   int,
-		angle: f32,
-		dist:  f32,
-	}
-
-	points: [dynamic]Point
-	boxes: [dynamic]Box
-	defer delete(points)
-	defer delete(boxes)
+	clear(&self.selection_boxes)
 
 	for node in self.nodes {
 		box := node_get_text_selection_box(node)
 		if box_is_real(box) {
-			append(&boxes, Box{box.lo - 2, box.hi + 2})
+			append(&self.selection_boxes, Box{box.lo - 1, box.hi + 1})
 		}
 	}
 
-	join_overlapping_boxes_recursive :: proc(
-		box: ^Box,
-		excluded_index: int,
-		array: ^[dynamic]Box,
-		depth := 0,
-	) {
-		if depth > 10 {
-			return
-		}
+	join_overlapping_boxes :: proc(box: ^Box, excluded_index: int, array: ^[dynamic]Box) {
 		for len(array) > 0 {
 			found := false
 			for &other, i in array {
@@ -602,60 +584,70 @@ text_view_update_hightlight_shape :: proc(self: ^Text_View) {
 		}
 	}
 
-	for &box, i in boxes {
-		join_overlapping_boxes_recursive(&box, i, &boxes)
+	for &box, i in self.selection_boxes {
+		join_overlapping_boxes(&box, i, &self.selection_boxes)
 	}
 
-	for box, i in boxes {
-		append(
-			&points,
-			Point{pos = box.lo, idx = i},
-			Point{pos = {box.hi.x, box.lo.y}, idx = i},
-			Point{pos = box.hi, idx = i},
-			Point{pos = {box.lo.x, box.hi.y}, idx = i},
-		)
-	}
+	// for box in boxes {
+	// 	append(
+	// 		&box.points,
+	// 		Point{pos = box.box.lo, idx = i},
+	// 		Point{pos = {box.box.hi.x, box.box.lo.y}, idx = i},
+	// 		Point{pos = box.box.hi, idx = i},
+	// 		Point{pos = {box.box.lo.x, box.box.hi.y}, idx = i},
+	// 	)
+	// }
 
-	clear(&self.points)
+	// start: [2]f32 = math.F32_MAX
 
-	sum: [2]f32
+	// for &point, i in points {
+	// 	overlapped: bool
+	// 	for j := 0; j < len(boxes); j += 1 {
+	// 		if j == point.idx {
+	// 			continue
+	// 		}
+	// 		box := boxes[j]
 
-	for &point, i in points {
-		overlapped: bool
-		for j := 0; j < len(boxes); j += 1 {
-			if j == point.idx {
-				continue
-			}
-			box := boxes[j]
+	// 		if point.pos.y >= box.lo.y && point.pos.y <= box.hi.y {
+	// 			if point.pos.x == box.lo.x || point.pos.x == box.hi.x {
+	// 				overlapped = true
+	// 				break
+	// 			} else if point.pos.x > box.lo.x && point.pos.x < box.hi.x {
+	// 				top := max(0, point.pos.y - box.lo.y)
+	// 				bottom := max(0, box.hi.y - point.pos.y)
+	// 				if top < bottom {
+	// 					point.pos.y -= top
+	// 				} else {
+	// 					point.pos.y += bottom
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// 	if overlapped {
+	// 		ordered_remove(&points, i)
+	// 	} else {
+	// 		if point.pos.y < start.y || (point.pos.y == start.y && point.pos.x < start.x) {
+	// 			start = point.pos
+	// 		}
+	// 	}
+	// }
 
-			if point.pos.y >= box.lo.y && point.pos.y <= box.hi.y {
-				if point.pos.x == box.lo.x || point.pos.x == box.hi.x {
-					overlapped = true
-					break
-				} else if point.pos.x > box.lo.x && point.pos.x < box.hi.x {
-					top := max(0, point.pos.y - box.lo.y)
-					bottom := max(0, box.hi.y - point.pos.y)
-					if top < bottom {
-						point.pos.y -= top
-					} else {
-						point.pos.y += bottom
-					}
-				}
-			}
-		}
-		if overlapped {
-			ordered_remove(&points, i)
-		} else {
-			sum += point.pos
-		}
-	}
+	// for &point in points {
+	// 	point.angle = math.atan2(point.pos.y - start.y, point.pos.x - start.x)
+	// 	point.dist = linalg.distance(point.pos, start)
+	// }
 
-	avg := sum / f32(len(points))
+	// slice.sort_by(points[:], proc(j, i: Point) -> bool {
+	// 	if abs(i.angle - j.angle) < 0.0001 {
+	// 		return i.dist < j.dist
+	// 	}
+	// 	return i.angle < j.angle
+	// })
 
-	for &point in points {
-		point.angle = math.atan2(point.pos.x - avg.x, point.pos.y - avg.y)
-		point.dist = linalg.distance(point.pos, avg)
-	}
+	// clear(&self.points)
+	// for point in points {
+	// 	append(&self.points, point.pos)
+	// }
 }
 
 // text_view_draw_highlight_shape :: proc(self: ^Text_View) {
@@ -857,4 +849,3 @@ text_agent_get_selection_string :: proc(self: ^Text_Agent) -> string {
 	}
 	return ""
 }
-

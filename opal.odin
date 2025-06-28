@@ -1100,9 +1100,12 @@ end :: proc() {
 		// 	kn.close_path()
 		// 	kn.fill_path(kn.WHITE)
 		// }
-		for i in 0 ..< len(view.points) {
-			j := (i + 1) % len(view.points)
-			kn.add_line(view.points[i], view.points[j], 2, kn.WHITE)
+		// for i in 0 ..< len(view.points) {
+		// 	j := (i + 1) % len(view.points)
+		// 	kn.add_line(view.points[i], view.points[j], 2, kn.WHITE)
+		// }
+		for box in view.selection_boxes {
+			kn.add_box_lines(box, 1, paint = kn.WHITE)
 		}
 	}
 
@@ -1292,4 +1295,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-
