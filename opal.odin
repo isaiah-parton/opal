@@ -1114,7 +1114,7 @@ end :: proc() {
 	//
 	if self, ok := ctx.node_by_id[ctx.inspector.inspected_id]; ok {
 		box := self.box
-		padding_paint := kn.paint_index_from_option(Color{0, 0, 255, 128})
+		padding_paint := kn.paint_index_from_option(Color{0, 120, 255, 100})
 		if self.padding.x > 0 {
 			kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
 		}
@@ -1127,7 +1127,7 @@ end :: proc() {
 		if self.padding.w > 0 {
 			kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
 		}
-		kn.add_box(box, paint = Color{0, 255, 0, 100})
+		kn.add_box(box, paint = Color{0, 255, 0, 80})
 		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
 	}
 
@@ -1159,9 +1159,6 @@ ctx_solve_sizes :: proc(self: ^Context) {
 	}
 
 	for root in self.layout_roots {
-		if !root.dirty {
-			continue
-		}
 
 		if root.absolute {
 			node_solve_absolute_size(root)
@@ -1295,3 +1292,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

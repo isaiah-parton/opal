@@ -176,6 +176,7 @@ inspector_show :: proc(self: ^Inspector) {
 							max = INFINITY,
 							fit = {0, ease.quadratic_in_out(node.transitions[0])},
 						},
+						content_align = {0, 1},
 						clip_content = true,
 						vertical = true,
 					},
@@ -319,3 +320,4 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
+

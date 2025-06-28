@@ -236,12 +236,6 @@ Node :: struct {
 	// The accumulated size of the node on this frame. This value is unstable!
 	size:              [2]f32,
 
-	// The last known size; compared with the known size each frame to trigger a sizing pass
-	last_size:         [2]f32,
-
-	// Cached size from the last sizing pass
-	cached_size:       [2]f32,
-
 	// Amount of content overflow
 	// Computed at end of frame
 	overflow:          [2]f32,
@@ -446,15 +440,15 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	// Nodes' cached sizes are used here because at this point they should represent the actual sizes
 	if self.absolute {
 		assert(self.layout_parent != nil)
-		self.position = self.layout_parent.cached_size * self.relative_offset + self.exact_offset
-		self.position -= self.cached_size * self.align
+		self.position = self.layout_parent.size * self.relative_offset + self.exact_offset
+		self.position -= self.size * self.align
 	}
 
 	self.box.lo = offset + self.position
 	if bounds, ok := self.bounds.?; ok {
-		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.cached_size)
+		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
 	}
-	self.box.hi = self.box.lo + self.cached_size
+	self.box.hi = self.box.lo + self.size
 
 	// Re-implement this
 	// if global_ctx.snap_to_pixels {
@@ -468,7 +462,7 @@ node_get_is_size_affected_by_parent :: proc(self: ^Node) -> bool {
 
 node_solve_absolute_size :: proc(self: ^Node) {
 	assert(self.layout_parent != nil)
-	self.size += self.layout_parent.cached_size * self.sizing.relative
+	self.size += self.layout_parent.size * self.sizing.relative
 }
 
 node_solve_box_recursive :: proc(
@@ -477,9 +471,7 @@ node_solve_box_recursive :: proc(
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
-	if self.dirty || (dirty && !self.absolute) {
-		self.cached_size = self.size
-	}
+
 
 	node_solve_box(self, offset)
 
@@ -549,7 +541,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 	spacing := (length_left / f32(len(children) - 1)) if self.justify_between else self.gap
 
-	offset: f32 = self.padding[i] + max(length_left, 0) * self.content_align[i]
+	offset: f32 = self.padding[i] + length_left * self.content_align[i]
 
 	for node in children {
 		node.position[i] = offset
@@ -959,11 +951,12 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		)
 	}
 
-	when ODIN_DEBUG {
-		if global_ctx.inspector.shown && self.dirty {
-			kn.add_box(self.box, paint = fade(kn.RED, 0.1))
-		}
-	}
+	// TODO: Do this better
+	// when ODIN_DEBUG {
+	// 	if global_ctx.inspector.shown && self.dirty {
+	// 		kn.add_box(self.box, paint = fade(kn.RED, 0.1))
+	// 	}
+	// }
 
 	if is_transformed {
 		kn.pop_matrix()
@@ -1212,10 +1205,6 @@ end_node :: proc() {
 	//
 	// Determine dirty state from size changes in known metrics
 	//
-	if self.size != self.last_size {
-		self.dirty = true
-	}
-	self.last_size = self.size
 
 	if self.dirty {
 		draw_frames(1)

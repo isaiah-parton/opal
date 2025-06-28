@@ -83,7 +83,7 @@ add_slider :: proc(
 
 	if body_node.is_active {
 		new_time := clamp(
-			(global_ctx.mouse_position.x - body_node.box.lo.x) / body_node.cached_size.x,
+			(global_ctx.mouse_position.x - body_node.box.lo.x) / body_node.size.x,
 			0,
 			1,
 		)
@@ -94,3 +94,4 @@ add_slider :: proc(
 
 	return
 }
+

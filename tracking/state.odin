@@ -5,39 +5,11 @@ import "core:mem"
 import "core:reflect"
 import "core:time"
 
-Object :: struct($T: typeid) {
-	inner:        T,
+Object :: struct {
+	data:         rawptr,
+	type:         typeid,
 	last_changed: time.Time,
-}
-
-object_borrow :: proc(self: ^Object($T)) -> ^T {
-	self.last_changed = time.now()
-	return self.inner
-}
-
-Array :: struct($T: typeid) {
-	using object: Object([dynamic]T),
-}
-
-array_append :: proc(self: ^Array($T), elems: ..T) {
-	append(object_borrow(self), ..elems)
-}
-
-array_ordered_remove :: proc(self: ^Array, index: int) {
-	ordered_remove(object_borrow(self), index)
-}
-
-array_unordered_remove :: proc(self: ^Array, index: int) {
-	unordered_remove(object_borrow(self), index)
-}
-
-array_remove_range :: proc(self: ^Array, from, to: int) {
-	remove_range(object_borrow(self), from, to)
-}
-
-object_drop :: proc(self: ^Object) {
-	free(self.data)
-	self^ = {}
+	last_checked: time.Time,
 }
 
 make_object_empty :: proc(type: typeid) -> Object {
