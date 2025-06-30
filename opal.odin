@@ -280,7 +280,7 @@ Context :: struct {
 	// Call index
 	call_index:                int,
 
-	// Nodes by call order
+	// Nodes by id
 	node_by_id:                map[Id]^Node,
 
 	// Node memory is stored contiguously for memory efficiency.
@@ -295,6 +295,9 @@ Context :: struct {
 
 	// The stack of nodes being declared. May contain multiple roots, as its only a way of keeping track of the nodes currently being invoked.
 	node_stack:                [dynamic]^Node,
+
+	// Nodes in sequencial order
+	node_buffer:               [dynamic]^Node,
 
 	// The hash stack
 	id_stack:                  [dynamic]Id,
@@ -1292,4 +1295,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-

@@ -150,6 +150,8 @@ view_manager_cleanup :: proc(self: ^View_Manager) {
 	}
 }
 
+View_Ref :: Maybe(^View)
+
 View :: struct {
 	id:         Id,
 	dead:       bool,
@@ -157,6 +159,10 @@ View :: struct {
 	object:     Maybe(Object),
 	first_node: int,
 	last_node:  int,
+}
+
+view_drop :: proc(self: ^View) {
+
 }
 
 View_Build_Proc :: #type proc()
@@ -175,4 +181,3 @@ add_reactive_view :: proc(state: any, build_proc: View_Build_Proc, loc := #calle
 add_static_view :: proc(build_proc: View_Build_Proc, loc := #caller_location) {
 
 }
-

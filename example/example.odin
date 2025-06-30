@@ -156,34 +156,32 @@ main :: proc() {
 					begin_node(&{sizing = {fit = 1}, vertical = true, gap = 10})
 					{
 						begin_section("Settings")
-						add_with_state(&theme.base_size, proc() {
-							components.add_field(
-								&{
-									value_data = &theme.base_size.x,
-									value_type_info = type_info_of(f32),
-									multiline = true,
-									sizing = {
-										fit = {0, 1},
-										exact = {100, 20},
-										max = {200, 20},
-										grow = {true, false},
-									},
+						components.add_field(
+							&{
+								value_data = &theme.base_size.x,
+								value_type_info = type_info_of(f32),
+								multiline = true,
+								sizing = {
+									fit = {0, 1},
+									exact = {100, 20},
+									max = {200, 20},
+									grow = {true, false},
 								},
-							)
-							components.add_field(
-								&{
-									value_data = &theme.base_size.y,
-									value_type_info = type_info_of(f32),
-									multiline = true,
-									sizing = {
-										fit = {0, 1},
-										exact = {100, 20},
-										max = {200, 20},
-										grow = {true, false},
-									},
+							},
+						)
+						components.add_field(
+							&{
+								value_data = &theme.base_size.y,
+								value_type_info = type_info_of(f32),
+								multiline = true,
+								sizing = {
+									fit = {0, 1},
+									exact = {100, 20},
+									max = {200, 20},
+									grow = {true, false},
 								},
-							)
-						})
+							},
+						)
 						end_section()
 						//
 						begin_section("Buttons")
@@ -377,4 +375,3 @@ do_text :: proc(
 	}
 	end_node()
 }
-
