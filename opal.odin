@@ -131,6 +131,22 @@ Font :: kn.Font
 
 Node_Result :: Maybe(^Node)
 
+Stack :: struct($T: typeid, $N: int) {
+	items:  [N]T,
+	height: int,
+}
+
+stack_push :: proc(self: ^Stack($T, $N), elem: T) {
+	assert(self.height < N)
+	self.items[self.height] = elem
+	self.height += 1
+}
+
+stack_pop :: proc(self: ^Stack($T, $N)) {
+	assert(self.height > 0)
+	self.height -= 1
+}
+
 /*
 Rule_Background :: distinct Paint_Variant
 Rule_Foreground :: distinct Paint_Option
@@ -301,6 +317,11 @@ Context :: struct {
 
 	// The hash stack
 	id_stack:                  [dynamic]Id,
+
+	//
+	view_stack:                [dynamic]^View,
+	current_view:              ^View,
+	view_map:                  map[Id]View,
 
 	// Non-interactive glyphs
 	glyphs:                    [dynamic]Glyph,
@@ -1295,3 +1316,4 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
+

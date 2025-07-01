@@ -136,8 +136,11 @@ recursively_compare_and_clone :: proc(
 	return
 }
 
+VIEW_STACK_HEIGHT :: 128
+
 View_Manager :: struct {
-	dict: map[Id]View,
+	dict:  map[Id]View,
+	stack: Stack(^View, VIEW_STACK_HEIGHT),
 }
 
 view_manager_cleanup :: proc(self: ^View_Manager) {
@@ -153,15 +156,22 @@ view_manager_cleanup :: proc(self: ^View_Manager) {
 View_Ref :: Maybe(^View)
 
 View :: struct {
-	id:         Id,
-	dead:       bool,
-	dirty:      bool,
-	object:     Maybe(Object),
-	first_node: int,
-	last_node:  int,
+	id:     Id,
+	dead:   bool,
+	dirty:  bool,
+	object: Maybe(Object),
+	nodes:  []^Node,
 }
 
 view_drop :: proc(self: ^View) {
+
+}
+
+view_begin :: proc(self: ^View) {
+
+}
+
+view_end :: proc(self: ^View) {
 
 }
 
@@ -181,3 +191,4 @@ add_reactive_view :: proc(state: any, build_proc: View_Build_Proc, loc := #calle
 add_static_view :: proc(build_proc: View_Build_Proc, loc := #caller_location) {
 
 }
+

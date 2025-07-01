@@ -214,6 +214,9 @@ Node :: struct {
 	layout_parent:     ^Node,
 	layout_children:   [dynamic]^Node `fmt:"-"`,
 
+	// Each node holds a reference to its immediate view
+	view:              ^View,
+
 	// A simple kill switch that causes the node to be discarded
 	dead:              bool,
 
@@ -252,6 +255,7 @@ Node :: struct {
 	text_view:         ^Text_View,
 	text_byte_index:   int,
 	text_glyph_index:  int,
+	text_hash:         u32,
 	glyphs:            []Glyph `fmt:"-"`,
 
 	// View offset of contents
@@ -990,7 +994,7 @@ node_fit_to_content :: proc(self: ^Node) {
 //
 // Get an existing node by its id or create a new one
 //
-get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
+acquire_node :: proc(id: Id) -> Maybe(^Node) {
 	ctx := global_ctx
 	if node, ok := ctx.node_by_id[id]; ok {
 		return node
@@ -1013,7 +1017,7 @@ get_or_create_node :: proc(id: Id) -> Maybe(^Node) {
 
 begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
 	ctx := global_ctx
-	self = get_or_create_node(hash_loc(loc))
+	self = acquire_node(hash_loc(loc))
 
 	if self, ok := self.?; ok {
 		if desc != nil {
@@ -1103,12 +1107,16 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 			glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
 
+			hash: u32 = FNV1A32_OFFSET_BASIS
+
 			for {
 				char, length, err := io.read_rune(reader)
 
 				if err == .EOF {
 					break
 				}
+
+				hash = hash ~ (u32(char) * FNV1A32_PRIME)
 
 				if char == '\t' {
 					append(
@@ -1164,6 +1172,11 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				if self.enable_selection {
 					self.text_view.byte_length += length
 				}
+			}
+
+			if hash != self.text_hash {
+				draw_frames(1)
+				self.text_hash = hash
 			}
 
 			self.text_size.x -= self.gap
@@ -1301,3 +1314,4 @@ add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_
 	}
 	return self
 }
+
