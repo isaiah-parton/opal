@@ -12,7 +12,9 @@ import "core:math"
 import "core:math/ease"
 import "core:mem"
 import "core:os"
+import "core:path/filepath"
 import "core:reflect"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import "vendor:sdl3"
@@ -38,10 +40,23 @@ Explorer :: struct {
 
 explorer_refresh :: proc(self: ^Explorer) -> os.Error {
 	folder := os.open(self.cwd) or_return
+	defer os.close(folder)
+
 	files := os.read_dir(folder, -1) or_return
+	defer delete(files)
+
+	clear(&self.items)
 	for file_info in files {
 		append(&self.items, Item{file_info = file_info})
 	}
+
+	slice.sort_by(self.items[:], proc(a, b: Item) -> bool {
+		if a.is_dir != b.is_dir {
+			return a.is_dir
+		}
+		return strings.compare(a.file_info.name, b.file_info.name) < 0
+	})
+
 	return nil
 }
 
@@ -82,6 +97,10 @@ main :: proc() {
 				"Lexend-Regular.png",
 				"Lexend-Regular.json",
 			)
+			app.cwd = os.get_current_directory()
+			if err := explorer_refresh(app); err != nil {
+				fmt.eprintf("Failed to refresh explorer: %v\n", err)
+			}
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
@@ -137,99 +156,161 @@ main :: proc() {
 				}
 				end_node()
 
-				TEXT_COLOR :: tw.NEUTRAL_400
-				TEXT_STROKE_COLOR :: tw.ROSE_600
-
-				node := begin_node(
+				begin_node(
 					&{
 						sizing = {max = INFINITY, grow = true},
-						gap = 5,
-						padding = 20,
-						interactive = true,
-						clip_content = true,
-						show_scrollbars = true,
-						vertical = true,
-						content_align = 0.5,
+						content_align = {0, 0.5},
+						style = {background = tw.NEUTRAL_900},
 					},
-				).?
+				)
 				{
-					begin_node(&{sizing = {fit = 1}, vertical = true, gap = 10})
+					begin_node(
+						&{
+							sizing = {
+								max = {200, INFINITY},
+								grow = {false, true},
+								exact = {200, 0},
+								fit = {1, 0},
+							},
+							vertical = true,
+						},
+					)
 					{
-						begin_section("Settings")
-						components.add_field(
-							&{
-								value_data = &theme.base_size.x,
-								value_type_info = type_info_of(f32),
-								multiline = true,
-								sizing = {
-									fit = {0, 1},
-									exact = {100, 20},
-									max = {200, 20},
-									grow = {true, false},
-								},
-							},
-						)
-						components.add_field(
-							&{
-								value_data = &theme.base_size.y,
-								value_type_info = type_info_of(f32),
-								multiline = true,
-								sizing = {
-									fit = {0, 1},
-									exact = {100, 20},
-									max = {200, 20},
-									grow = {true, false},
-								},
-							},
-						)
-						end_section()
-						//
-						begin_section("Buttons")
-						for variant, i in Button_Variant {
+						button := components.make_button("...")
+						if components.add_button(&button) {
+							// Move up one folder using the os package
+							if err := os.change_directory(
+								app.cwd[:strings.last_index_byte(app.cwd, '\\')],
+							); err == nil {
+								app.cwd = os.get_current_directory()
+								explorer_refresh(app)
+							} else {
+								fmt.eprintfln("Failed to change directory: %v", err)
+							}
+						}
+						for &item, i in app.items {
 							push_id(i)
-							desc := make_button(fmt.tprint(variant), variant)
-							add_button(&desc)
+							node := add_node(
+								&{
+									interactive = true,
+									sizing = {fit = 1, grow = {true, false}, max = INFINITY},
+									text = item.file_info.name,
+									font = &theme.font,
+									font_size = 16,
+									foreground = kn.BLUE if item.file_info.is_dir else kn.WHITE,
+								},
+							).?
+							if item.file_info.is_dir {
+								if node.is_active && !node.was_active {
+									if err := os.change_directory(item.file_info.fullpath);
+									   err == nil {
+										app.cwd = os.get_current_directory()
+										explorer_refresh(app)
+									} else {
+										fmt.eprintfln("Failed to change directory: %v", err)
+									}
+								}
+							}
 							pop_id()
 						}
-						end_section()
-						//
-						begin_section("Boolean")
-						components.add_toggle_switch(&app.toggle_switch)
-						end_section()
-						//
-						begin_section("Slider")
-						if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, sizing = {exact = {300, 0}}}).new_value.?;
-						   ok {
-							app.slider = new_value
-						}
-						end_section()
-						//
-						begin_section("Progress")
-						components.add_radial_progress(&{size = 70, time = app.slider})
-						components.add_progress_bar(&{time = app.slider})
-						end_section()
-						//
-						begin_section("Input fields")
-						components.add_field(
-							&{
-								value_data = &app.text,
-								value_type_info = type_info_of(string),
-								multiline = true,
-								sizing = {fit = 1, exact = {50, 20}},
-							},
-						)
-						end_section()
 					}
 					end_node()
-					do_text(
-						&{sizing = {fit = 1, grow = {true, false}, max = INFINITY}},
-						FILLER_TEXT,
-						12,
-						&theme.font,
-						paint = kn.WHITE,
-					)
 				}
 				end_node()
+
+				// TEXT_COLOR :: tw.NEUTRAL_400
+				// TEXT_STROKE_COLOR :: tw.ROSE_600
+
+				// node := begin_node(
+				// 	&{
+				// 		sizing = {max = INFINITY, grow = true},
+				// 		gap = 5,
+				// 		padding = 20,
+				// 		interactive = true,
+				// 		clip_content = true,
+				// 		show_scrollbars = true,
+				// 		vertical = true,
+				// 		content_align = 0.5,
+				// 	},
+				// ).?
+				// {
+				// 	begin_node(&{sizing = {fit = 1}, vertical = true, gap = 10})
+				// 	{
+				// 		begin_section("Settings")
+				// 		components.add_field(
+				// 			&{
+				// 				value_data = &theme.base_size.x,
+				// 				value_type_info = type_info_of(f32),
+				// 				multiline = true,
+				// 				sizing = {
+				// 					fit = {0, 1},
+				// 					exact = {100, 20},
+				// 					max = {200, 20},
+				// 					grow = {true, false},
+				// 				},
+				// 			},
+				// 		)
+				// 		components.add_field(
+				// 			&{
+				// 				value_data = &theme.base_size.y,
+				// 				value_type_info = type_info_of(f32),
+				// 				multiline = true,
+				// 				sizing = {
+				// 					fit = {0, 1},
+				// 					exact = {100, 20},
+				// 					max = {200, 20},
+				// 					grow = {true, false},
+				// 				},
+				// 			},
+				// 		)
+				// 		end_section()
+				// 		//
+				// 		begin_section("Buttons")
+				// 		for variant, i in Button_Variant {
+				// 			push_id(i)
+				// 			desc := make_button(fmt.tprint(variant), variant)
+				// 			add_button(&desc)
+				// 			pop_id()
+				// 		}
+				// 		end_section()
+				// 		//
+				// 		begin_section("Boolean")
+				// 		components.add_toggle_switch(&app.toggle_switch)
+				// 		end_section()
+				// 		//
+				// 		begin_section("Slider")
+				// 		if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, sizing = {exact = {300, 0}}}).new_value.?;
+				// 		   ok {
+				// 			app.slider = new_value
+				// 		}
+				// 		end_section()
+				// 		//
+				// 		begin_section("Progress")
+				// 		components.add_radial_progress(&{size = 70, time = app.slider})
+				// 		components.add_progress_bar(&{time = app.slider})
+				// 		end_section()
+				// 		//
+				// 		begin_section("Input fields")
+				// 		components.add_field(
+				// 			&{
+				// 				value_data = &app.text,
+				// 				value_type_info = type_info_of(string),
+				// 				multiline = true,
+				// 				sizing = {fit = 1, exact = {50, 20}},
+				// 			},
+				// 		)
+				// 		end_section()
+				// 	}
+				// 	end_node()
+				// 	do_text(
+				// 		&{sizing = {fit = 1, grow = {true, false}, max = INFINITY}},
+				// 		FILLER_TEXT,
+				// 		12,
+				// 		&theme.font,
+				// 		paint = kn.WHITE,
+				// 	)
+				// }
+				// end_node()
 			}
 			end_node()
 			end()
@@ -375,3 +456,4 @@ do_text :: proc(
 	}
 	end_node()
 }
+
