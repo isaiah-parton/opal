@@ -988,7 +988,7 @@ begin :: proc() {
 			text_agent_on_mouse_up(&ctx.text_agent)
 		}
 
-		if mouse_pressed(.Left) {
+		if ctx.mouse_button_down - ctx.mouse_button_was_down > {} {
 			// Individual node interaction
 			if ctx.hovered_node != nil {
 				// Set activation status

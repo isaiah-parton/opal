@@ -410,12 +410,77 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	}
 }
 
+aabb_intersects_segment_2d :: proc(
+	aabb_min: [2]f32,
+	aabb_max: [2]f32,
+	p1: [2]f32,
+	p2: [2]f32,
+) -> bool {
+	// Initialize t parameters for the segment
+	t_min := f32(0.0)
+	t_max := f32(1.0)
+
+	d := p2 - p1
+	epsilon :: f32(0.0001)
+
+	// Loop through X (i=0) and Y (i=1)
+	for i := 0; i < 2; i += 1 {
+		// Get the relevant components for the current axis
+		p1_i := p1[i]
+		d_i := d[i]
+		v_min_i := aabb_min[i]
+		v_max_i := aabb_max[i]
+
+		// --- Handle Parallel Case ---
+		if abs(d_i) < epsilon {
+			if (p1_i < v_min_i) || (p1_i > v_max_i) {
+				return false // Parallel and outside the slab
+			}
+		} else {
+			// --- General Case ---
+			t_near := (v_min_i - p1_i) / d_i
+			t_far := (v_max_i - p1_i) / d_i
+
+			// Ensure t_near is always smaller than t_far
+			if t_near > t_far {
+				t_near, t_far = t_far, t_near
+			}
+
+			// Update the intersection interval
+			// The latest entry point (t_min)
+			if t_near > t_min {
+				t_min = t_near
+			}
+			// The earliest exit point (t_max)
+			if t_far < t_max {
+				t_max = t_far
+			}
+
+			// Check if the intersection interval collapsed
+			if t_min > t_max {
+				return false
+			}
+		}
+	}
+
+	// The line segment intersects if the final interval [t_min, t_max] is valid
+	// AND overlaps the segment range [0, 1].
+	// Since we initialized t_min=0 and t_max=1, this check suffices:
+	return true
+}
+
 node_receive_input :: proc(self: ^Node, layer: i32) -> (mouse_overlap: bool) {
 	ctx := global_ctx
-	if ctx.mouse_position.x >= self.box.lo.x &&
-	   ctx.mouse_position.x <= self.box.hi.x &&
-	   ctx.mouse_position.y >= self.box.lo.y &&
-	   ctx.mouse_position.y <= self.box.hi.y {
+	// if ctx.mouse_position.x >= self.box.lo.x &&
+	//    ctx.mouse_position.x <= self.box.hi.x &&
+	//    ctx.mouse_position.y >= self.box.lo.y &&
+	//    ctx.mouse_position.y <= self.box.hi.y {
+	if aabb_intersects_segment_2d(
+		self.box.lo,
+		self.box.hi,
+		ctx.last_mouse_position,
+		ctx.mouse_position,
+	) {
 		mouse_overlap = true
 		if self.interactive && !(ctx.hovered_node != nil && ctx.hovered_node.layer > layer) {
 			ctx.hovered_node = self
@@ -475,8 +540,6 @@ node_solve_box_recursive :: proc(
 	offset: [2]f32 = {},
 	clip_box: Box = {0, INFINITY},
 ) {
-
-
 	node_solve_box(self, offset)
 
 	clip_box := clip_box
@@ -967,7 +1030,8 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	}
 }
 
-node_get_glyph_position :: proc(self: ^Node, index: int) -> [2]f32 {
+node_get_glyph_position :: proc(self: ^Node, index: int, loc := #caller_location) -> [2]f32 {
+	assert(index >= 0, loc = loc)
 	if index == 0 {
 		return self.text_origin
 	}
@@ -1057,6 +1121,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 			begin_text_view({id = self.id})
 		} else {
 			append(&self.parent.children, self)
+			self.layer = desc.layer + self.parent.layer
 		}
 
 		// Clear arrays and reserve memory
@@ -1150,7 +1215,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 						},
 					)
 					self.text_size.x += glyph.advance * self.font_size
-				} else {
+				} else if char != '\r' {
 					for char in fmt.tprintf("<0x%x>", char) {
 						if glyph, ok := kn.get_font_glyph(self.font, char); ok {
 							append(

@@ -482,7 +482,10 @@ text_view_update_cursor_box :: proc(self: ^Text_View) {
 
 		line_height := glyph.node.font.line_height * glyph.node.font_size
 
-		top_left := node_get_glyph_position(glyph.node, cursor_index - glyph.node.text_glyph_index)
+		top_left := node_get_glyph_position(
+			glyph.node,
+			max(0, cursor_index - glyph.node.text_glyph_index),
+		)
 
 		if cursor_index == len(self.glyphs) {
 			// top_left.x += glyph.advance * glyph.node.font_size
@@ -849,3 +852,4 @@ text_agent_get_selection_string :: proc(self: ^Text_Agent) -> string {
 	}
 	return ""
 }
+

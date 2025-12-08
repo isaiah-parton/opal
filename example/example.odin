@@ -7,17 +7,27 @@ import "../lucide"
 import "../sdl3app"
 import tw "../tailwind_colors"
 import "base:runtime"
+import "core:c/libc"
 import "core:fmt"
+import "core:image"
+import "core:image/bmp"
+import "core:image/jpeg"
+import "core:image/png"
+import "core:image/qoi"
+import "core:image/tga"
 import "core:math"
+import "core:math/bits"
 import "core:math/ease"
 import "core:mem"
 import "core:os"
+import "core:os/os2"
 import "core:path/filepath"
 import "core:reflect"
 import "core:slice"
 import "core:strings"
 import "core:time"
 import "vendor:sdl3"
+import stbi "vendor:stb/image"
 import "vendor:wgpu"
 
 import "../components"
@@ -27,15 +37,139 @@ FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc qu
 Item :: struct {
 	using file_info: os.File_Info,
 	children:        [dynamic]Item,
+	selected:        bool,
+}
+
+Preview :: union {
+	Text_Preview,
+	Image_Preview,
+}
+
+Text_Preview :: struct {
+	data: []u8,
+	text: string,
+}
+
+Image_Preview :: struct {
+	source: kn.Box,
+}
+
+Context_Menu :: struct {
+	position: [2]f32,
+	file:     string,
 }
 
 Explorer :: struct {
-	using app:     sdl3app.App,
-	toggle_switch: bool,
-	slider:        f32,
-	text:          string,
-	cwd:           string,
-	items:         [dynamic]Item,
+	using app:         sdl3app.App,
+	toggle_switch:     bool,
+	slider:            f32,
+	text:              string,
+	cwd:               string,
+	last_cwd:          string,
+	items:             [dynamic]Item,
+	primary_selection: Maybe(string),
+	preview:           Preview,
+	context_menu:      Maybe(Context_Menu),
+}
+
+memory_size_suffix :: proc(size: i64) -> string {
+	switch size {
+	case mem.Gigabyte ..= bits.I64_MAX:
+		return "GB"
+	case mem.Megabyte ..= mem.Gigabyte - 1:
+		return "MB"
+	case mem.Kilobyte ..= mem.Megabyte - 1:
+		return "KB"
+	}
+	return "B"
+}
+
+fmt_memory_size :: proc(size: i64) -> string {
+	if size > mem.Gigabyte {
+		return fmt.tprintf("%i", size / mem.Gigabyte)
+	} else if size > mem.Megabyte {
+		return fmt.tprintf("%i", size / mem.Megabyte)
+	} else if size > mem.Kilobyte {
+		return fmt.tprintf("%i", size / mem.Kilobyte)
+	} else {
+		return fmt.tprintf("%i", size)
+	}
+	return "???"
+}
+
+explorer_change_folder :: proc(self: ^Explorer, folder: string) {
+	if err := os.change_directory(folder); err == nil {
+		delete(self.last_cwd)
+		self.last_cwd = self.cwd
+		self.cwd = os.get_current_directory()
+		explorer_refresh(self)
+	} else {
+		fmt.eprintfln("Failed to change directory: %v", err)
+	}
+}
+
+explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: os.Error) {
+	self.primary_selection = name
+
+	if os.is_dir(name) {
+		return os.General_Error.Invalid_File
+	}
+
+	file := os.open(name, os.O_RDONLY) or_return
+	defer os.close(file)
+
+	switch filepath.ext(name) {
+	case ".png", ".jpg", ".jpeg", ".qoi", ".tga", ".bmp":
+		if img, err := image.load_from_file(name, {.alpha_add_if_missing}); err == nil {
+			defer image.destroy(img)
+
+			shrink_x := max(img.width - 256, 0)
+			shrink_y := max(img.height - 256, 0)
+
+			new_width := img.width
+			new_height := img.height
+			if shrink_x > shrink_y {
+				new_width = img.width - shrink_x
+				new_height = int(f32(img.height) * (f32(new_width) / f32(img.width)))
+			} else {
+				new_height = img.height - shrink_y
+				new_width = int(f32(img.width) * (f32(new_height) / f32(img.height)))
+			}
+
+			new_data := make([]u8, new_width * new_height * 4)
+			defer delete(new_data)
+
+			stbi.resize_uint8(
+				raw_data(img.pixels.buf),
+				i32(img.width),
+				i32(img.height),
+				0,
+				raw_data(new_data),
+				i32(new_width),
+				i32(new_height),
+				0,
+				4,
+			)
+
+			self.preview = Image_Preview {
+				source = kn.copy_image_to_atlas(raw_data(new_data), new_width, new_height),
+			}
+		} else {
+			fmt.eprintln(err)
+		}
+	case:
+		text_preview := Text_Preview {
+			data = make([]u8, 1024),
+		}
+		defer if err != nil do delete(text_preview.data)
+
+		n := os.read(file, text_preview.data) or_return
+
+		text_preview.text = string(text_preview.data[:n])
+		self.preview = text_preview
+	}
+
+	return nil
 }
 
 explorer_refresh :: proc(self: ^Explorer) -> os.Error {
@@ -97,6 +231,10 @@ main :: proc() {
 				"Lexend-Regular.png",
 				"Lexend-Regular.json",
 			)
+			components.theme.monospace_font, _ = kn.load_font_from_files(
+				"SpaceMono-Regular.png",
+				"SpaceMono-Regular.json",
+			)
 			app.cwd = os.get_current_directory()
 			if err := explorer_refresh(app); err != nil {
 				fmt.eprintf("Failed to refresh explorer: %v\n", err)
@@ -156,9 +294,91 @@ main :: proc() {
 				}
 				end_node()
 
+				if menu, ok := app.context_menu.?; ok {
+					push_id(menu.file)
+					defer pop_id()
+					menu_root := begin_node(
+						&Node_Descriptor {
+							layer = 9,
+							absolute = true,
+							exact_offset = menu.position,
+							sizing = {exact = {0, 0}, fit = 1, max = INFINITY},
+							padding = 8,
+							radius = 10,
+							gap = 4,
+							background = tw.NEUTRAL_800,
+							stroke = tw.NEUTRAL_600,
+							shadow_color = tw.BLACK,
+							shadow_offset = 2,
+							shadow_size = 10,
+							stroke_width = 1,
+							interactive = true,
+							vertical = true,
+						},
+					).?
+					if mouse_pressed(.Left) &&
+					   !menu_root.is_focused &&
+					   !menu_root.has_focused_child {
+						app.context_menu = nil
+					}
+					node_update_transition(menu_root, 0, true, 0.2)
+					menu_root.scale.y = 0.5 + ease.cubic_out(menu_root.transitions[0]) * 0.5
+					{
+						add_node(
+							&{
+								text = menu.file,
+								foreground = tw.WHITE,
+								font = &theme.font,
+								font_size = 14,
+								sizing = {fit = 1},
+							},
+						)
+						begin_node(&{sizing = {fit = 1}, gap = 4})
+						{
+							{
+								btn := components.make_button(lucide.COPY, .Primary)
+								btn.font = &theme.icon_font
+								if components.add_button(&btn) {
+									fmt.eprintln("Not implemented")
+								}
+							}
+							{
+								btn := components.make_button(lucide.SCISSORS, .Primary)
+								btn.font = &theme.icon_font
+								if components.add_button(&btn) {
+									fmt.eprintln("Not implemented")
+								}
+							}
+							{
+								btn := components.make_button(lucide.CLIPBOARD_PASTE, .Primary)
+								btn.font = &theme.icon_font
+								if components.add_button(&btn) {
+									fmt.eprintln("Not implemented")
+								}
+							}
+							{
+								btn := components.make_button(lucide.TEXT_CURSOR_INPUT, .Primary)
+								btn.font = &theme.icon_font
+								if components.add_button(&btn) {
+									fmt.eprintln("Not implemented")
+								}
+							}
+							{
+								btn := components.make_button(lucide.SHREDDER, .Primary)
+								btn.font = &theme.icon_font
+								if components.add_button(&btn) {
+									fmt.eprintln("Not implemented")
+								}
+							}
+						}
+						end_node()
+					}
+					end_node()
+				}
+
 				begin_node(
 					&{
-						sizing = {max = INFINITY, grow = true},
+						sizing = {max = INFINITY, grow = true, fit = 1},
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_900},
 					},
@@ -167,150 +387,280 @@ main :: proc() {
 					begin_node(
 						&{
 							sizing = {
-								max = {200, INFINITY},
-								grow = {false, true},
+								max = {INFINITY, INFINITY},
+								grow = {true, true},
 								exact = {200, 0},
 								fit = {1, 0},
 							},
+							gap = 2,
 							vertical = true,
 						},
 					)
 					{
-						button := components.make_button("...")
-						if components.add_button(&button) {
-							// Move up one folder using the os package
-							if err := os.change_directory(
-								app.cwd[:strings.last_index_byte(app.cwd, '\\')],
-							); err == nil {
-								app.cwd = os.get_current_directory()
-								explorer_refresh(app)
-							} else {
-								fmt.eprintfln("Failed to change directory: %v", err)
-							}
-						}
-						for &item, i in app.items {
-							push_id(i)
-							node := add_node(
-								&{
-									interactive = true,
-									sizing = {fit = 1, grow = {true, false}, max = INFINITY},
-									text = item.file_info.name,
-									font = &theme.font,
-									font_size = 16,
-									foreground = kn.BLUE if item.file_info.is_dir else kn.WHITE,
+						begin_node(
+							&{
+								sizing = {
+									fit = {0, 1},
+									grow = {true, false},
+									max = {INFINITY, 30},
 								},
-							).?
-							if item.file_info.is_dir {
-								if node.is_active && !node.was_active {
-									if err := os.change_directory(item.file_info.fullpath);
-									   err == nil {
-										app.cwd = os.get_current_directory()
-										explorer_refresh(app)
-									} else {
-										fmt.eprintfln("Failed to change directory: %v", err)
-									}
+								gap = 6,
+								padding = 2,
+								content_align = {0, 0.5},
+							},
+						)
+						{
+							{
+								button := components.make_button(lucide.ARROW_LEFT, .Primary)
+								button.font = &theme.icon_font
+								button.square_fit = true
+								if components.add_button(&button) {
+									explorer_change_folder(app, app.last_cwd)
 								}
 							}
-							pop_id()
+							{
+								button := components.make_button(lucide.ARROW_UP, .Primary)
+								button.font = &theme.icon_font
+								button.square_fit = true
+								if components.add_button(&button) {
+									explorer_change_folder(
+										app,
+										app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
+									)
+								}
+							}
+							add_node(
+								&{
+									text = app.cwd,
+									foreground = theme.color.base_foreground,
+									font_size = 14,
+									font = &theme.font,
+									sizing = {fit = 1},
+								},
+							)
 						}
+						end_node()
+						// Main stuff
+						begin_node(&{sizing = {max = INFINITY, grow = true}, padding = 4, gap = 4})
+						{
+							// File list
+							begin_node(
+								&{
+									sizing = {fit = {1, 0}, max = INFINITY, grow = {true, true}},
+									padding = 4,
+									vertical = true,
+									show_scrollbars = true,
+									clip_content = true,
+									interactive = true,
+									background = tw.NEUTRAL_800,
+									radius = 10,
+								},
+							)
+							{
+								for &item, i in app.items {
+									push_id(i)
+
+
+									node := begin_node(
+										&{
+											interactive = true,
+											radius = 8,
+											padding = {8, 4, 8, 4},
+											sizing = {
+												fit = 1,
+												grow = {true, false},
+												max = INFINITY,
+											},
+											content_align = {0, 0.5},
+											gap = 4,
+											foreground = tw.BLUE_500 if item.file_info.is_dir else kn.WHITE,
+											stroke = tw.BLUE_500,
+											stroke_width = f32(i32(item.selected)),
+										},
+									).?
+									{
+										if item.is_dir {
+											add_node(
+												&{
+													sizing = {fit = 1},
+													text = string_from_rune(lucide.FOLDER),
+													font = &theme.icon_font,
+													square_fit = true,
+													font_size = 16,
+													foreground = node.foreground,
+												},
+											)
+										} else if item.file_info.mode == 1049014 {
+											add_node(
+												&{
+													sizing = {fit = 1},
+													text = string_from_rune(lucide.FOLDER_SYMLINK),
+													font = &theme.icon_font,
+													square_fit = true,
+													font_size = 16,
+													foreground = node.foreground,
+												},
+											)
+										}
+										add_node(
+											&{
+												text = item.file_info.name,
+												font = &theme.font,
+												font_size = 16,
+												sizing = {fit = 1},
+												foreground = node.foreground,
+											},
+										)
+										add_node(
+											&{sizing = {grow = {true, false}, max = INFINITY}},
+										)
+										add_node(
+											&{
+												text = fmt_memory_size(item.file_info.size),
+												font = &theme.font,
+												font_size = 16,
+												sizing = {fit = 1},
+												foreground = node.foreground,
+											},
+										)
+										add_node(
+											&{
+												text = memory_size_suffix(item.file_info.size),
+												font = &theme.font,
+												font_size = 16,
+												sizing = {fit = 1},
+												foreground = fade(node.foreground.(kn.Color), 0.5),
+											},
+										)
+									}
+									end_node()
+									if node.is_hovered && !node.was_hovered {
+										node.transitions[0] = 1
+									}
+									node_update_transition(node, 0, node.is_hovered, 0.1)
+									node_update_transition(node, 1, node.is_active, 0.1)
+									node.background = kn.fade(
+										kn.mix(
+											f32(i32(item.selected)) * 0.2,
+											tw.NEUTRAL_700,
+											tw.BLUE_700,
+										),
+										max(f32(i32(item.selected)) * 0.2, node.transitions[0]),
+									)
+									if node.is_active && !node.was_active {
+										if node.click_count == 2 {
+											if item.file_info.is_dir {
+												explorer_change_folder(app, item.file_info.name)
+											} else if item.file_info.mode == 1049014 {
+												h, _ := os.open(item.file_info.name)
+												fi, _ := os.read_dir(h, 1)
+												if len(fi) > 0 {
+													explorer_change_folder(
+														app,
+														filepath.dir(fi[0].fullpath),
+													)
+												}
+											} else {
+												libc.system(
+													fmt.ctprintf(
+														`start "" "%s"`,
+														item.file_info.name,
+													),
+												)
+											}
+										} else {
+											if global_ctx.last_mouse_down_button == .Right {
+												app.context_menu = Context_Menu {
+													position = global_ctx.mouse_position,
+													file     = item.file_info.name,
+												}
+											} else {
+												if key_down(.Left_Control) ||
+												   key_down(.Right_Control) {
+													item.selected = !item.selected
+												} else {
+													for &item, j in app.items {
+														item.selected = false
+													}
+													item.selected = true
+												}
+												if !item.file_info.is_dir {
+													if err := explorer_set_primary_selection(
+														app,
+														item.name,
+													); err != nil {
+														fmt.eprintfln(
+															"Failed to set primary selection: %v",
+															err,
+														)
+													}
+												}
+											}
+										}
+									}
+									pop_id()
+								}
+							}
+							end_node()
+							// Preview
+							if name, ok := app.primary_selection.?; ok {
+								begin_node(
+									&{
+										sizing = {
+											grow = {false, true},
+											exact = {400, 0},
+											max = {400, INFINITY},
+										},
+										vertical = true,
+										padding = 8,
+										background = tw.NEUTRAL_800,
+										show_scrollbars = true,
+										clip_content = true,
+										interactive = true,
+										radius = 10,
+									},
+								)
+								{
+									switch preview in app.preview {
+									case (Text_Preview):
+										do_text(
+											&{sizing = {grow = true, max = INFINITY, fit = 1}},
+											preview.text,
+											14,
+											&theme.monospace_font,
+											tw.WHITE,
+										)
+									case (Image_Preview):
+										add_node(
+											&{
+												sizing = {
+													exact = preview.source.hi - preview.source.lo,
+												},
+												data = app,
+												on_draw = proc(node: ^Node) {
+													app := (^Explorer)(node.data)
+													kn.add_box(
+														node.box,
+														4,
+														kn.make_atlas_sample(
+															app.preview.(Image_Preview).source,
+															node.box,
+															kn.WHITE,
+														),
+													)
+												},
+											},
+										)
+									}
+								}
+								end_node()
+							}
+						}
+						end_node()
 					}
 					end_node()
 				}
 				end_node()
-
-				// TEXT_COLOR :: tw.NEUTRAL_400
-				// TEXT_STROKE_COLOR :: tw.ROSE_600
-
-				// node := begin_node(
-				// 	&{
-				// 		sizing = {max = INFINITY, grow = true},
-				// 		gap = 5,
-				// 		padding = 20,
-				// 		interactive = true,
-				// 		clip_content = true,
-				// 		show_scrollbars = true,
-				// 		vertical = true,
-				// 		content_align = 0.5,
-				// 	},
-				// ).?
-				// {
-				// 	begin_node(&{sizing = {fit = 1}, vertical = true, gap = 10})
-				// 	{
-				// 		begin_section("Settings")
-				// 		components.add_field(
-				// 			&{
-				// 				value_data = &theme.base_size.x,
-				// 				value_type_info = type_info_of(f32),
-				// 				multiline = true,
-				// 				sizing = {
-				// 					fit = {0, 1},
-				// 					exact = {100, 20},
-				// 					max = {200, 20},
-				// 					grow = {true, false},
-				// 				},
-				// 			},
-				// 		)
-				// 		components.add_field(
-				// 			&{
-				// 				value_data = &theme.base_size.y,
-				// 				value_type_info = type_info_of(f32),
-				// 				multiline = true,
-				// 				sizing = {
-				// 					fit = {0, 1},
-				// 					exact = {100, 20},
-				// 					max = {200, 20},
-				// 					grow = {true, false},
-				// 				},
-				// 			},
-				// 		)
-				// 		end_section()
-				// 		//
-				// 		begin_section("Buttons")
-				// 		for variant, i in Button_Variant {
-				// 			push_id(i)
-				// 			desc := make_button(fmt.tprint(variant), variant)
-				// 			add_button(&desc)
-				// 			pop_id()
-				// 		}
-				// 		end_section()
-				// 		//
-				// 		begin_section("Boolean")
-				// 		components.add_toggle_switch(&app.toggle_switch)
-				// 		end_section()
-				// 		//
-				// 		begin_section("Slider")
-				// 		if new_value, ok := components.add_slider(&Slider_Descriptor(f32){min = 0, max = 1, value = app.slider, sizing = {exact = {300, 0}}}).new_value.?;
-				// 		   ok {
-				// 			app.slider = new_value
-				// 		}
-				// 		end_section()
-				// 		//
-				// 		begin_section("Progress")
-				// 		components.add_radial_progress(&{size = 70, time = app.slider})
-				// 		components.add_progress_bar(&{time = app.slider})
-				// 		end_section()
-				// 		//
-				// 		begin_section("Input fields")
-				// 		components.add_field(
-				// 			&{
-				// 				value_data = &app.text,
-				// 				value_type_info = type_info_of(string),
-				// 				multiline = true,
-				// 				sizing = {fit = 1, exact = {50, 20}},
-				// 			},
-				// 		)
-				// 		end_section()
-				// 	}
-				// 	end_node()
-				// 	do_text(
-				// 		&{sizing = {fit = 1, grow = {true, false}, max = INFINITY}},
-				// 		FILLER_TEXT,
-				// 		12,
-				// 		&theme.font,
-				// 		paint = kn.WHITE,
-				// 	)
-				// }
-				// end_node()
 			}
 			end_node()
 			end()
@@ -422,37 +772,64 @@ do_text :: proc(
 	if font == nil {
 		return
 	}
+
 	push_id(hash(loc))
 	defer pop_id()
+
 	desc.clip_content = true
-	desc.wrapped = true
+	desc.vertical = true
+
 	begin_node(desc)
 	s := text
-	i := 0
+
+	i := 1
+
 	for len(s) > 0 {
-		until := strings.index_byte(s, ' ')
-		if until == -1 {
-			until = len(s)
-		} else {
-			until += 1
-		}
-		push_id(int(i))
-		add_node(
-			&{
-				foreground = paint,
-				sizing = {fit = 1},
-				text = s[:until],
-				font = font,
-				font_size = size,
-				interactive = true,
-				enable_selection = true,
-				// static_text = true,
-			},
-			loc = loc,
-		)
-		pop_id()
-		s = s[until:]
+		push_id(i)
 		i += 1
+
+		line_end := strings.index_byte(s, '\n')
+		if line_end == -1 {
+			line_end = len(s)
+		} else {
+			line_end += 1
+		}
+		line := s[:line_end]
+
+		begin_node(&{wrapped = true, sizing = {fit = 1, max = INFINITY, grow = {true, false}}})
+		pop_id()
+		{
+			for len(line) > 0 {
+				push_id(i)
+				i += 1
+
+				word_end := strings.index_any(line, " ")
+				if word_end == -1 {
+					word_end = len(line)
+				} else {
+					word_end += 1
+				}
+
+				text := line[:word_end]
+
+				add_node(
+					&{
+						foreground = paint,
+						sizing = {fit = 1},
+						text = text,
+						font = font,
+						font_size = size,
+						interactive = true,
+						enable_selection = true,
+					},
+				)
+				pop_id()
+				line = line[word_end:]
+			}
+		}
+		end_node()
+
+		s = s[line_end:]
 	}
 	end_node()
 }
