@@ -30,7 +30,6 @@ import "core:time"
 import "core:unicode"
 import tw "tailwind_colors"
 import "tedit"
-import "vendor:sdl3"
 import stbi "vendor:stb/image"
 
 INFINITY :: math.F32_MAX

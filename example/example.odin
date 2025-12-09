@@ -2,9 +2,9 @@ package example
 
 import opal ".."
 import kn "../../katana"
-import "../../katana/sdl3glue"
+import "../../katana/sdl2glue"
 import "../lucide"
-import "../sdl3app"
+import "../sdl2app"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:c/libc"
@@ -26,8 +26,9 @@ import "core:reflect"
 import "core:slice"
 import "core:strings"
 import "core:time"
-import "vendor:sdl3"
+import "vendor:sdl2"
 import stbi "vendor:stb/image"
+import stbtt "vendor:stb/truetype"
 import "vendor:wgpu"
 
 import "../components"
@@ -60,7 +61,7 @@ Context_Menu :: struct {
 }
 
 Explorer :: struct {
-	using app:         sdl3app.App,
+	using app:         sdl2app.App,
 	toggle_switch:     bool,
 	slider:            f32,
 	text:              string,
@@ -157,6 +158,54 @@ explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: o
 		} else {
 			fmt.eprintln(err)
 		}
+	case ".ttf", ".otf":
+		if data, ok := os.read_entire_file(name); ok {
+			font: stbtt.fontinfo
+			if !stbtt.InitFont(&font, raw_data(data), 0) {
+				fmt.eprintln("Failed to initialize font")
+			}
+
+			x, y, w, h: i32
+			codepoint: rune
+			for i := 0;; i += 1 {
+				index := stbtt.FindGlyphIndex(&font, rune(i))
+				if index != 0 && !stbtt.IsGlyphEmpty(&font, index) {
+					codepoint = rune(i)
+					break
+				}
+			}
+			scale := stbtt.ScaleForPixelHeight(&font, 32)
+			glyph_pixels := stbtt.GetGlyphBitmap(
+				&font,
+				scale,
+				scale,
+				i32(codepoint),
+				&w,
+				&h,
+				&x,
+				&y,
+			)[:w *
+			h]
+			// defer stbtt.FreeBitmap(glyph_pixels, nil)
+			if glyph_pixels == nil {
+				fmt.eprintln("Failed to get codepoint bitmap")
+			} else {
+				image_pixels := make([]u8, w * h * 4)
+				defer delete(image_pixels)
+				for i in 0 ..< len(glyph_pixels) {
+					j := i * 4
+					image_pixels[j] = 255
+					image_pixels[j + 1] = 255
+					image_pixels[j + 2] = 255
+					image_pixels[j + 3] = glyph_pixels[i]
+				}
+				self.preview = Image_Preview {
+					source = kn.copy_image_to_atlas(raw_data(image_pixels), int(w), int(h)),
+				}
+			}
+		} else {
+			fmt.eprintln("Failed to read font file")
+		}
 	case:
 		text_preview := Text_Preview {
 			data = make([]u8, 1024),
@@ -211,14 +260,14 @@ main :: proc() {
 		}
 	}
 
-	if !sdl3.Init({.VIDEO}) {
+	if sdl2.Init({.VIDEO, .EVENTS}) != 0 {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl3app.state = new_clone(
+	sdl2app.state = new_clone(
 	Explorer {
 		run = true,
-		on_start = proc(app: ^sdl3app.App) {
+		on_start = proc(app: ^sdl2app.App) {
 			app := (^Explorer)(app)
 			lucide.load()
 			components.theme.icon_font = lucide.font
@@ -240,11 +289,17 @@ main :: proc() {
 				fmt.eprintf("Failed to refresh explorer: %v\n", err)
 			}
 		},
-		on_frame = proc(app: ^sdl3app.App) {
+		on_frame = proc(app: ^sdl2app.App) {
 			app := (^Explorer)(app)
 			using opal, components
 			window_radius :=
-				app.radius * f32(i32(.MAXIMIZED not_in sdl3.GetWindowFlags(app.window)))
+				app.radius *
+				f32(
+					i32(
+						transmute(sdl2.WindowFlags)sdl2.GetWindowFlags(app.window) >=
+						sdl2.WINDOW_MAXIMIZED,
+					),
+				)
 
 			begin()
 			begin_node(
@@ -274,18 +329,38 @@ main :: proc() {
 					},
 				)
 				{
-					sdl3app.app_use_node_for_window_grabbing(
+					if do_window_button(lucide.ARROW_LEFT, tw.EMERALD_500) {
+						explorer_change_folder(app, app.last_cwd)
+					}
+					if do_window_button(lucide.ARROW_UP, tw.EMERALD_500) {
+						explorer_change_folder(
+							app,
+							app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
+						)
+					}
+					add_node(
+						&{
+							text = app.cwd,
+							foreground = theme.color.base_foreground,
+							font_size = 14,
+							font = &theme.font,
+							sizing = {fit = 1},
+							padding = {10, 0, 0, 0},
+						},
+					)
+					sdl2app.app_use_node_for_window_grabbing(
 						app,
 						add_node(&{sizing = {grow = true, max = INFINITY}, interactive = true}).?,
 					)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
-						sdl3.MinimizeWindow(app.window)
+						sdl2.MinimizeWindow(app.window)
 					}
 					if do_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
-						if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
-							sdl3.RestoreWindow(app.window)
+						if .MAXIMIZED in
+						   transmute(sdl2.WindowFlags)sdl2.GetWindowFlags(app.window) {
+							sdl2.RestoreWindow(app.window)
 						} else {
-							sdl3.MaximizeWindow(app.window)
+							sdl2.MaximizeWindow(app.window)
 						}
 					}
 					if do_window_button(lucide.X, tw.ROSE_500) {
@@ -393,53 +468,11 @@ main :: proc() {
 								fit = {1, 0},
 							},
 							gap = 2,
+							padding = 4,
 							vertical = true,
 						},
 					)
 					{
-						begin_node(
-							&{
-								sizing = {
-									fit = {0, 1},
-									grow = {true, false},
-									max = {INFINITY, 30},
-								},
-								gap = 6,
-								padding = 2,
-								content_align = {0, 0.5},
-							},
-						)
-						{
-							{
-								button := components.make_button(lucide.ARROW_LEFT, .Primary)
-								button.font = &theme.icon_font
-								button.square_fit = true
-								if components.add_button(&button) {
-									explorer_change_folder(app, app.last_cwd)
-								}
-							}
-							{
-								button := components.make_button(lucide.ARROW_UP, .Primary)
-								button.font = &theme.icon_font
-								button.square_fit = true
-								if components.add_button(&button) {
-									explorer_change_folder(
-										app,
-										app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
-									)
-								}
-							}
-							add_node(
-								&{
-									text = app.cwd,
-									foreground = theme.color.base_foreground,
-									font_size = 14,
-									font = &theme.font,
-									sizing = {fit = 1},
-								},
-							)
-						}
-						end_node()
 						// Main stuff
 						begin_node(&{sizing = {max = INFINITY, grow = true}, padding = 4, gap = 4})
 						{
@@ -668,7 +701,7 @@ main :: proc() {
 	},
 	)
 
-	sdl3app.run(
+	sdl2app.run(
 		&{
 			width              = 1000,
 			height             = 800,
@@ -680,7 +713,7 @@ main :: proc() {
 		},
 	)
 
-	free(sdl3app.state)
+	free(sdl2app.state)
 }
 
 begin_section :: proc(name: string, loc := #caller_location) {
