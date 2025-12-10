@@ -1,11 +1,5 @@
 package example
 
-import opal ".."
-import kn "../../katana"
-import "../../katana/sdl2glue"
-import "../lucide"
-import "../sdl2app"
-import tw "../tailwind_colors"
 import "base:runtime"
 import "core:c/libc"
 import "core:fmt"
@@ -26,12 +20,18 @@ import "core:reflect"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "local:/katana/sdl2glue"
+import kn "local:katana"
+import opal "local:opal"
+import "local:opal/components"
+import "local:opal/lucide"
+import "local:opal/sdl2app"
+import tw "local:opal/tailwind_colors"
 import "vendor:sdl2"
 import stbi "vendor:stb/image"
 import stbtt "vendor:stb/truetype"
 import "vendor:wgpu"
 
-import "../components"
 
 FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
 
@@ -87,11 +87,11 @@ memory_size_suffix :: proc(size: i64) -> string {
 
 fmt_memory_size :: proc(size: i64) -> string {
 	if size > mem.Gigabyte {
-		return fmt.tprintf("%i", size / mem.Gigabyte)
+		return fmt.tprintf("%.1f", f32(size) / mem.Gigabyte)
 	} else if size > mem.Megabyte {
-		return fmt.tprintf("%i", size / mem.Megabyte)
+		return fmt.tprintf("%.1f", f32(size) / mem.Megabyte)
 	} else if size > mem.Kilobyte {
-		return fmt.tprintf("%i", size / mem.Kilobyte)
+		return fmt.tprintf("%.1f", f32(size) / mem.Kilobyte)
 	} else {
 		return fmt.tprintf("%i", size)
 	}
@@ -277,12 +277,12 @@ main :: proc() {
 			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
 			opal.global_ctx.snap_to_pixels = true
 			components.theme.font, _ = kn.load_font_from_files(
-				"Lexend-Regular.png",
-				"Lexend-Regular.json",
+				"../fonts/Lexend-Regular.png",
+				"../fonts/Lexend-Regular.json",
 			)
 			components.theme.monospace_font, _ = kn.load_font_from_files(
-				"SpaceMono-Regular.png",
-				"SpaceMono-Regular.json",
+				"../fonts/SpaceMono-Regular.png",
+				"../fonts/SpaceMono-Regular.json",
 			)
 			app.cwd = os.get_current_directory()
 			if err := explorer_refresh(app); err != nil {
