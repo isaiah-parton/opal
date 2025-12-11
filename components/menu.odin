@@ -10,7 +10,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 
 	self := begin_node(
 		&{
-			padding = {3, 3, 12, 3},
+			padding = {4, 4, 12, 4},
 			sizing = {fit = 1, max = INFINITY, grow = {true, false}},
 			gap = 6,
 			content_align = {0, 0.5},
@@ -29,11 +29,11 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		&{
 			text = string_from_rune(icon),
 			sizing = {fit = 1},
-			style = {foreground = tw.NEUTRAL_300, font_size = 14, font = &theme.icon_font},
+			style = {foreground = tw.NEUTRAL_300, font_size = 16, font = &theme.icon_font},
 		},
 	)
 	add_node(
-		&{text = label, sizing = {fit = 1}, style = {font_size = 12, foreground = tw.NEUTRAL_300}},
+		&{text = label, sizing = {fit = 1}, style = {font_size = 14, foreground = tw.NEUTRAL_300}},
 	)
 	end_node()
 	pop_id()
@@ -95,3 +95,4 @@ __do_menu :: proc(is_open: bool) {
 		end_node()
 	}
 }
+

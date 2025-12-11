@@ -68,6 +68,7 @@ Explorer :: struct {
 	cwd:               string,
 	last_cwd:          string,
 	items:             [dynamic]Item,
+	selection_count:   int,
 	primary_selection: Maybe(string),
 	preview:           Preview,
 	context_menu:      Maybe(Context_Menu),
@@ -378,9 +379,7 @@ main :: proc() {
 							absolute = true,
 							exact_offset = menu.position,
 							sizing = {exact = {0, 0}, fit = 1, max = INFINITY},
-							padding = 8,
 							radius = 10,
-							gap = 4,
 							background = tw.NEUTRAL_800,
 							stroke = tw.NEUTRAL_600,
 							shadow_color = tw.BLACK,
@@ -401,50 +400,38 @@ main :: proc() {
 					{
 						add_node(
 							&{
-								text = menu.file,
+								text = menu.file if app.selection_count == 1 else fmt.tprintf("%i files", app.selection_count),
 								foreground = tw.WHITE,
 								font = &theme.font,
-								font_size = 14,
+								font_size = 16,
 								sizing = {fit = 1},
+								padding = {8, 6, 24, 6},
 							},
 						)
-						begin_node(&{sizing = {fit = 1}, gap = 4})
+						add_node(
+							&{
+								sizing = {
+									exact = {0, 1},
+									max = {INFINITY, 1},
+									grow = {true, false},
+								},
+								background = tw.NEUTRAL_600,
+							},
+						)
+						begin_node(
+							&{
+								sizing = {fit = 1, max = INFINITY, grow = {true, false}},
+								gap = 4,
+								padding = 6,
+								vertical = true,
+							},
+						)
 						{
-							{
-								btn := components.make_button(lucide.COPY, .Primary)
-								btn.font = &theme.icon_font
-								if components.add_button(&btn) {
-									fmt.eprintln("Not implemented")
-								}
-							}
-							{
-								btn := components.make_button(lucide.SCISSORS, .Primary)
-								btn.font = &theme.icon_font
-								if components.add_button(&btn) {
-									fmt.eprintln("Not implemented")
-								}
-							}
-							{
-								btn := components.make_button(lucide.CLIPBOARD_PASTE, .Primary)
-								btn.font = &theme.icon_font
-								if components.add_button(&btn) {
-									fmt.eprintln("Not implemented")
-								}
-							}
-							{
-								btn := components.make_button(lucide.TEXT_CURSOR_INPUT, .Primary)
-								btn.font = &theme.icon_font
-								if components.add_button(&btn) {
-									fmt.eprintln("Not implemented")
-								}
-							}
-							{
-								btn := components.make_button(lucide.SHREDDER, .Primary)
-								btn.font = &theme.icon_font
-								if components.add_button(&btn) {
-									fmt.eprintln("Not implemented")
-								}
-							}
+							components.do_menu_item("Copy", lucide.COPY)
+							components.do_menu_item("Cut", lucide.SCISSORS)
+							components.do_menu_item("Paste", lucide.CLIPBOARD_PASTE)
+							components.do_menu_item("Rename", lucide.TEXT_CURSOR_INPUT)
+							components.do_menu_item("Shred", lucide.SHREDDER)
 						}
 						end_node()
 					}
@@ -490,9 +477,13 @@ main :: proc() {
 								},
 							)
 							{
+								app.selection_count = 0
 								for &item, i in app.items {
 									push_id(i)
 
+									if item.selected {
+										app.selection_count += 1
+									}
 
 									node := begin_node(
 										&{
