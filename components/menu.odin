@@ -16,7 +16,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			content_align = {0, 0.5},
 			interactive = true,
 			group = true,
-			style = {radius = 3},
+			style = {radius = 6},
 		},
 	).?
 	node_update_transition(self, 0, self.is_hovered, 0.1)
@@ -29,7 +29,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 		&{
 			text = string_from_rune(icon),
 			sizing = {fit = 1},
-			style = {foreground = tw.NEUTRAL_300, font_size = 16, font = &theme.icon_font},
+			style = {foreground = tw.NEUTRAL_300, font_size = 18, font = &theme.icon_font},
 		},
 	)
 	add_node(
