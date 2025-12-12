@@ -86,7 +86,7 @@ item_load_children :: proc(self: ^Item) -> os.Error {
 	return nil
 }
 
-item_display :: proc(self: ^Item, app: ^Explorer, loc := #caller_location) {
+item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_location) {
 	using opal
 
 	push_id(hash_loc(loc))
@@ -100,7 +100,7 @@ item_display :: proc(self: ^Item, app: ^Explorer, loc := #caller_location) {
 		&{
 			interactive = true,
 			radius = 8,
-			padding = {8, 4, 8, 4},
+			padding = {8 + f32(depth) * 20, 4, 8, 4},
 			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
 			content_align = {0, 0.5},
 			gap = 4,
@@ -172,12 +172,12 @@ item_display :: proc(self: ^Item, app: ^Explorer, loc := #caller_location) {
 				sizing = {grow = {true, false}, max = INFINITY, fit = {1, node.transitions[2]}},
 				clip_content = true,
 				vertical = true,
-				padding = {node.size.y, 0, 0, 0},
+				padding = {0, 0, 0, 0},
 			},
 		)
 		for &child, i in self.children {
 			push_id(i + 1)
-			item_display(&child, app)
+			item_display(&child, app, depth + 1)
 			pop_id()
 		}
 		end_node()
