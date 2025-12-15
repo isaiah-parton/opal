@@ -1,8 +1,8 @@
 package sdl3app
 
 import ".."
-import kn "../../katana"
-import "../../katana/sdl3glue"
+import kn "../katana"
+import "../katana/sdl3glue"
 import "base:runtime"
 import "core:fmt"
 import "core:os"

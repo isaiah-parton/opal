@@ -1,6 +1,5 @@
 package opal
 
-import kn "../katana"
 import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
@@ -16,6 +15,7 @@ import "core:strings"
 import "core:sys/windows"
 import "core:time"
 import "core:unicode"
+import kn "katana"
 import tw "tailwind_colors"
 
 //

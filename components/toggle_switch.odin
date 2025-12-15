@@ -1,7 +1,7 @@
 package components
 
 import ".."
-import kn "../../katana"
+import kn "../katana"
 import tw "../tailwind_colors"
 import "core:math/ease"
 
