@@ -180,7 +180,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 		push_id(text_view.id)
 		add_node(
 			&{
-				sizing = {max = INFINITY, exact = {2, 0}, grow = {false, true}},
+				sizing = {max = INFINITY, exact = {2, 0}, grow = {0, 1}},
 				background = get_text_cursor_color(),
 			},
 		)

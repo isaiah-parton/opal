@@ -35,6 +35,11 @@ import "vendor:wgpu"
 
 FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
 
+Item_Display_Mode :: enum {
+	List,
+	Grid,
+}
+
 Item :: struct {
 	using file_info: os.File_Info,
 	children:        [dynamic]Item,
@@ -86,7 +91,115 @@ item_load_children :: proc(self: ^Item) -> os.Error {
 	return nil
 }
 
-item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_location) {
+item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_location) {
+	using opal
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	if self.selected {
+		app.selection_count += 1
+	}
+
+	node := begin_node(
+		&{
+			interactive = true,
+			radius = 8,
+			padding = 8,
+			sizing = {
+				exact = {200, 50},
+				fit = {1, 0},
+				relative = {0.25, 0},
+				grow = {0.5, 0},
+				max = INFINITY,
+			},
+			content_align = {0, 0.5},
+			gap = 4,
+			foreground = tw.BLUE_500 if self.file_info.is_dir else kn.WHITE,
+			stroke = tw.BLUE_500,
+			stroke_width = f32(i32(self.name == app.primary_selection)),
+			clip_content = true,
+		},
+	).?
+	{
+		icon: rune = lucide.FILE
+		if self.is_dir {
+			icon = lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER
+		} else if self.file_info.mode == 1049014 {
+			icon = lucide.FOLDER_SYMLINK
+		}
+		add_node(
+			&{
+				sizing = {fit = 1},
+				text = string_from_rune(icon),
+				font = &components.theme.icon_font,
+				square_fit = true,
+				font_size = 32,
+				foreground = node.foreground,
+			},
+		)
+		begin_node(
+			&{
+				sizing = {grow = 1, max = INFINITY, fit = {1, 0}},
+				vertical = true,
+				content_align = {0, 0.5},
+			},
+		)
+		{
+			add_node(
+				&{
+					text = self.file_info.name,
+					font = &components.theme.font,
+					font_size = 16,
+					sizing = {fit = 1},
+					foreground = node.foreground,
+				},
+			)
+			if !self.is_dir {
+				begin_node(&{sizing = {grow = {1, 0}, max = INFINITY, fit = 1}})
+				{
+					add_node(
+						&{
+							text = fmt_memory_size(self.file_info.size),
+							font = &components.theme.font,
+							font_size = 16,
+							sizing = {fit = 1},
+							foreground = node.foreground,
+						},
+					)
+					add_node(
+						&{
+							text = memory_size_suffix(self.file_info.size),
+							font = &components.theme.font,
+							font_size = 16,
+							sizing = {fit = 1},
+							foreground = fade(node.foreground.(kn.Color), 0.5),
+						},
+					)
+				}
+				end_node()
+			}
+		}
+		end_node()
+	}
+	end_node()
+
+	if node.is_hovered && !node.was_hovered {
+		node.transitions[0] = 1
+	}
+
+	node_update_transition(node, 0, node.is_hovered, 0.1)
+	node_update_transition(node, 1, node.is_active, 0.1)
+
+	node.background = kn.fade(
+		kn.mix(f32(i32(self.selected)) * 0.5, tw.NEUTRAL_700, tw.BLUE_700),
+		max(f32(i32(self.selected)) * 0.5, node.transitions[0]),
+	)
+
+	item_handle_node_input(self, app, node)
+}
+
+item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_location) {
 	using opal
 
 	push_id(hash_loc(loc))
@@ -101,7 +214,7 @@ item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_loc
 			interactive = true,
 			radius = 8,
 			padding = {8 + f32(depth) * 20, 4, 8, 4},
-			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
+			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			content_align = {0, 0.5},
 			gap = 4,
 			foreground = tw.BLUE_500 if self.file_info.is_dir else kn.WHITE,
@@ -144,32 +257,34 @@ item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_loc
 				foreground = node.foreground,
 			},
 		)
-		add_node(&{sizing = {grow = {true, false}, max = INFINITY}})
-		add_node(
-			&{
-				text = fmt_memory_size(self.file_info.size),
-				font = &components.theme.font,
-				font_size = 16,
-				sizing = {fit = 1},
-				foreground = node.foreground,
-			},
-		)
-		add_node(
-			&{
-				text = memory_size_suffix(self.file_info.size),
-				font = &components.theme.font,
-				font_size = 16,
-				sizing = {fit = 1},
-				foreground = fade(node.foreground.(kn.Color), 0.5),
-			},
-		)
+		add_node(&{sizing = {grow = {1, 0}, max = INFINITY}})
+		if !self.is_dir {
+			add_node(
+				&{
+					text = fmt_memory_size(self.file_info.size),
+					font = &components.theme.font,
+					font_size = 16,
+					sizing = {fit = 1},
+					foreground = node.foreground,
+				},
+			)
+			add_node(
+				&{
+					text = memory_size_suffix(self.file_info.size),
+					font = &components.theme.font,
+					font_size = 16,
+					sizing = {fit = 1},
+					foreground = fade(node.foreground.(kn.Color), 0.5),
+				},
+			)
+		}
 	}
 	end_node()
 
 	if node.transitions[2] > 0 {
 		begin_node(
 			&{
-				sizing = {grow = {true, false}, max = INFINITY, fit = {1, node.transitions[2]}},
+				sizing = {grow = {1, 0}, max = INFINITY, fit = {1, node.transitions[2]}},
 				clip_content = true,
 				vertical = true,
 				padding = {0, 0, 0, 0},
@@ -177,7 +292,7 @@ item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_loc
 		)
 		for &child, i in self.children {
 			push_id(i + 1)
-			item_display(&child, app, depth + 1)
+			item_display_for_list(&child, app, depth + 1)
 			pop_id()
 		}
 		end_node()
@@ -195,6 +310,12 @@ item_display :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_loc
 		kn.mix(f32(i32(self.selected)) * 0.5, tw.NEUTRAL_700, tw.BLUE_700),
 		max(f32(i32(self.selected)) * 0.5, node.transitions[0]),
 	)
+
+	item_handle_node_input(self, app, node)
+}
+
+item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
+	using opal
 
 	if node.is_active && !node.was_active {
 		if node.click_count == 2 {
@@ -271,6 +392,7 @@ Explorer :: struct {
 	primary_selection: Maybe(string),
 	preview:           Preview,
 	context_menu:      Maybe(Context_Menu),
+	display_mode:      Item_Display_Mode,
 }
 
 memory_size_suffix :: proc(size: i64) -> string {
@@ -519,12 +641,7 @@ main :: proc() {
 			{
 				begin_node(
 					&{
-						sizing = {
-							fit = {0, 1},
-							exact = {0, 20},
-							max = INFINITY,
-							grow = {true, false},
-						},
+						sizing = {fit = {0, 1}, exact = {0, 20}, max = INFINITY, grow = {1, 0}},
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_800},
 					},
@@ -551,7 +668,7 @@ main :: proc() {
 					)
 					sdl2app.app_use_node_for_window_grabbing(
 						app,
-						add_node(&{sizing = {grow = true, max = INFINITY}, interactive = true}).?,
+						add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?,
 					)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
 						sdl2.MinimizeWindow(app.window)
@@ -610,17 +727,13 @@ main :: proc() {
 						)
 						add_node(
 							&{
-								sizing = {
-									exact = {0, 1},
-									max = {INFINITY, 1},
-									grow = {true, false},
-								},
+								sizing = {exact = {0, 1}, max = {INFINITY, 1}, grow = {1, 0}},
 								background = tw.NEUTRAL_600,
 							},
 						)
 						begin_node(
 							&{
-								sizing = {fit = 1, max = INFINITY, grow = {true, false}},
+								sizing = {fit = 1, max = INFINITY, grow = {1, 0}},
 								gap = 4,
 								padding = 4,
 								vertical = true,
@@ -642,7 +755,7 @@ main :: proc() {
 
 				begin_node(
 					&{
-						sizing = {max = INFINITY, grow = true, fit = 1},
+						sizing = {max = INFINITY, grow = 1, fit = 1},
 						content_align = {0, 0.5},
 						style = {background = tw.NEUTRAL_900},
 					},
@@ -652,7 +765,7 @@ main :: proc() {
 						&{
 							sizing = {
 								max = {INFINITY, INFINITY},
-								grow = {true, true},
+								grow = 1,
 								exact = {200, 0},
 								fit = {1, 0},
 							},
@@ -663,28 +776,75 @@ main :: proc() {
 					)
 					{
 						// Main stuff
-						begin_node(&{sizing = {max = INFINITY, grow = true}, padding = 4, gap = 4})
+						begin_node(&{sizing = {max = INFINITY, grow = 1}, padding = 4, gap = 4})
 						{
 							// File list
 							begin_node(
 								&{
-									sizing = {fit = {1, 0}, max = INFINITY, grow = {true, true}},
-									padding = 4,
+									sizing = {fit = {1, 0}, max = INFINITY, grow = 1},
+									padding = 8,
+									gap = 8,
 									vertical = true,
-									show_scrollbars = true,
-									clip_content = true,
 									interactive = true,
+									wrapped = true,
 									background = tw.NEUTRAL_800,
 									radius = 10,
 								},
 							)
 							{
-								app.selection_count = 0
-								for &item, i in app.items {
-									push_id(i)
-									item_display(&item, app)
-									pop_id()
+								begin_node(
+									&{sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY}},
+								)
+								{
+									for mode, i in Item_Display_Mode {
+										push_id(i)
+										node := add_node(
+											&{
+												text = fmt.tprint(mode),
+												sizing = {fit = 1},
+												padding = {8, 4, 8, 4},
+												font_size = 14,
+												stroke_width = 2,
+												interactive = true,
+												font = &theme.font,
+												background = tw.BLUE_500 if app.display_mode == mode else tw.NEUTRAL_800,
+												foreground = theme.color.base_foreground,
+											},
+										).?
+										pop_id()
+
+										if node.is_active && !node.was_active {
+											app.display_mode = mode
+										}
+									}
 								}
+								end_node()
+								begin_node(
+									&{
+										wrapped = app.display_mode == .Grid,
+										vertical = true,
+										sizing = {grow = 1, max = INFINITY},
+										show_scrollbars = true,
+										clip_content = true,
+									},
+								)
+								{
+									app.selection_count = 0
+									if app.display_mode == .List {
+										for &item, i in app.items {
+											push_id(i)
+											item_display_for_list(&item, app)
+											pop_id()
+										}
+									} else {
+										for &item, i in app.items {
+											push_id(i)
+											item_display_for_grid(&item, app)
+											pop_id()
+										}
+									}
+								}
+								end_node()
 							}
 							end_node()
 							// Preview
@@ -692,7 +852,7 @@ main :: proc() {
 								begin_node(
 									&{
 										sizing = {
-											grow = {false, true},
+											grow = {0, 1},
 											exact = {400, 0},
 											max = {400, INFINITY},
 										},
@@ -709,7 +869,7 @@ main :: proc() {
 									switch preview in app.preview {
 									case (Text_Preview):
 										do_text(
-											&{sizing = {grow = true, max = INFINITY, fit = 1}},
+											&{sizing = {grow = 1, max = INFINITY, fit = 1}},
 											preview.text,
 											14,
 											&theme.monospace_font,
@@ -776,12 +936,12 @@ begin_section :: proc(name: string, loc := #caller_location) {
 			background = tw.NEUTRAL_800,
 			radius = 10,
 			vertical = true,
-			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
+			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 		},
 	)
 	title_node := begin_node(
 		&{
-			sizing = {fit = {0, 1}, grow = {true, false}, max = INFINITY},
+			sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
 			justify_between = true,
 			interactive = true,
 			padding = 10,
@@ -805,7 +965,7 @@ begin_section :: proc(name: string, loc := #caller_location) {
 	add_node(
 		&{
 			font_size = 14,
-			sizing = {fit = 1, exact = {20, 0}, max = INFINITY, grow = {false, true}},
+			sizing = {fit = 1, exact = {20, 0}, max = INFINITY, grow = {0, 1}},
 			data = title_node,
 			foreground = text_color,
 			on_draw = proc(self: ^Node) {
@@ -824,7 +984,7 @@ begin_section :: proc(name: string, loc := #caller_location) {
 		&{
 			sizing = {
 				fit = {1, ease.circular_in_out(title_node.transitions[0])},
-				grow = {true, false},
+				grow = {1, 0},
 				max = INFINITY,
 			},
 			clip_content = true,
@@ -851,6 +1011,7 @@ do_text :: proc(
 	size: f32,
 	font: ^opal.Font,
 	paint: opal.Paint_Option,
+	interactive: bool = true,
 	loc := #caller_location,
 ) {
 	using opal
@@ -881,14 +1042,14 @@ do_text :: proc(
 		}
 		line := s[:line_end]
 
-		begin_node(&{wrapped = true, sizing = {fit = 1, max = INFINITY, grow = {true, false}}})
+		begin_node(&{wrapped = true, sizing = {fit = 1, max = INFINITY, grow = {1, 0}}})
 		pop_id()
 		{
 			for len(line) > 0 {
 				push_id(i)
 				i += 1
 
-				word_end := strings.index_any(line, " ")
+				word_end := strings.index_any(line, " .")
 				if word_end == -1 {
 					word_end = len(line)
 				} else {
@@ -904,8 +1065,8 @@ do_text :: proc(
 						text = text,
 						font = font,
 						font_size = size,
-						interactive = true,
-						enable_selection = true,
+						interactive = interactive,
+						enable_selection = interactive,
 					},
 				)
 				pop_id()

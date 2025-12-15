@@ -99,20 +99,20 @@ clone_recursive :: proc(target, source: rawptr, type_info: ^runtime.Type_Info) {
 }
 
 Sizing_Descriptor :: struct {
-	// The node's exact initial size
+	// Exact initial size
 	exact:    [2]f32,
 
-	// Relative to parent
+	// Base size relative to parent
 	relative: [2]f32,
 
-	// The maximum size the node is allowed to grow to
-	max:      [2]f32,
-
-	// If the node will grow to acommodate its contents
+	// How much of the content space the node will grow to fit
 	fit:      [2]f32,
 
-	// If the node will be grown to fill available space
-	grow:     [2]bool,
+	// How much of the parents space the node will grow to fill
+	grow:     [2]f32,
+
+	// The maximum fixed size the node is allowed to grow to
+	max:      [2]f32,
 }
 
 //
@@ -593,7 +593,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	// Populate the array and accumulate node extent
 	for node in children {
 		length += node.size[i]
-		if node.sizing.grow[i] {
+		if node.sizing.grow[i] > 0 {
 			append(&growables, node)
 		}
 	}
@@ -613,7 +613,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	for node in children {
 		node.position[i] = offset
 
-		if node.sizing.grow[j] {
+		if node.sizing.grow[j] > 0 {
 			node.size[j] = min(span, node.sizing.max[j])
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
@@ -741,7 +741,10 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 		// Add that amount to every eligable child
 		for node, node_index in array {
 			if node.size[i] == smallest {
-				size_to_add := min(size_to_add, node.sizing.max[i] - node.size[i])
+				size_to_add := min(
+					size_to_add,
+					min(node.sizing.max[i], node.sizing.grow[i] * self.size[i]) - node.size[i],
+				)
 
 				// Remove the node when it's done growing
 				if size_to_add <= 0 {

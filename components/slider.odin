@@ -45,7 +45,7 @@ add_slider :: proc(
 
 	begin_node(
 		&{
-			sizing = {grow = true, max = INFINITY},
+			sizing = {grow = 1, max = INFINITY},
 			group = true,
 			padding = theme.base_size.y * [4]f32{0.5, 0.25, 0.5, 0.25},
 			background = tw.NEUTRAL_950,
@@ -60,7 +60,7 @@ add_slider :: proc(
 			background = theme.color.secondary,
 		},
 	)
-	begin_node(&{sizing = {grow = true, max = INFINITY}})
+	begin_node(&{sizing = {grow = 1, max = INFINITY}})
 
 	thumb_size := desc.sizing.exact.y * (1 - body_node.transitions[1] * 0.15)
 	add_node(

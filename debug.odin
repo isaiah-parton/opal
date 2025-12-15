@@ -42,7 +42,7 @@ inspector_show :: proc(self: ^Inspector) {
 	total_nodes := len(global_ctx.node_by_id)
 	handle_node := begin_node(
 		&{
-			sizing = {fit = 1, grow = {true, false}, max = INFINITY},
+			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			padding = 5,
 			style = {background = _FOREGROUND},
 			interactive = true,
@@ -94,7 +94,7 @@ inspector_show :: proc(self: ^Inspector) {
 	if self.selected_id != 0 {
 		begin_node(
 			&{
-				sizing = {exact = {0, 200}, grow = true, max = INFINITY},
+				sizing = {exact = {0, 200}, grow = 1, max = INFINITY},
 				padding = 4,
 				clip_content = true,
 				show_scrollbars = true,
@@ -103,7 +103,7 @@ inspector_show :: proc(self: ^Inspector) {
 				vertical = true,
 			},
 		)
-		begin_node(&{sizing = {grow = {true, false}, fit = 1, max = INFINITY}, vertical = true})
+		begin_node(&{sizing = {grow = {1, 0}, fit = 1, max = INFINITY}, vertical = true})
 		add_value_node("Node", &self.inspected_node, type_info_of(Node))
 		end_node()
 		end_node()
@@ -137,7 +137,7 @@ inspector_show :: proc(self: ^Inspector) {
 
 		node := begin_node(
 			&{
-				sizing = {max = INFINITY, grow = {true, false}, fit = 1},
+				sizing = {max = INFINITY, grow = {1, 0}, fit = 1},
 				padding = 2,
 				interactive = true,
 				justify_between = true,
@@ -172,7 +172,7 @@ inspector_show :: proc(self: ^Inspector) {
 					&{
 						padding = {10, 0, 0, 0},
 						sizing = {
-							grow = {true, false},
+							grow = {1, 0},
 							max = INFINITY,
 							fit = {0, ease.quadratic_in_out(node.transitions[0])},
 						},
@@ -234,7 +234,7 @@ inspector_show :: proc(self: ^Inspector) {
 inspector_build_tree :: proc(self: ^Inspector) {
 	begin_node(
 		&{
-			sizing = {max = INFINITY, grow = true},
+			sizing = {max = INFINITY, grow = 1},
 			vertical = true,
 			clip_content = true,
 			show_scrollbars = true,
@@ -258,7 +258,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		&{
 			content_align = {0, 0.5},
 			gap = 4,
-			sizing = {grow = {true, false}, max = INFINITY, fit = {0, 1}},
+			sizing = {grow = {1, 0}, max = INFINITY, fit = {0, 1}},
 			padding = {4, 2, 4, 2},
 			interactive = true,
 			group = true,
@@ -304,7 +304,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			&{
 				padding = {10, 0, 0, 0},
 				sizing = {
-					grow = {true, false},
+					grow = {1, 0},
 					max = INFINITY,
 					fit = {0, ease.quadratic_in_out(button_node.transitions[0])},
 				},

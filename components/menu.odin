@@ -11,7 +11,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	self := begin_node(
 		&{
 			padding = {4, 4, 12, 4},
-			sizing = {fit = 1, max = INFINITY, grow = {true, false}},
+			sizing = {fit = 1, max = INFINITY, grow = {1, 0}},
 			gap = 6,
 			content_align = {0, 0.5},
 			interactive = true,

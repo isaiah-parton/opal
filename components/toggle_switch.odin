@@ -33,7 +33,7 @@ add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 	)
 	add_node(
 		&{
-			sizing = {max = INFINITY, grow = true},
+			sizing = {max = INFINITY, grow = 1},
 			radius = (base_size.y - 4) / 2,
 			shadow_offset = {-1, 2},
 			shadow_size = 4,
@@ -60,3 +60,4 @@ add_toggle_switch :: proc(value: ^bool, loc := #caller_location) {
 		value^ = !value^
 	}
 }
+
