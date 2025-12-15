@@ -20,14 +20,14 @@ import "core:reflect"
 import "core:slice"
 import "core:strings"
 import "core:time"
-import "local:/katana/sdl2glue"
+import "local:/katana/sdl3glue"
 import kn "local:katana"
 import opal "local:opal"
 import "local:opal/components"
 import "local:opal/lucide"
-import "local:opal/sdl2app"
+import "local:opal/sdl3app"
 import tw "local:opal/tailwind_colors"
-import "vendor:sdl2"
+import "vendor:sdl3"
 import stbi "vendor:stb/image"
 import stbtt "vendor:stb/truetype"
 import "vendor:wgpu"
@@ -381,7 +381,7 @@ Context_Menu :: struct {
 }
 
 Explorer :: struct {
-	using app:         sdl2app.App,
+	using app:         sdl3app.App,
 	toggle_switch:     bool,
 	slider:            f32,
 	text:              string,
@@ -583,14 +583,14 @@ main :: proc() {
 		}
 	}
 
-	if sdl2.Init({.VIDEO, .EVENTS}) != 0 {
+	if !sdl3.Init({.VIDEO, .EVENTS}) {
 		panic("Could not initialize SDL3")
 	}
 
-	sdl2app.state = new_clone(
+	sdl3app.state = new_clone(
 	Explorer {
 		run = true,
-		on_start = proc(app: ^sdl2app.App) {
+		on_start = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
 			lucide.load()
 			components.theme.icon_font = lucide.font
@@ -612,15 +612,15 @@ main :: proc() {
 				fmt.eprintf("Failed to refresh explorer: %v\n", err)
 			}
 		},
-		on_frame = proc(app: ^sdl2app.App) {
+		on_frame = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
 			using opal, components
 			window_radius :=
 				app.radius *
 				f32(
 					i32(
-						transmute(sdl2.WindowFlags)sdl2.GetWindowFlags(app.window) >=
-						sdl2.WINDOW_MAXIMIZED,
+						transmute(sdl3.WindowFlags)sdl3.GetWindowFlags(app.window) >=
+						sdl3.WINDOW_MAXIMIZED,
 					),
 				)
 
@@ -666,19 +666,19 @@ main :: proc() {
 							padding = {10, 0, 0, 0},
 						},
 					)
-					sdl2app.app_use_node_for_window_grabbing(
+					sdl3app.app_use_node_for_window_grabbing(
 						app,
 						add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?,
 					)
 					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
-						sdl2.MinimizeWindow(app.window)
+						sdl3.MinimizeWindow(app.window)
 					}
 					if do_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
 						if .MAXIMIZED in
-						   transmute(sdl2.WindowFlags)sdl2.GetWindowFlags(app.window) {
-							sdl2.RestoreWindow(app.window)
+						   transmute(sdl3.WindowFlags)sdl3.GetWindowFlags(app.window) {
+							sdl3.RestoreWindow(app.window)
 						} else {
-							sdl2.MaximizeWindow(app.window)
+							sdl3.MaximizeWindow(app.window)
 						}
 					}
 					if do_window_button(lucide.X, tw.ROSE_500) {
@@ -826,6 +826,7 @@ main :: proc() {
 										sizing = {grow = 1, max = INFINITY},
 										show_scrollbars = true,
 										clip_content = true,
+										interactive = true,
 									},
 								)
 								{
@@ -913,7 +914,7 @@ main :: proc() {
 	},
 	)
 
-	sdl2app.run(
+	sdl3app.run(
 		&{
 			width              = 1000,
 			height             = 800,
@@ -925,7 +926,7 @@ main :: proc() {
 		},
 	)
 
-	free(sdl2app.state)
+	free(sdl3app.state)
 }
 
 begin_section :: proc(name: string, loc := #caller_location) {

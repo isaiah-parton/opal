@@ -1300,7 +1300,7 @@ end_node :: proc() {
 
 	// Add scrollbars
 	if self.show_scrollbars && self.overflow != {} {
-		SCROLLBAR_SIZE :: 3
+		SCROLLBAR_SIZE :: 4
 		SCROLLBAR_PADDING :: 2
 
 		inner_box := box_shrink(self.box, 1)
@@ -1329,15 +1329,17 @@ end_node :: proc() {
 					sizing = {
 						relative = {0, 1},
 						exact = {SCROLLBAR_SIZE, SCROLLBAR_PADDING * -2 - corner_space},
+						max = INFINITY,
 					},
 					interactive = true,
+					sticky = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
 					vertical = true,
 				},
 			).?
 			added_size := SCROLLBAR_SIZE * node.transitions[1]
-			node.sizing.exact.x += added_size
+			node.size.x += added_size
 			node.exact_offset.x -= added_size
 			node.radius = node.sizing.exact.x / 2
 		}
@@ -1352,15 +1354,17 @@ end_node :: proc() {
 					sizing = {
 						relative = {1, 0},
 						exact = {-SCROLLBAR_PADDING * 2 - corner_space, SCROLLBAR_SIZE},
+						max = INFINITY,
 					},
 					interactive = true,
+					sticky = true,
 					style = scrollbar_style,
 					on_draw = scrollbar_on_draw,
 				},
 			).?
 			added_size := SCROLLBAR_SIZE * 2 * node.transitions[1]
 			node.size.y += added_size
-			node.position.y -= added_size
+			node.exact_offset.y -= added_size
 			node.radius = node.size.y / 2
 		}
 

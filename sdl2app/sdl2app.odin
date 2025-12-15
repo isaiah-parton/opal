@@ -151,6 +151,7 @@ app_main :: proc "c" (appstate: rawptr, argc: i32, argv: [^]cstring) {
 	// Hit test callback for modified moving/resizing hitboxes
 	if app.customize_window {
 		sdl2.SetWindowHitTest(app.window, hit_test_callback, app)
+		sdl2.SetWindowResizable(app.window, true)
 	}
 	sdl2.SetWindowMinimumSize(app.window, app.min_width, app.min_height)
 
@@ -271,11 +272,10 @@ app_event :: proc "c" (appstate: rawptr, event: ^sdl2.Event) {
 		handle_text_input(transmute(cstring)&event.text.text)
 	case .WINDOWEVENT:
 		#partial switch event.window.event {
-		case .RESIZED, .SIZE_CHANGED:
+		case .RESIZED:
 			handle_window_resize(event.window.data1, event.window.data2)
 		case .RESTORED:
 			draw_frames(2)
-
 		case .MOVED:
 			handle_window_move()
 		case .FOCUS_LOST:
