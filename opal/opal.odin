@@ -300,7 +300,7 @@ Context :: struct {
 
 	// Node memory is stored contiguously for memory efficiency.
 	// TODO: Implement a dynamic array
-	nodes:                     [8192]Maybe(Node),
+	nodes:                     [16_384]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
 	roots:                     [dynamic]^Node,

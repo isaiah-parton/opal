@@ -105,10 +105,10 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 		&{
 			interactive = true,
 			radius = 8,
-			padding = 8,
+			padding = 6,
 			sizing = {
-				exact = {200, 50},
-				fit = {1, 0},
+				exact = {200, 0},
+				fit = {1, 1},
 				relative = {0.25, 0},
 				grow = {0.5, 0},
 				max = INFINITY,
@@ -383,6 +383,7 @@ Context_Menu :: struct {
 Explorer :: struct {
 	using app:         sdl3app.App,
 	toggle_switch:     bool,
+	right_panel_width: f32,
 	slider:            f32,
 	text:              string,
 	cwd:               string,
@@ -428,6 +429,56 @@ explorer_change_folder :: proc(self: ^Explorer, folder: string) {
 		explorer_refresh(self)
 	} else {
 		fmt.eprintfln("Failed to change directory: %v", err)
+	}
+}
+
+explorer_display_breadcrumbs :: proc(self: ^Explorer) {
+	using opal
+
+	i := 0
+	for i < len(self.cwd) {
+		s := self.cwd[i:]
+		n := strings.index_any(s, "/\\")
+		if n == -1 {
+			n = len(s)
+		}
+		s = s[:n]
+
+		push_id(i)
+		defer pop_id()
+		node := add_node(
+			&{
+				text = s,
+				foreground = components.theme.color.base_foreground,
+				font_size = 16,
+				font = &components.theme.font,
+				interactive = true,
+				padding = {4, 2, 4, 2},
+				radius = 8,
+				sizing = {fit = 1},
+			},
+		).?
+		node_update_transition(node, 0, node.is_hovered, 0.1)
+		node.background = fade(tw.NEUTRAL_700, 0.4 * node.transitions[0])
+		if node.is_active && !node.was_active {
+			explorer_change_folder(self, self.cwd[:i + n])
+		}
+
+		i += n + 1
+
+		if i < len(self.cwd) {
+			add_node(
+				&{
+					text = string_from_rune(lucide.CHEVRON_RIGHT),
+					font_size = 16,
+					sizing = {fit = 1, grow = {0, 1}, max = {0, INFINITY}},
+					padding = {0, 3, 0, 0},
+					content_align = {0, 0.5},
+					font = &components.theme.icon_font,
+					foreground = components.theme.color.base_foreground,
+				},
+			)
+		}
 	}
 }
 
@@ -656,16 +707,7 @@ main :: proc() {
 							app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
 						)
 					}
-					add_node(
-						&{
-							text = app.cwd,
-							foreground = theme.color.base_foreground,
-							font_size = 14,
-							font = &theme.font,
-							sizing = {fit = 1},
-							padding = {10, 0, 0, 0},
-						},
-					)
+
 					sdl3app.app_use_node_for_window_grabbing(
 						app,
 						add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?,
@@ -778,47 +820,77 @@ main :: proc() {
 						// Main stuff
 						begin_node(&{sizing = {max = INFINITY, grow = 1}, padding = 4, gap = 4})
 						{
-							// File list
+							// Body
 							begin_node(
 								&{
 									sizing = {fit = {1, 0}, max = INFINITY, grow = 1},
 									padding = 8,
 									gap = 8,
 									vertical = true,
-									interactive = true,
-									wrapped = true,
 									background = tw.NEUTRAL_800,
 									radius = 10,
 								},
 							)
 							{
+								// Toolbar
 								begin_node(
-									&{sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY}},
+									&{
+										sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
+										content_align = {0, 0.5},
+									},
 								)
 								{
-									for mode, i in Item_Display_Mode {
-										push_id(i)
-										node := add_node(
-											&{
-												text = fmt.tprint(mode),
-												sizing = {fit = 1},
-												padding = {8, 4, 8, 4},
-												font_size = 14,
-												stroke_width = 2,
-												interactive = true,
-												font = &theme.font,
-												background = tw.BLUE_500 if app.display_mode == mode else tw.NEUTRAL_800,
-												foreground = theme.color.base_foreground,
-											},
-										).?
-										pop_id()
+									begin_node(
+										&{
+											sizing = {grow = 1, max = INFINITY},
+											clip_content = true,
+										},
+									)
+									explorer_display_breadcrumbs(app)
+									end_node()
+									begin_node(
+										&{
+											sizing = {fit = 1},
+											padding = 2,
+											radius = 8,
+											gap = 2,
+											background = tw.NEUTRAL_900,
+										},
+									)
+									{
+										for mode, i in Item_Display_Mode {
+											push_id(i)
+											node := add_node(
+												&{
+													text = string_from_rune(
+														lucide.GRID_2X2 if mode == .Grid else lucide.ROWS_3,
+													),
+													sizing = {fit = 1},
+													padding = 4,
+													font_size = 16,
+													stroke_width = 2,
+													square_fit = true,
+													interactive = true,
+													content_align = 0.5,
+													radius = 6,
+													font = &theme.icon_font,
+													foreground = theme.color.base_foreground,
+												},
+											).?
+											pop_id()
 
-										if node.is_active && !node.was_active {
-											app.display_mode = mode
+											node_update_transition(node, 0, node.is_hovered, 0.1)
+											node.background =
+												tw.NEUTRAL_700 if app.display_mode == mode else fade(tw.NEUTRAL_700, 0.4 * node.transitions[0])
+											if node.is_active && !node.was_active {
+												app.display_mode = mode
+											}
 										}
 									}
+									end_node()
 								}
 								end_node()
+								// File list
 								begin_node(
 									&{
 										wrapped = app.display_mode == .Grid,
@@ -848,14 +920,76 @@ main :: proc() {
 								end_node()
 							}
 							end_node()
-							// Preview
+
+							// Right panel
 							if name, ok := app.primary_selection.?; ok {
+								{
+									begin_node(
+										&{
+											sizing = {
+												grow = {0, 1},
+												max = INFINITY,
+												exact = {0, 0},
+											},
+											layer = 2,
+											group = true,
+										},
+									)
+									{
+										node := add_node(
+											&{
+												absolute = true,
+												sizing = {relative = {0, 1}, exact = {6, 0}},
+												exact_offset = {-3, 0},
+												interactive = true,
+												radius = 2,
+												sticky = true,
+												cursor = Cursor.Resize_EW,
+												data = app,
+												on_draw = proc(self: ^Node) {
+													app := (^Explorer)(self.data)
+													if self.is_active {
+														app.right_panel_width =
+															self.parent.parent.box.hi.x -
+															self.parent.parent.padding.z -
+															self.parent.parent.gap -
+															box_width(self.box) / 2 -
+															opal.global_ctx.mouse_position.x
+													}
+													center := box_center(self.box)
+													thumb_box := Box {
+														center - {6, 10},
+														center + {6, 10},
+													}
+													kn.add_box(thumb_box, 4, self.foreground)
+													kn.add_box(
+														box_shrink(thumb_box, 4),
+														2,
+														fade(
+															tw.NEUTRAL_800,
+															f32(self.foreground.(Color).a) / 255,
+														),
+													)
+												},
+											},
+										).?
+										node_update_transition(
+											node,
+											0,
+											node.is_hovered || node.is_active,
+											0.1,
+										)
+										node.foreground = fade(tw.NEUTRAL_950, node.transitions[0])
+									}
+									end_node()
+								}
+								app.right_panel_width = max(app.right_panel_width, 240)
 								begin_node(
 									&{
 										sizing = {
 											grow = {0, 1},
-											exact = {400, 0},
-											max = {400, INFINITY},
+											exact = {app.right_panel_width, 0},
+											max = {app.right_panel_width, INFINITY},
 										},
 										vertical = true,
 										padding = 8,
@@ -880,8 +1014,10 @@ main :: proc() {
 										add_node(
 											&{
 												sizing = {
-													exact = preview.source.hi - preview.source.lo,
+													grow = 1,
+													max = preview.source.hi - preview.source.lo,
 												},
+												square_fit = true,
 												data = app,
 												on_draw = proc(node: ^Node) {
 													app := (^Explorer)(node.data)

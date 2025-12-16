@@ -618,6 +618,14 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
 
+		if node.square_fit {
+			if node.size.x > node.size.y {
+				node.size.x = node.size.y
+			} else {
+				node.size.y = node.size.x
+			}
+		}
+
 		node.position[j] =
 			self.padding[j] +
 			line_offset +
