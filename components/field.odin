@@ -1,7 +1,7 @@
 package components
 
-import ".."
 import kn "../katana"
+import "../opal"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"

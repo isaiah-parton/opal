@@ -1,6 +1,6 @@
 package components
 
-import ".."
+import "../opal"
 import tw "../tailwind_colors"
 
 Theme :: struct {

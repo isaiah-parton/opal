@@ -12,6 +12,9 @@ package opal
 // 		- Maybe by separating nodes from their style (yes definitely, there's no reason to duplicate that data for 100s of nodes)
 //
 
+import kn "../katana"
+import tw "../tailwind_colors"
+import "../tedit"
 import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
@@ -27,9 +30,6 @@ import "core:strings"
 import "core:sys/windows"
 import "core:time"
 import "core:unicode"
-import kn "katana"
-import tw "tailwind_colors"
-import "tedit"
 import stbi "vendor:stb/image"
 
 INFINITY :: math.F32_MAX

@@ -1,8 +1,8 @@
 package sdl2app
 
-import ".."
 import kn "../katana"
 import "../katana/sdl2glue"
+import "../opal"
 import "base:runtime"
 import "core:fmt"
 import "core:os"

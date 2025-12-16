@@ -1,12 +1,12 @@
 package opal
 
+import kn "../katana"
+import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
-import kn "katana"
-import tw "tailwind_colors"
 
 _BACKGROUND :: tw.NEUTRAL_900
 _FOREGROUND :: tw.NEUTRAL_800

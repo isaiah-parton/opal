@@ -1,10 +1,10 @@
 package example
 
-import opal "../.."
 import "../../components"
 import kn "../../katana"
 import "../../katana/sdl3glue"
 import "../../lucide"
+import opal "../../opal"
 import "../../sdl3app"
 import tw "../../tailwind_colors"
 import "base:runtime"

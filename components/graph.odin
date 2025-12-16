@@ -1,3 +1,4 @@
 package components
 
-import ".."
+import "../opal"
+

@@ -1,6 +1,6 @@
 package components
 
-import ".."
+import "../opal"
 
 make_boolean :: proc(value: ^bool) -> opal.Node_Descriptor {
 	using opal
@@ -12,3 +12,4 @@ make_boolean :: proc(value: ^bool) -> opal.Node_Descriptor {
 		},
 	}
 }
+

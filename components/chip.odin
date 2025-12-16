@@ -1,6 +1,6 @@
 package components
 
-import ".."
+import "../opal"
 
 Chip_Descriptor :: struct {
 	using base: opal.Node_Descriptor,
@@ -24,3 +24,4 @@ add_chip :: proc(text: string) -> opal.Node_Result {
 	self.radius = self.size.y / 2
 	return self
 }
+

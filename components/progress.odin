@@ -1,7 +1,7 @@
 package components
 
-import ".."
 import kn "../katana"
+import "../opal"
 import "core:fmt"
 import "core:math"
 
