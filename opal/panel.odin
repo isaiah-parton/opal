@@ -103,3 +103,4 @@ panel_update :: proc(self: ^Panel, base_node, grab_node: ^Node) {
 		self.state = .None
 	}
 }
+

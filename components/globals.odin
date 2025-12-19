@@ -42,7 +42,7 @@ theme: Theme = {
 		secondary = tw.NEUTRAL_700,
 		secondary_foreground = tw.NEUTRAL_950,
 		secondary_strong = tw.NEUTRAL_600,
-		border = tw.NEUTRAL_500,
+		border = tw.NEUTRAL_700,
 		base_foreground = tw.NEUTRAL_50,
 	},
 }

@@ -130,10 +130,9 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 		}
 		add_node(
 			&{
-				sizing = {fit = 1},
+				sizing = {fit = 1, aspect_ratio = 1},
 				text = string_from_rune(icon),
 				font = &components.theme.icon_font,
-				square_fit = true,
 				font_size = 32,
 				foreground = node.foreground,
 			},
@@ -226,12 +225,11 @@ item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #c
 		if self.is_dir {
 			add_node(
 				&{
-					sizing = {fit = 1},
+					sizing = {fit = 1, aspect_ratio = 1},
 					text = string_from_rune(
 						lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER,
 					),
 					font = &components.theme.icon_font,
-					square_fit = true,
 					font_size = 16,
 					foreground = node.foreground,
 				},
@@ -239,10 +237,9 @@ item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #c
 		} else if self.file_info.mode == 1049014 {
 			add_node(
 				&{
-					sizing = {fit = 1},
+					sizing = {fit = 1, aspect_ratio = 1},
 					text = string_from_rune(lucide.FOLDER_SYMLINK),
 					font = &components.theme.icon_font,
-					square_fit = true,
 					font_size = 16,
 					foreground = node.foreground,
 				},
@@ -497,8 +494,10 @@ explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: o
 		if img, err := image.load_from_file(name, {.alpha_add_if_missing}); err == nil {
 			defer image.destroy(img)
 
-			shrink_x := max(img.width - 256, 0)
-			shrink_y := max(img.height - 256, 0)
+			MAX_DIMENSION :: 512
+
+			shrink_x := max(img.width - MAX_DIMENSION, 0)
+			shrink_y := max(img.height - MAX_DIMENSION, 0)
 
 			new_width := img.width
 			new_height := img.height
@@ -865,11 +864,10 @@ main :: proc() {
 													text = string_from_rune(
 														lucide.GRID_2X2 if mode == .Grid else lucide.ROWS_3,
 													),
-													sizing = {fit = 1},
+													sizing = {fit = 1, aspect_ratio = 1},
 													padding = 4,
 													font_size = 16,
 													stroke_width = 2,
-													square_fit = true,
 													interactive = true,
 													content_align = 0.5,
 													radius = 6,
@@ -929,7 +927,7 @@ main :: proc() {
 											sizing = {
 												grow = {0, 1},
 												max = INFINITY,
-												exact = {0, 0},
+												exact = {1, 0},
 											},
 											layer = 2,
 											group = true,
@@ -939,7 +937,7 @@ main :: proc() {
 										node := add_node(
 											&{
 												absolute = true,
-												sizing = {relative = {0, 1}, exact = {6, 0}},
+												sizing = {relative = {0, 1}, exact = {7, 0}},
 												exact_offset = {-3, 0},
 												interactive = true,
 												radius = 2,
@@ -957,19 +955,14 @@ main :: proc() {
 															opal.global_ctx.mouse_position.x
 													}
 													center := box_center(self.box)
-													thumb_box := Box {
-														center - {6, 10},
-														center + {6, 10},
-													}
-													kn.add_box(thumb_box, 4, self.foreground)
-													kn.add_box(
-														box_shrink(thumb_box, 4),
-														2,
-														fade(
-															tw.NEUTRAL_800,
-															f32(self.foreground.(Color).a) / 255,
-														),
+													color := kn.mix(
+														self.transitions[0] * 0.5,
+														components.theme.color.border,
+														components.theme.color.accent,
 													)
+													kn.add_circle(center + {0, -7}, 2.5, color)
+													kn.add_circle(center, 2.5, color)
+													kn.add_circle(center + {0, 7}, 2.5, color)
 												},
 											},
 										).?
@@ -979,7 +972,7 @@ main :: proc() {
 											node.is_hovered || node.is_active,
 											0.1,
 										)
-										node.foreground = fade(tw.NEUTRAL_950, node.transitions[0])
+										node_update_transition(node, 1, node.is_active, 0.2)
 									}
 									end_node()
 								}
@@ -1016,8 +1009,9 @@ main :: proc() {
 												sizing = {
 													grow = 1,
 													max = preview.source.hi - preview.source.lo,
+													aspect_ratio = box_width(preview.source) /
+													box_height(preview.source),
 												},
-												square_fit = true,
 												data = app,
 												on_draw = proc(node: ^Node) {
 													app := (^Explorer)(node.data)

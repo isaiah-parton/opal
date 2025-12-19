@@ -100,19 +100,22 @@ clone_recursive :: proc(target, source: rawptr, type_info: ^runtime.Type_Info) {
 
 Sizing_Descriptor :: struct {
 	// Exact initial size
-	exact:    [2]f32,
+	exact:        [2]f32,
 
 	// Base size relative to parent
-	relative: [2]f32,
+	relative:     [2]f32,
 
 	// How much of the content space the node will grow to fit
-	fit:      [2]f32,
+	fit:          [2]f32,
 
 	// How much of the parents space the node will grow to fill
-	grow:     [2]f32,
+	grow:         [2]f32,
 
 	// The maximum fixed size the node is allowed to grow to
-	max:      [2]f32,
+	max:          [2]f32,
+
+	// Forced aspect ratio
+	aspect_ratio: f32,
 }
 
 //
@@ -176,9 +179,6 @@ Node_Descriptor :: struct {
 
 	// Show/hide scrollbars when content overflows
 	show_scrollbars:  bool,
-
-	// Forces equal width and height when fitting to content size
-	square_fit:       bool,
 
 	//
 	sticky:           bool,
@@ -326,7 +326,7 @@ node_update_input :: proc(self: ^Node) {
 	self.was_focused = self.is_focused
 	self.is_focused = ctx.focused_id == self.id && ctx.window_is_focused
 
-	if self.is_hovered {
+	if self.is_hovered || self.is_active {
 		set_cursor(self.cursor)
 	}
 }
@@ -618,12 +618,8 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
 
-		if node.square_fit {
-			if node.size.x > node.size.y {
-				node.size.x = node.size.y
-			} else {
-				node.size.y = node.size.x
-			}
+		if node.sizing.aspect_ratio != 0 {
+			node_enforce_aspect_ratio(node)
 		}
 
 		node.position[j] =
@@ -632,6 +628,16 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 			(span + self.overflow[j] - node.size[j]) * self.content_align[j]
 
 		offset += node.size[i] + spacing
+	}
+}
+
+node_enforce_aspect_ratio :: proc(node: ^Node) {
+	current_aspect := node.size.x / node.size.y
+
+	if node.sizing.aspect_ratio > current_aspect {
+		node.size.y = node.size.x / node.sizing.aspect_ratio
+	} else {
+		node.size.x = node.size.y * node.sizing.aspect_ratio
 	}
 }
 
@@ -1061,8 +1067,8 @@ node_fit_to_content :: proc(self: ^Node) {
 		return
 	}
 	self.size = linalg.max(self.content_size * self.sizing.fit, self.size)
-	if self.square_fit {
-		self.size = max(self.size.x, self.size.y)
+	if self.sizing.aspect_ratio != 0 {
+		node_enforce_aspect_ratio(self)
 	}
 }
 
