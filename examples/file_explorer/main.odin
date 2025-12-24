@@ -984,6 +984,7 @@ main :: proc() {
 											exact = {app.right_panel_width, 0},
 											max = {app.right_panel_width, INFINITY},
 										},
+										content_align = {0.5, 0.5},
 										vertical = true,
 										padding = 8,
 										background = tw.NEUTRAL_800,

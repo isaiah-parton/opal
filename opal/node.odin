@@ -578,6 +578,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	i := int(self.vertical)
 	j := 1 - i
 
+	// Slice children D:
 	children := self.layout_children[from:to]
 
 	// Array of growing nodes along the layout axis
@@ -588,28 +589,37 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 		allocator = context.temp_allocator,
 	)
 
+	// The fixed content length along layout axis
 	length: f32
 
 	// Populate the array and accumulate node extent
 	for node in children {
+		if node.sizing.aspect_ratio != 0 {
+			node_enforce_aspect_ratio(node)
+		}
 		length += node.size[i]
 		if node.sizing.grow[i] > 0 {
 			append(&growables, node)
 		}
 	}
 
+	// Add gaps as content length
 	length += self.gap * f32(len(children) - 1)
 
+	// Grow children to their maximum sizes and get the leftover space
 	length_left := node_grow_children(
 		self,
 		&growables,
 		self.size[i] - self.padding[i] - self.padding[i + 2] - length,
 	)
 
+	// Equal spacing between children
 	spacing := (length_left / f32(len(children) - 1)) if self.justify_between else self.gap
 
+	// Starting position for children along layout axis
 	offset: f32 = self.padding[i] + length_left * self.content_align[i]
 
+	// Next, position children along layout axis + grow and position them across it
 	for node in children {
 		node.position[i] = offset
 
@@ -730,7 +740,9 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 
 	i := int(self.vertical)
 
+	// As long as there is remaining space and children to grow
 	for length > 0 && len(array) > 0 {
+
 		// Get the smallest size along the layout axis, nodes of this size will be grown first
 		smallest := array[0].size[i]
 
@@ -738,12 +750,12 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 		second_smallest := f32(math.F32_MAX)
 		size_to_add := length
 
+		// Figure out the smallest and second smallest sizes
 		for node in array {
 			if node.size[i] < smallest {
 				second_smallest = smallest
 				smallest = node.size[i]
 			}
-
 			if node.size[i] > smallest {
 				second_smallest = min(second_smallest, node.size[i])
 			}
@@ -752,9 +764,10 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 		// Compute the smallest size to add
 		size_to_add = min(second_smallest - smallest, length / f32(len(array)))
 
-		// Add that amount to every eligable child
+		// TODO: Remove the loop?
 		for node, node_index in array {
 			if node.size[i] == smallest {
+				// Compute the size to add to this child
 				size_to_add := min(
 					size_to_add,
 					min(node.sizing.max[i], node.sizing.grow[i] * self.size[i]) - node.size[i],
