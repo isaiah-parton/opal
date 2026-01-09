@@ -139,10 +139,7 @@ Node_Descriptor :: struct {
 	//
 	cursor:           Cursor,
 
-	// Absolute nodes aren't affected by their parent's layout
-	absolute:         bool,
-
-	//
+	// Absolute placement
 	exact_offset:     [2]f32,
 	relative_offset:  [2]f32,
 	align:            [2]f32,
@@ -155,6 +152,12 @@ Node_Descriptor :: struct {
 
 	// Spacing added between children
 	gap:              f32,
+
+	// Absolute nodes aren't affected by their parent's layout'
+	// they will instead be placed at their parent's position +
+	// `exact_offset` + `relative_offset` * the parent's size -
+	// `align` * the node's size
+	absolute:         bool,
 
 	//
 	justify_between:  bool,
@@ -578,7 +581,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	i := int(self.vertical)
 	j := 1 - i
 
-	// Slice children D:
+	// Slice the children D:
 	children := self.layout_children[from:to]
 
 	// Array of growing nodes along the layout axis
@@ -594,8 +597,19 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 	// Populate the array and accumulate node extent
 	for node in children {
+		if node.sizing.grow[j] > 0 {
+			node.size[j] = min(span * node.sizing.grow[j], node.sizing.max[j])
+			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
+		}
+		// Check for aspect ratio to enforce
 		if node.sizing.aspect_ratio != 0 {
-			node_enforce_aspect_ratio(node)
+			target_aspect := node.sizing.aspect_ratio
+			// Invert ratios if layout is horizontal
+			if i == 0 {
+				target_aspect = 1 / target_aspect
+			}
+			// Clamp max growable size based on aspect ratio
+			node.sizing.max[i] = min(node.sizing.max[i], node.size[j] / target_aspect)
 		}
 		length += node.size[i]
 		if node.sizing.grow[i] > 0 {
@@ -610,6 +624,7 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	length_left := node_grow_children(
 		self,
 		&growables,
+		// Compute the amount of space left for growth
 		self.size[i] - self.padding[i] - self.padding[i + 2] - length,
 	)
 
@@ -622,16 +637,6 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 	// Next, position children along layout axis + grow and position them across it
 	for node in children {
 		node.position[i] = offset
-
-		if node.sizing.grow[j] > 0 {
-			node.size[j] = min(span, node.sizing.max[j])
-			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
-		}
-
-		if node.sizing.aspect_ratio != 0 {
-			node_enforce_aspect_ratio(node)
-		}
-
 		node.position[j] =
 			self.padding[j] +
 			line_offset +
@@ -660,14 +665,22 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 
 	offset: f32
 	max_offset := self.size[i] - self.padding[i] - self.padding[i + 2]
+
+	// The maximum span (size across layout axis) of all child nodes
 	line_span: f32
 
+	// Check if wrapping is enabled
 	if self.wrapped {
+
+		// Calculate content size
 		line_start: int
 		content_size: [2]f32
 
 		for child, child_index in self.layout_children {
+			// Detect when the content size would excede the available space
 			if offset + child.size[i] > max_offset {
+
+				// Grow the nodes that do fit
 				node_solve_sizes_in_range(
 					self,
 					line_start,
@@ -675,15 +688,22 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 					line_span,
 					content_size[j],
 				)
-				line_start = child_index
 
+				// Check if there's only one child
 				if offset == 0 {
+					// If so, include it's size
 					content_size[i] = max(content_size[i], offset + child.size[i])
 				} else {
+					// Otherwise, reset offset
 					content_size[i] = max(content_size[i], offset)
 					offset = 0
 				}
+
+				// Grow the parent node to fit the wrapped content
+				// Increase span by the line span + gap
 				content_size[j] += line_span + self.gap
+
+				line_start = child_index
 				line_span = 0
 			}
 			line_span = max(line_span, child.size[j])
@@ -694,6 +714,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			line_span = node_get_span(self)
 		}
 
+		// Solve sizes
 		node_solve_sizes_in_range(
 			self,
 			line_start,
@@ -702,7 +723,10 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			content_size[j],
 		)
 
+		// Add padding to content size
 		content_size += self.padding.xy + self.padding.zw
+
+		// Fit final run of nodes
 		content_size[j] += line_span
 
 		// TODO: Remove or keep this
@@ -714,12 +738,16 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 		// 	)
 		// }
 
+		// Check if the node should grow
 		if self.wrapped && self.content_size != content_size {
 			self.content_size = content_size
 			node_fit_to_content(self)
+
+			// Trigger resolve of entire tree
 			needs_resolve = true
 		}
 	} else {
+		// Solve sizes normally
 		node_solve_sizes_in_range(
 			self,
 			0,
@@ -795,7 +823,8 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 }
 
 //
-// Walks down the tree, calculating node sizes, wrapping contents and then propagating size changes back up the tree for an optional second pass
+// Walks down the tree, calculating node sizes, wrapping contents and then
+// propagating size changes back up the tree for an optional second pass
 //
 node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_resolve: bool) {
 	if depth >= MAX_TREE_DEPTH {
@@ -988,11 +1017,14 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		line_height := self.font.line_height * self.font_size
 
 		if self.enable_selection && self.text_view.active {
+			// TODO: implement custom selection color
 			paint := kn.paint_index_from_option(fade(tw.INDIGO_700, 1))
+
 			selection := [2]int {
 				clamp(self.text_view.selection[0] - self.text_byte_index, 0, len(self.glyphs)),
 				clamp(self.text_view.selection[1] - self.text_byte_index, 0, len(self.glyphs)),
 			}
+
 			ordered_selection := selection
 			if ordered_selection[0] != ordered_selection[1] {
 				if ordered_selection[0] > ordered_selection[1] {
@@ -1079,7 +1111,10 @@ node_fit_to_content :: proc(self: ^Node) {
 	if self.sizing.fit == {} {
 		return
 	}
+
 	self.size = linalg.max(self.content_size * self.sizing.fit, self.size)
+
+	// Enforce non-zero aspect ratios
 	if self.sizing.aspect_ratio != 0 {
 		node_enforce_aspect_ratio(self)
 	}

@@ -95,7 +95,7 @@ Text_View_Descriptor :: struct {
 Text_View :: struct {
 	using desc:       Text_View_Descriptor,
 
-	// Text length in bytes
+	// Length in bytes of the text displayed in this view
 	byte_length:      int,
 
 	// Hovered glyph index
@@ -761,7 +761,7 @@ text_agent_begin_view :: proc(self: ^Text_Agent, desc: Text_View_Descriptor) -> 
 
 	if view.selection != view.last_selection {
 		view.last_selection = view.selection
-		text_view_update_hightlight_shape(view)
+		// text_view_update_hightlight_shape(view)
 	}
 
 	if view.container_node != nil {

@@ -110,7 +110,7 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 				exact = {200, 0},
 				fit = {1, 1},
 				relative = {0.25, 0},
-				grow = {0.5, 0},
+				grow = {1, 0},
 				max = INFINITY,
 			},
 			content_align = {0, 0.5},
@@ -222,29 +222,21 @@ item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #c
 		},
 	).?
 	{
+		icon: rune = lucide.FILE
 		if self.is_dir {
-			add_node(
-				&{
-					sizing = {fit = 1, aspect_ratio = 1},
-					text = string_from_rune(
-						lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER,
-					),
-					font = &components.theme.icon_font,
-					font_size = 16,
-					foreground = node.foreground,
-				},
-			)
+			icon = lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER
 		} else if self.file_info.mode == 1049014 {
-			add_node(
-				&{
-					sizing = {fit = 1, aspect_ratio = 1},
-					text = string_from_rune(lucide.FOLDER_SYMLINK),
-					font = &components.theme.icon_font,
-					font_size = 16,
-					foreground = node.foreground,
-				},
-			)
+			icon = lucide.FOLDER_SYMLINK
 		}
+		add_node(
+			&{
+				sizing = {fit = 1, aspect_ratio = 1},
+				text = string_from_rune(icon),
+				font = &components.theme.icon_font,
+				font_size = 16,
+				foreground = node.foreground,
+			},
+		)
 		add_node(
 			&{
 				text = self.file_info.name,
