@@ -85,19 +85,6 @@ Node_Variant :: union #no_nil {
 }
 */
 
-clone_recursive :: proc(target, source: rawptr, type_info: ^runtime.Type_Info) {
-	type_info := runtime.type_info_base(type_info)
-	#partial switch v in type_info.variant {
-	case (runtime.Type_Info_String):
-		if v.is_cstring {
-			(^cstring)(target)^ = strings.clone_to_cstring(string((^cstring)(source)^))
-		} else {
-			(^string)(target)^ = strings.clone(string((^string)(source)^))
-		}
-	case (runtime.Type_Info_Dynamic_Array):
-	}
-}
-
 Sizing_Descriptor :: struct {
 	// Exact initial size
 	exact:        [2]f32,
@@ -119,7 +106,8 @@ Sizing_Descriptor :: struct {
 }
 
 //
-// The transient data belonging to a node for only the frame's duration. This is reset every frame when the node is invoked.  None of these values should be modified after initialization.
+// The transient data belonging to a node for only the frame's duration.
+// This is reset every frame when the node is invoked.
 //
 Node_Descriptor :: struct {
 	using style:      Node_Style,
@@ -130,7 +118,7 @@ Node_Descriptor :: struct {
 	// Text
 	text:             string,
 
-	// Z index (higher values appear in front of lower ones), this value stacks down the tree
+	// Z index (higher values appear in front of lower ones), this value accumulates down the tree
 	layer:            i32,
 
 	// The node's final box will be loosely bound within this box, maintaining its size
@@ -183,10 +171,10 @@ Node_Descriptor :: struct {
 	// Show/hide scrollbars when content overflows
 	show_scrollbars:  bool,
 
-	//
+	// Causes the node to maintain a hovered and active state until the mouse is released
 	sticky:           bool,
 
-	//
+	// Must be true for the node to receive mouse and keyboard events
 	interactive:      bool,
 
 	// Called after the default drawing behavior
@@ -577,7 +565,7 @@ node_solve_box_recursive :: proc(
 //
 // Solve one continuous extent of children along an axis
 //
-node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset: f32) {
+node_solve_child_placement_in_range :: proc(self: ^Node, from, to: int, span, line_offset: f32) {
 	i := int(self.vertical)
 	j := 1 - i
 
@@ -597,10 +585,13 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 	// Populate the array and accumulate node extent
 	for node in children {
+
+		// Grow child across axis (span)
 		if node.sizing.grow[j] > 0 {
 			node.size[j] = min(span * node.sizing.grow[j], node.sizing.max[j])
 			node.overflow[j] = linalg.max(node.content_size[j] - node.size[j], 0)
 		}
+
 		// Check for aspect ratio to enforce
 		if node.sizing.aspect_ratio != 0 {
 			target_aspect := node.sizing.aspect_ratio
@@ -611,7 +602,11 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 			// Clamp max growable size based on aspect ratio
 			node.sizing.max[i] = min(node.sizing.max[i], node.size[j] / target_aspect)
 		}
+
+		// Increase total size along axis (length)
 		length += node.size[i]
+
+		// Add to growables array if grow factor is non-zero
 		if node.sizing.grow[i] > 0 {
 			append(&growables, node)
 		}
@@ -636,7 +631,10 @@ node_solve_sizes_in_range :: proc(self: ^Node, from, to: int, span, line_offset:
 
 	// Next, position children along layout axis + grow and position them across it
 	for node in children {
+		// Place child along axis
 		node.position[i] = offset
+
+		// Place child across axis
 		node.position[j] =
 			self.padding[j] +
 			line_offset +
@@ -659,7 +657,7 @@ node_enforce_aspect_ratio :: proc(node: ^Node) {
 //
 // Solve wrapped or normal layout
 //
-node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
+node_solve_child_placement :: proc(self: ^Node) -> (needs_resolve: bool) {
 	i := int(self.vertical)
 	j := 1 - i
 
@@ -681,7 +679,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 			if offset + child.size[i] > max_offset {
 
 				// Grow the nodes that do fit
-				node_solve_sizes_in_range(
+				node_solve_child_placement_in_range(
 					self,
 					line_start,
 					child_index,
@@ -715,7 +713,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 		}
 
 		// Solve sizes
-		node_solve_sizes_in_range(
+		node_solve_child_placement_in_range(
 			self,
 			line_start,
 			len(self.layout_children),
@@ -748,7 +746,7 @@ node_solve_sizes :: proc(self: ^Node) -> (needs_resolve: bool) {
 		}
 	} else {
 		// Solve sizes normally
-		node_solve_sizes_in_range(
+		node_solve_child_placement_in_range(
 			self,
 			0,
 			len(self.layout_children),
@@ -826,19 +824,24 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 // Walks down the tree, calculating node sizes, wrapping contents and then
 // propagating size changes back up the tree for an optional second pass
 //
-node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_resolve: bool) {
+node_solve_child_placement_and_wrap_recursive :: proc(
+	self: ^Node,
+	depth := 0,
+) -> (
+	needs_resolve: bool,
+) {
 	if depth >= MAX_TREE_DEPTH {
 		return
 	}
 
-	needs_resolve = node_solve_sizes(self)
+	needs_resolve = node_solve_child_placement(self)
 
 	if self.wrapped {
 		for child in self.layout_children {
-			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
+			needs_resolve |= node_solve_child_placement_and_wrap_recursive(child, depth + 1)
 		}
 		if needs_resolve {
-			node_solve_sizes(self)
+			node_solve_child_placement(self)
 		}
 	} else {
 		i := int(self.vertical)
@@ -847,7 +850,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 		content_size: [2]f32
 
 		for child in self.layout_children {
-			needs_resolve |= node_solve_sizes_and_wrap_recursive(child, depth + 1)
+			needs_resolve |= node_solve_child_placement_and_wrap_recursive(child, depth + 1)
 
 			content_size[i] += child.size[i]
 			content_size[j] = max(content_size[j], child.size[j])
@@ -871,7 +874,7 @@ node_solve_sizes_and_wrap_recursive :: proc(self: ^Node, depth := 0) -> (needs_r
 //
 // Second pass
 //
-node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
+node_solve_child_placement_recursive :: proc(self: ^Node, depth := 0) {
 	if depth >= MAX_TREE_DEPTH {
 		return
 	}
@@ -881,10 +884,10 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 	}
 
 	// self.overflow = linalg.max(self.content_size - self.size, 0)
-	node_solve_sizes_in_range(self, 0, len(self.layout_children), node_get_span(self), 0)
+	node_solve_child_placement_in_range(self, 0, len(self.layout_children), node_get_span(self), 0)
 
 	for node in self.layout_children {
-		node_solve_sizes_recursive(node, depth + 1)
+		node_solve_child_placement_recursive(node, depth + 1)
 	}
 
 	return
@@ -893,8 +896,6 @@ node_solve_sizes_recursive :: proc(self: ^Node, depth := 0) {
 //
 // Procedures for transforming nodes
 //
-
-
 node_get_span :: proc(self: ^Node) -> f32 {
 	if self.vertical {
 		return self.size.x - self.padding.x - self.padding.z
@@ -1080,13 +1081,6 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		)
 	}
 
-	// TODO: Do this better
-	// when ODIN_DEBUG {
-	// 	if global_ctx.inspector.shown && self.dirty {
-	// 		kn.add_box(self.box, paint = fade(kn.RED, 0.1))
-	// 	}
-	// }
-
 	if is_transformed {
 		kn.pop_matrix()
 	}
@@ -1248,7 +1242,8 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 				hash = hash ~ (u32(char) * FNV1A32_PRIME)
 
-				if char == '\t' {
+				switch char {
+				case '\t':
 					append(
 						glyphs,
 						Glyph {
@@ -1258,7 +1253,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 						},
 					)
 					self.text_size.x += self.font.space_advance * self.font_size * 2
-				} else if char == '\n' {
+				case '\n':
 					append(
 						glyphs,
 						Glyph {
@@ -1269,30 +1264,33 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 						},
 					)
 					self.text_size.x += self.font.space_advance * self.font_size
-				} else if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-					append(
-						glyphs,
-						Glyph {
-							node = self,
-							index = self.text_view.byte_length,
-							glyph = glyph,
-							offset = {self.text_size.x, 0},
-						},
-					)
-					self.text_size.x += glyph.advance * self.font_size
-				} else if char != '\r' {
-					for char in fmt.tprintf("<0x%x>", char) {
-						if glyph, ok := kn.get_font_glyph(self.font, char); ok {
-							append(
-								glyphs,
-								Glyph {
-									node = self,
-									index = self.text_view.byte_length,
-									glyph = glyph,
-									offset = {self.text_size.x, 0},
-								},
-							)
-							self.text_size.x += glyph.advance * self.font_size
+				case '\r':
+				case:
+					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+						append(
+							glyphs,
+							Glyph {
+								node = self,
+								index = self.text_view.byte_length,
+								glyph = glyph,
+								offset = {self.text_size.x, 0},
+							},
+						)
+						self.text_size.x += glyph.advance * self.font_size
+					} else {
+						for char in fmt.tprintf("<0x%x>", char) {
+							if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+								append(
+									glyphs,
+									Glyph {
+										node = self,
+										index = self.text_view.byte_length,
+										glyph = glyph,
+										offset = {self.text_size.x, 0},
+									},
+								)
+								self.text_size.x += glyph.advance * self.font_size
+							}
 						}
 					}
 				}

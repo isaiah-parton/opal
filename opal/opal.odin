@@ -1187,8 +1187,8 @@ ctx_solve_sizes :: proc(self: ^Context) {
 			node_solve_absolute_size(root)
 		}
 
-		if node_solve_sizes_and_wrap_recursive(root) {
-			node_solve_sizes_recursive(root)
+		if node_solve_child_placement_and_wrap_recursive(root) {
+			node_solve_child_placement_recursive(root)
 		}
 
 		when ODIN_DEBUG {
