@@ -253,6 +253,7 @@ Context :: struct {
 	node_click_offset:         Vector2,
 
 	// Current and previous states of mouse buttons
+	mouse_click_position:      [2]f32,
 	mouse_button_down:         Mouse_Buttons,
 	mouse_button_was_down:     Mouse_Buttons,
 
@@ -827,6 +828,7 @@ handle_mouse_down :: proc(button: Mouse_Button) {
 	ctx.mouse_button_down += {button}
 	ctx.last_mouse_down_button = button
 	ctx.last_mouse_down_time = time.now()
+	ctx.mouse_click_position = ctx.mouse_position
 	draw_frames(2)
 }
 

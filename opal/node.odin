@@ -502,6 +502,8 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 		assert(self.layout_parent != nil)
 		self.position = self.layout_parent.size * self.relative_offset + self.exact_offset
 		self.position -= self.size * self.align
+	} else if self.is_root {
+		self.position = self.exact_offset + global_ctx.screen_size * self.relative_offset
 	}
 
 	self.box.lo = offset + self.position

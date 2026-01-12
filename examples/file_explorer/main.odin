@@ -19,6 +19,7 @@ import "core:image/tga"
 import "core:math"
 import "core:math/bits"
 import "core:math/ease"
+import "core:math/linalg"
 import "core:mem"
 import "core:os"
 import "core:os/os2"
@@ -47,10 +48,13 @@ Item :: struct {
 	expanded:        bool,
 }
 
-item_deselect_children :: proc(self: ^Item) {
+item_deselect_children :: proc(self: ^Item, exception: ^Item = nil) {
 	for &child in self.children {
+		if exception != nil && child.fullpath == exception.fullpath {
+			continue
+		}
 		child.selected = false
-		item_deselect_children(&child)
+		item_deselect_children(&child, exception)
 	}
 }
 
@@ -91,7 +95,13 @@ item_load_children :: proc(self: ^Item) -> os.Error {
 	return nil
 }
 
-item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_location) {
+item_display_for_grid :: proc(
+	self: ^Item,
+	app: ^Explorer,
+	loc := #caller_location,
+) -> (
+	node: ^opal.Node,
+) {
 	using opal
 
 	push_id(hash_loc(loc))
@@ -101,7 +111,8 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 		app.selection_count += 1
 	}
 
-	node := begin_node(
+	node =
+	begin_node(
 		&{
 			interactive = true,
 			radius = 8,
@@ -124,7 +135,7 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 	{
 		icon: rune = lucide.FILE
 		if self.is_dir {
-			icon = lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER
+			icon = lucide.FOLDER
 		} else if self.file_info.mode == 1049014 {
 			icon = lucide.FOLDER_SYMLINK
 		}
@@ -196,9 +207,18 @@ item_display_for_grid :: proc(self: ^Item, app: ^Explorer, loc := #caller_locati
 	)
 
 	item_handle_node_input(self, app, node)
+
+	return
 }
 
-item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #caller_location) {
+item_display_for_list :: proc(
+	self: ^Item,
+	app: ^Explorer,
+	depth := 0,
+	loc := #caller_location,
+) -> (
+	node: ^opal.Node,
+) {
 	using opal
 
 	push_id(hash_loc(loc))
@@ -208,9 +228,11 @@ item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #c
 		app.selection_count += 1
 	}
 
-	node := begin_node(
+	node =
+	begin_node(
 		&{
 			interactive = true,
+			sticky = true,
 			radius = 8,
 			padding = {8 + f32(depth) * 20, 4, 8, 4},
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
@@ -301,12 +323,41 @@ item_display_for_list :: proc(self: ^Item, app: ^Explorer, depth := 0, loc := #c
 	)
 
 	item_handle_node_input(self, app, node)
+
+	return
 }
 
 item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 	using opal
 
+	multi_select := key_down(.Left_Control) || key_down(.Right_Control)
+
+	update_selection: bool
+	defer if update_selection do explorer_update_selection(app)
+
+	if node.is_active &&
+	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 10 {
+		if !multi_select && len(app.selected_items) == 1 {
+			for &item, j in app.items {
+				item_deselect_children(&item)
+				item.selected = false
+			}
+			self.selected = true
+			update_selection = true
+		}
+		app.dragging = true
+	}
+
 	if node.is_active && !node.was_active {
+		if multi_select {
+			self.selected = !self.selected
+		} else {
+			self.selected = true
+		}
+		update_selection = true
+	}
+
+	if node.was_active && !node.is_active {
 		if node.click_count == 2 {
 			if self.file_info.is_dir {
 				explorer_change_folder(app, self.file_info.name)
@@ -326,14 +377,14 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 					file     = self.file_info.name,
 				}
 			} else {
-				if key_down(.Left_Control) || key_down(.Right_Control) {
-					self.selected = !self.selected
-				} else {
+				if !multi_select && !app.dragging {
 					for &item, j in app.items {
-						item_deselect_children(&item)
+						if item.fullpath == self.fullpath {
+							continue
+						}
+						item_deselect_children(&item, self)
 						item.selected = false
 					}
-					self.selected = true
 				}
 				if self.file_info.is_dir {
 					self.expanded = !self.expanded
@@ -343,7 +394,7 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 				}
 			}
 		}
-		explorer_update_selection(app)
+		update_selection = true
 	}
 }
 
@@ -384,11 +435,13 @@ Explorer :: struct {
 	cwd:               string,
 	last_cwd:          string,
 	items:             [dynamic]Item,
+	selected_items:    [dynamic]Item,
 	selection_count:   int,
 	primary_selection: Maybe(string),
 	previews:          [dynamic]Preview,
 	context_menu:      Maybe(Context_Menu),
 	display_mode:      Item_Display_Mode,
+	dragging:          bool,
 }
 
 memory_size_suffix :: proc(size: i64) -> string {
@@ -432,16 +485,20 @@ explorer_update_selection :: proc(self: ^Explorer) {
 		preview_uninit(&preview)
 	}
 	clear(&self.previews)
+	clear(&self.selected_items)
 	explorer_populate_previews(self, self.items[:])
 }
 
 explorer_populate_previews :: proc(self: ^Explorer, items: []Item) {
 	for &item in items {
-		if item.selected && !item.is_dir {
-			if preview, err := explorer_make_preview(self, item.fullpath); err == nil {
-				append(&self.previews, preview)
-			} else {
-				fmt.eprintfln("Failed to create preview for %v: %v", item.name, err)
+		if item.selected {
+			append(&self.selected_items, item)
+			if !item.is_dir {
+				if preview, err := explorer_make_preview(self, item.fullpath); err == nil {
+					append(&self.previews, preview)
+				} else {
+					fmt.eprintfln("Failed to create preview for %v: %v", item.name, err)
+				}
 			}
 		}
 		explorer_populate_previews(self, item.children[:])
@@ -734,7 +791,7 @@ main :: proc() {
 							app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
 						)
 					}
-					if do_window_button(lucide.BUG, tw.EMERALD_500) {
+					if do_window_button(lucide.BUG, tw.ORANGE_500) {
 						global_ctx.inspector.shown = !global_ctx.inspector.shown
 					}
 
@@ -758,6 +815,47 @@ main :: proc() {
 					}
 				}
 				end_node()
+
+				if app.dragging {
+					if mouse_released(.Left) {
+						app.dragging = false
+					}
+					begin_node(
+						&{
+							style = {background = tw.NEUTRAL_900},
+							layer = 3,
+							radius = 4,
+							shadow_color = tw.BLACK,
+							shadow_size = 10,
+							exact_offset = global_ctx.mouse_position,
+							is_root = true,
+							sizing = {fit = 1, exact = {300, 0}},
+							vertical = true,
+						},
+					)
+					{
+						for &item, i in app.selected_items {
+							push_id(int(i))
+							item.selected = false
+							node := item_display_for_list(&item, app)
+							node.interactive = false
+							pop_id()
+						}
+						add_node(
+							&{
+								layer = 4,
+								absolute = true,
+								align = {0, 1},
+								sizing = {fit = 1},
+								text = fmt.tprintf("%i items", len(app.selected_items)),
+								font = &theme.font,
+								font_size = 14,
+								foreground = tw.WHITE,
+							},
+						)
+					}
+					end_node()
+				}
 
 				if menu, ok := app.context_menu.?; ok {
 					push_id(menu.file)
@@ -960,7 +1058,7 @@ main :: proc() {
 												max = INFINITY,
 												exact = {1, 0},
 											},
-											layer = 2,
+											layer = 1,
 											group = true,
 										},
 									)
@@ -1019,6 +1117,7 @@ main :: proc() {
 										content_align = {0.5, 0.5},
 										vertical = true,
 										padding = 8,
+										gap = 8,
 										background = tw.NEUTRAL_800,
 										show_scrollbars = true,
 										clip_content = true,
