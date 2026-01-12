@@ -1032,13 +1032,25 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		line_height := self.font.line_height * self.font_size
 
+		when ODIN_DEBUG {
+			if global_ctx.inspector.show_text_widgets {
+				rgba := linalg.vector4_hsl_to_rgb(
+					math.mod(f32(self.id) * 0.00001, 1.0),
+					0.9,
+					0.45,
+					0.25,
+				)
+				kn.add_box(self.box, 0, kn.color_from_rgba(rgba))
+			}
+		}
+
 		if self.enable_selection && self.text_view.active {
 			// TODO: implement custom selection color
 			paint := kn.paint_index_from_option(fade(tw.INDIGO_700, 1))
 
 			selection := [2]int {
-				clamp(self.text_view.selection[0] - self.text_byte_index, 0, len(self.glyphs)),
-				clamp(self.text_view.selection[1] - self.text_byte_index, 0, len(self.glyphs)),
+				clamp(self.text_view.selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
+				clamp(self.text_view.selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
 			}
 
 			ordered_selection := selection

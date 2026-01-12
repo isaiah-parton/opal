@@ -13,14 +13,18 @@ _FOREGROUND :: tw.NEUTRAL_800
 _TEXT :: tw.WHITE
 
 Inspector :: struct {
-	using panel:    Panel,
-	shown:          bool,
-	selected_id:    Id,
-	inspected_id:   Id,
-	inspected_node: Node,
+	using panel:       Panel,
+	shown:             bool,
+	selected_id:       Id,
+	inspected_id:      Id,
+	inspected_node:    Node,
+	show_text_widgets: bool,
 }
 
 inspector_show :: proc(self: ^Inspector) {
+	if key_pressed(.T) {
+		self.show_text_widgets = !self.show_text_widgets
+	}
 	self.min_size = {300, 400}
 	self.size = linalg.max(self.size, self.min_size)
 	base_node := begin_node(
@@ -44,6 +48,7 @@ inspector_show :: proc(self: ^Inspector) {
 		&{
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			padding = 5,
+			gap = 5,
 			style = {background = _FOREGROUND},
 			interactive = true,
 			vertical = true,
@@ -86,6 +91,8 @@ inspector_show :: proc(self: ^Inspector) {
 		add_node(&desc)
 		desc.text = fmt.tprintf("Sizing passes: %i", global_ctx.sizing_passes)
 		add_node(&desc)
+		add_checkbox(&{label = "Text debug", value = &self.show_text_widgets})
+		add_checkbox(&{label = "Pixel snap", value = &global_ctx.snap_to_pixels})
 	}
 	end_node()
 	panel_update(self, base_node, handle_node)
@@ -319,5 +326,50 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		end_node()
 	}
 	pop_id()
+}
+
+@(private = "file")
+Button_Descriptor :: struct {
+	using base: Node_Descriptor,
+	label:      union {
+		string,
+		rune,
+	},
+}
+
+@(private = "file")
+Button_Result :: struct {
+	node:    Maybe(^Node),
+	clicked: bool,
+}
+
+@(private = "file")
+_add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result: Button_Result) {
+	desc.padding = {7, 5, 7, 5}
+	desc.sizing = {
+		fit = 1,
+		max = INFINITY,
+	}
+	desc.text = desc.label.(string) or_else string_from_rune(desc.label.(rune))
+	desc.font_size = 14
+	desc.foreground = tw.NEUTRAL_300
+	desc.interactive = true
+
+	self := add_node(desc, loc = loc).?
+	node_update_transition(self, 0, self.is_hovered, 0.1)
+	node_update_transition(self, 1, self.is_active, 0.1)
+	// self.style.stroke_width = 4 * self.transitions[1]
+	// self.style.background = kn.blend_colors_time(
+	// 	self.style.background.(Color),
+	// 	desc.shade_color,
+	// 	self.transitions[0],
+	// )
+	self.style.transform_origin = 0.5
+	self.style.scale = 1 - 0.05 * self.transitions[1]
+	assert(self != nil)
+	result.node = self
+	result.clicked = self.was_active && !self.is_active && self.is_hovered
+
+	return
 }
 

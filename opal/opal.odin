@@ -329,6 +329,9 @@ Context :: struct {
 	//
 	text_agent:                Text_Agent,
 
+	// default font
+	default_font:              Font,
+
 	//
 	// Styles
 	//
@@ -702,6 +705,15 @@ context_init :: proc(ctx: ^Context) {
 
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
+
+	if font, ok := kn.load_font_from_files(
+		"../fonts/Roboto-Regular.png",
+		"../fonts/Roboto-Regular.json",
+	); ok {
+		ctx.default_font = font
+	} else {
+		fmt.eprintln("Failed to load default font")
+	}
 }
 
 context_deinit :: proc(ctx: ^Context) {

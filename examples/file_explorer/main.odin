@@ -1198,7 +1198,7 @@ main :: proc() {
 									for &preview, i in app.previews {
 										push_id(int(i + 1))
 										defer pop_id()
-										switch variant in preview {
+										switch &variant in preview {
 										case (Text_Preview):
 											do_text(
 												&{sizing = {grow = 1, max = INFINITY, fit = 1}},
@@ -1207,6 +1207,16 @@ main :: proc() {
 												&theme.monospace_font,
 												tw.WHITE,
 											)
+										// components.add_field(
+										// 	&{
+										// 		sizing = {grow = 1, max = INFINITY},
+										// 		multiline = true,
+										// 		value_data = &variant.text,
+										// 		value_type_info = type_info_of(
+										// 			type_of(variant.text),
+										// 		),
+										// 	},
+										// )
 										case (Image_Preview):
 											add_node(
 												&{
