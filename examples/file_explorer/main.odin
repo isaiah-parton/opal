@@ -340,19 +340,25 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 					if self.expanded {
 						item_load_children(self)
 					}
-				} else {
-					if err := explorer_set_primary_selection(app, self.fullpath); err != nil {
-						fmt.eprintfln("Failed to set primary selection: %v", err)
-					}
 				}
 			}
 		}
+		explorer_update_selection(app)
 	}
 }
 
 Preview :: union {
 	Text_Preview,
 	Image_Preview,
+}
+
+preview_uninit :: proc(self: ^Preview) {
+	switch variant in self {
+	case Text_Preview:
+		delete(variant.data)
+	case Image_Preview:
+	}
+	self^ = {}
 }
 
 Text_Preview :: struct {
@@ -380,7 +386,7 @@ Explorer :: struct {
 	items:             [dynamic]Item,
 	selection_count:   int,
 	primary_selection: Maybe(string),
-	preview:           Preview,
+	previews:          [dynamic]Preview,
 	context_menu:      Maybe(Context_Menu),
 	display_mode:      Item_Display_Mode,
 }
@@ -421,6 +427,27 @@ explorer_change_folder :: proc(self: ^Explorer, folder: string) {
 	}
 }
 
+explorer_update_selection :: proc(self: ^Explorer) {
+	for &preview in self.previews {
+		preview_uninit(&preview)
+	}
+	clear(&self.previews)
+	explorer_populate_previews(self, self.items[:])
+}
+
+explorer_populate_previews :: proc(self: ^Explorer, items: []Item) {
+	for &item in items {
+		if item.selected && !item.is_dir {
+			if preview, err := explorer_make_preview(self, item.fullpath); err == nil {
+				append(&self.previews, preview)
+			} else {
+				fmt.eprintfln("Failed to create preview for %v: %v", item.name, err)
+			}
+		}
+		explorer_populate_previews(self, item.children[:])
+	}
+}
+
 explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 	using opal
 
@@ -435,6 +462,8 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 
 		push_id(i)
 		defer pop_id()
+
+		// The crumb node
 		node := add_node(
 			&{
 				text = s,
@@ -447,14 +476,20 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 				sizing = {fit = 1},
 			},
 		).?
+
+		// Fade animation
 		node_update_transition(node, 0, node.is_hovered, 0.1)
 		node.background = fade(tw.NEUTRAL_700, 0.4 * node.transitions[0])
+
+		// Handle clicks on each crumb
 		if node.is_active && !node.was_active {
-			explorer_change_folder(self, self.cwd[:i + n])
+			crumb_path := self.cwd[:max(i + n, 3)]
+			explorer_change_folder(self, crumb_path)
 		}
 
 		i += n + 1
 
+		// Draw arrow if there's another crumb after
 		if i < len(self.cwd) {
 			add_node(
 				&{
@@ -471,11 +506,12 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 	}
 }
 
-explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: os.Error) {
+explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview, err: os.Error) {
 	self.primary_selection = name
 
 	if os.is_dir(name) {
-		return os.General_Error.Invalid_File
+		err = os.General_Error.Invalid_File
+		return
 	}
 
 	file := os.open(name, os.O_RDONLY) or_return
@@ -516,7 +552,7 @@ explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: o
 				4,
 			)
 
-			self.preview = Image_Preview {
+			result = Image_Preview {
 				source = kn.copy_image_to_atlas(raw_data(new_data), new_width, new_height),
 			}
 		} else {
@@ -563,7 +599,7 @@ explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: o
 					image_pixels[j + 2] = 255
 					image_pixels[j + 3] = glyph_pixels[i]
 				}
-				self.preview = Image_Preview {
+				result = Image_Preview {
 					source = kn.copy_image_to_atlas(raw_data(image_pixels), int(w), int(h)),
 				}
 			}
@@ -579,10 +615,10 @@ explorer_set_primary_selection :: proc(self: ^Explorer, name: string) -> (err: o
 		n := os.read(file, text_preview.data) or_return
 
 		text_preview.text = string(text_preview.data[:n])
-		self.preview = text_preview
+		result = text_preview
 	}
 
-	return nil
+	return
 }
 
 explorer_refresh :: proc(self: ^Explorer) -> os.Error {
@@ -697,6 +733,9 @@ main :: proc() {
 							app,
 							app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
 						)
+					}
+					if do_window_button(lucide.BUG, tw.EMERALD_500) {
+						global_ctx.inspector.shown = !global_ctx.inspector.shown
 					}
 
 					sdl3app.app_use_node_for_window_grabbing(
@@ -973,6 +1012,7 @@ main :: proc() {
 									&{
 										sizing = {
 											grow = {0, 1},
+											fit = {0, 1},
 											exact = {app.right_panel_width, 0},
 											max = {app.right_panel_width, INFINITY},
 										},
@@ -987,39 +1027,44 @@ main :: proc() {
 									},
 								)
 								{
-									switch preview in app.preview {
-									case (Text_Preview):
-										do_text(
-											&{sizing = {grow = 1, max = INFINITY, fit = 1}},
-											preview.text,
-											14,
-											&theme.monospace_font,
-											tw.WHITE,
-										)
-									case (Image_Preview):
-										add_node(
-											&{
-												sizing = {
-													grow = 1,
-													max = preview.source.hi - preview.source.lo,
-													aspect_ratio = box_width(preview.source) /
-													box_height(preview.source),
-												},
-												data = app,
-												on_draw = proc(node: ^Node) {
-													app := (^Explorer)(node.data)
-													kn.add_box(
-														node.box,
-														4,
-														kn.make_atlas_sample(
-															app.preview.(Image_Preview).source,
+									for &preview, i in app.previews {
+										push_id(int(i + 1))
+										defer pop_id()
+										switch variant in preview {
+										case (Text_Preview):
+											do_text(
+												&{sizing = {grow = 1, max = INFINITY, fit = 1}},
+												variant.text,
+												14,
+												&theme.monospace_font,
+												tw.WHITE,
+											)
+										case (Image_Preview):
+											add_node(
+												&{
+													sizing = {
+														grow = 1,
+														max = variant.source.hi -
+														variant.source.lo,
+														aspect_ratio = box_width(variant.source) /
+														box_height(variant.source),
+													},
+													data = &preview,
+													on_draw = proc(node: ^Node) {
+														app := (^Explorer)(node.data)
+														kn.add_box(
 															node.box,
-															kn.WHITE,
-														),
-													)
+															4,
+															kn.make_atlas_sample(
+																(^Image_Preview)(node.data)^.source,
+																node.box,
+																kn.WHITE,
+															),
+														)
+													},
 												},
-											},
-										)
+											)
+										}
 									}
 								}
 								end_node()

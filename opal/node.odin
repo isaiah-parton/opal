@@ -808,6 +808,19 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 				// Grow the node
 				node.size[i] += size_to_add
 
+				// Check for aspect ratio to enforce
+				// We need to enforce aspect ratio anywhere growth or fitting happens
+				// TODO: Maybe move this functionality to a node_resize proc?
+				if node.sizing.aspect_ratio != 0 {
+					target_aspect := node.sizing.aspect_ratio
+					// Invert ratios if layout is horizontal
+					if i == 0 {
+						target_aspect = 1 / target_aspect
+					}
+					// Clamp max growable size based on aspect ratio
+					node.size[1 - i] = node.size[i] * target_aspect
+				}
+
 				// Add content size (this is important)
 				self.content_size[i] += size_to_add
 
