@@ -336,7 +336,8 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 	defer if update_selection do explorer_update_selection(app)
 
 	if node.is_active &&
-	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 10 {
+	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 10 &&
+	   global_ctx.last_mouse_down_button == .Left {
 		if !multi_select && len(app.selected_items) == 1 {
 			for &item, j in app.items {
 				item_deselect_children(&item)
@@ -349,6 +350,12 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 	}
 
 	if node.is_active && !node.was_active {
+		if global_ctx.last_mouse_down_button == .Right {
+			app.context_menu = Context_Menu {
+				position = global_ctx.mouse_position,
+				file     = self.file_info.name,
+			}
+		}
 		if multi_select {
 			self.selected = !self.selected
 		} else {
@@ -368,29 +375,22 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 					explorer_change_folder(app, filepath.dir(fi[0].fullpath))
 				}
 			} else {
-				libc.system(fmt.ctprintf(`start "" "%s"`, self.file_info.name))
+				libc.system(fmt.ctprintf(`start "" "%s"`, self.fullpath))
 			}
 		} else {
-			if global_ctx.last_mouse_down_button == .Right {
-				app.context_menu = Context_Menu {
-					position = global_ctx.mouse_position,
-					file     = self.file_info.name,
-				}
-			} else {
-				if !multi_select && !app.dragging {
-					for &item, j in app.items {
-						if item.fullpath == self.fullpath {
-							continue
-						}
-						item_deselect_children(&item, self)
-						item.selected = false
+			if !multi_select && !app.dragging {
+				for &item, j in app.items {
+					if item.fullpath == self.fullpath {
+						continue
 					}
+					item_deselect_children(&item, self)
+					item.selected = false
 				}
-				if self.file_info.is_dir {
-					self.expanded = !self.expanded
-					if self.expanded {
-						item_load_children(self)
-					}
+			}
+			if self.file_info.is_dir {
+				self.expanded = !self.expanded
+				if self.expanded {
+					item_load_children(self)
 				}
 			}
 		}
@@ -880,9 +880,12 @@ main :: proc() {
 					end_node()
 				}
 
+				// Show the context menu (if you wanna show the context menu)
 				if menu, ok := app.context_menu.?; ok {
 					push_id(menu.file)
 					defer pop_id()
+
+					// Container node
 					menu_root := begin_node(
 						&Node_Descriptor {
 							layer = 9,
@@ -900,17 +903,21 @@ main :: proc() {
 							vertical = true,
 						},
 					).?
+
+					// Handle clicking out
 					if mouse_pressed(.Left) &&
 					   !menu_root.is_focused &&
 					   !menu_root.has_focused_child {
 						app.context_menu = nil
 					}
+
 					node_update_transition(menu_root, 0, true, 0.2)
 					menu_root.scale.y = 0.5 + ease.cubic_out(menu_root.transitions[0]) * 0.5
+
 					{
 						add_node(
 							&{
-								text = menu.file if app.selection_count == 1 else fmt.tprintf("%i files", app.selection_count),
+								text = menu.file if len(app.selected_items) == 1 else fmt.tprintf("%i files", len(app.selected_items)),
 								foreground = tw.WHITE,
 								font = &theme.font,
 								font_size = 16,
@@ -933,6 +940,7 @@ main :: proc() {
 							},
 						)
 						{
+							// Show context options
 							components.do_menu_item("New Folder", lucide.FOLDER_PLUS)
 							components.do_menu_item("New File", lucide.FILE_PLUS)
 							components.do_menu_item("Copy", lucide.COPY)
@@ -1001,6 +1009,7 @@ main :: proc() {
 									).?
 									{
 										if path_input, ok := &app.path_input.?; ok {
+											// Show the path input
 											field_result := components.add_field(
 												&{
 													sizing = {grow = 1, max = INFINITY},
@@ -1010,24 +1019,32 @@ main :: proc() {
 													),
 												},
 											)
+
+											// Keep it focused
 											focus_node(field_result.node.?.id)
 
+											// Handle clicking out
 											if !field_result.node.?.is_focused &&
 											   field_result.node.?.was_focused {
 												explorer_submit_path_input(app)
 											}
 
+											// Handle enter pressage
 											if field_result.was_confirmed {
 												explorer_submit_path_input(app)
 											}
 										} else {
+											// Activate the input if you click around the breadcrumbs
 											if node.is_focused && !node.was_focused {
 												explorer_activate_path_input(app)
 											}
+
+											// Show breadcrumbs
 											explorer_display_breadcrumbs(app)
 										}
 									}
 									end_node()
+									// Some little selector buttons for changing modes
 									begin_node(
 										&{
 											sizing = {fit = 1},
