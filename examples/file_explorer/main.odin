@@ -426,6 +426,11 @@ Context_Menu :: struct {
 	file:     string,
 }
 
+Path_Input :: struct {
+	path:             string,
+	last_change_time: time.Time,
+}
+
 Explorer :: struct {
 	using app:         sdl3app.App,
 	toggle_switch:     bool,
@@ -434,6 +439,7 @@ Explorer :: struct {
 	text:              string,
 	cwd:               string,
 	last_cwd:          string,
+	path_input:        Maybe(Path_Input),
 	items:             [dynamic]Item,
 	selected_items:    [dynamic]Item,
 	selection_count:   int,
@@ -487,6 +493,23 @@ explorer_update_selection :: proc(self: ^Explorer) {
 	clear(&self.previews)
 	clear(&self.selected_items)
 	explorer_populate_previews(self, self.items[:])
+}
+
+explorer_activate_path_input :: proc(self: ^Explorer) {
+	if self.path_input != nil {
+		return
+	}
+	self.path_input = Path_Input {
+		path = strings.clone(self.cwd),
+	}
+}
+
+explorer_submit_path_input :: proc(self: ^Explorer) {
+	if path_input, ok := self.path_input.?; ok {
+		explorer_change_folder(self, path_input.path)
+		delete(path_input.path)
+		self.path_input = nil
+	}
 }
 
 explorer_populate_previews :: proc(self: ^Explorer, items: []Item) {
@@ -965,16 +988,45 @@ main :: proc() {
 									&{
 										sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
 										content_align = {0, 0.5},
+										gap = 4,
 									},
 								)
 								{
-									begin_node(
+									node := begin_node(
 										&{
 											sizing = {grow = 1, max = INFINITY},
 											clip_content = true,
+											interactive = true,
 										},
-									)
-									explorer_display_breadcrumbs(app)
+									).?
+									{
+										if path_input, ok := &app.path_input.?; ok {
+											field_result := components.add_field(
+												&{
+													sizing = {grow = 1, max = INFINITY},
+													value_data = &path_input.path,
+													value_type_info = type_info_of(
+														type_of(path_input.path),
+													),
+												},
+											)
+											focus_node(field_result.node.?.id)
+
+											if !field_result.node.?.is_focused &&
+											   field_result.node.?.was_focused {
+												explorer_submit_path_input(app)
+											}
+
+											if field_result.was_confirmed {
+												explorer_submit_path_input(app)
+											}
+										} else {
+											if node.is_focused && !node.was_focused {
+												explorer_activate_path_input(app)
+											}
+											explorer_display_breadcrumbs(app)
+										}
+									}
 									end_node()
 									begin_node(
 										&{

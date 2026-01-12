@@ -21,6 +21,7 @@ Field_Descriptor :: struct {
 }
 
 Field_Response :: struct {
+	node:          Maybe(^opal.Node),
 	was_changed:   bool,
 	was_confirmed: bool,
 }
@@ -43,12 +44,14 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	desc.enable_selection = true
 	desc.wrapped = true
 	desc.stroke_type = .Outer
+	desc.content_align.y = 0.5
 	if desc.format == "" {
 		desc.format = "%v"
 	}
 
 	push_id(hash(loc))
 	cont_node := begin_node(desc).?
+	res.node = cont_node
 
 	edit := cont_node.is_focused || cont_node.has_focused_child
 
