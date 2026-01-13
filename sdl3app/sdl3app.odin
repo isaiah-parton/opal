@@ -242,9 +242,9 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 
 	// TODO: Add a setter proc to opal
 	if app.vsync {
-		ctx.frame_interval = 0
+		ctx.performance_info.frame_interval = 0
 	} else {
-		ctx.frame_interval = max(
+		ctx.performance_info.frame_interval = max(
 			time.Duration(f32(time.Second) / display_mode.refresh_rate),
 			app.min_frame_interval,
 		)

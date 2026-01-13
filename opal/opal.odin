@@ -13,6 +13,7 @@ package opal
 //
 
 import kn "../katana"
+import "../lucide"
 import tw "../tailwind_colors"
 import "../tedit"
 import "base:intrinsics"
@@ -212,159 +213,148 @@ Context_Descriptor :: struct {
 	callback_data:      rawptr,
 }
 
+Window_Interface :: struct {
+	callback_data:     rawptr,
+	maximize_callback: proc(_: rawptr),
+	iconify_callback:  proc(_: rawptr),
+	close_callback:    proc(_: rawptr),
+	grab_node:         Maybe(^Node),
+}
+
 Context :: struct {
-	using descriptor:          Context_Descriptor,
+	using descriptor:       Context_Descriptor,
 
 	///
 	/// Configuration
 	///
 
 	// Prevents sub-pixel positioning to make edges appear perfectly crisp, motion however will not be as smooth
-	snap_to_pixels:            bool,
+	snap_to_pixels:         bool,
 
 	//
-	window_is_focused:         bool,
+	window_is_focused:      bool,
 
-	// Additional frame delay
-	frame_interval:            time.Duration,
+	// window procedures
+	window_interface:       Window_Interface,
 
-	// Time of last drawn frame
-	last_draw_time:            time.Time,
-
-	// Time of last average
-	last_average_time:         time.Time,
-	frames_since_last_average: int,
+	// Performance tracking
+	performance_info:       Performance_Info,
 
 	// Window size lol
-	screen_size:               Vector2,
+	screen_size:            Vector2,
 
 	// Current and previous state of mouse position
-	mouse_position:            Vector2,
-	last_mouse_position:       Vector2,
+	mouse_position:         Vector2,
+	last_mouse_position:    Vector2,
 
 	// Mouse scroll input
-	mouse_scroll:              Vector2,
+	mouse_scroll:           Vector2,
 
 	// Time of last mouse down event
-	last_mouse_down_time:      time.Time,
-	last_mouse_down_button:    Mouse_Button,
+	last_mouse_down_time:   time.Time,
+	last_mouse_down_button: Mouse_Button,
 
 	// The mouse offset from the clicked node
-	node_click_offset:         Vector2,
+	node_click_offset:      Vector2,
 
 	// Current and previous states of mouse buttons
-	mouse_click_position:      [2]f32,
-	mouse_button_down:         Mouse_Buttons,
-	mouse_button_was_down:     Mouse_Buttons,
+	mouse_click_position:   [2]f32,
+	mouse_button_down:      Mouse_Buttons,
+	mouse_button_was_down:  Mouse_Buttons,
 
 	// Current and previous state of keyboard
-	key_down:                  [Keyboard_Key]bool,
-	key_was_down:              [Keyboard_Key]bool,
+	key_down:               [Keyboard_Key]bool,
+	key_was_down:           [Keyboard_Key]bool,
 
 	// If a widget is hovered which would prevent native window interaction
-	widget_hovered:            bool,
+	widget_hovered:         bool,
 
 	// Which node will receive scroll input
-	scrollable_node:           ^Node,
+	scrollable_node:        ^Node,
 
 	// Transient pointers to interacted nodes
-	hovered_node:              ^Node,
+	hovered_node:           ^Node,
 
 	// Ids of interacted nodes
-	hovered_id:                Id,
-	focused_id:                Id,
+	hovered_id:             Id,
+	focused_id:             Id,
 
 	//
-	node_activation:           Maybe(Node_Activation),
+	node_activation:        Maybe(Node_Activation),
 
 	// Private cursor state
-	cursor:                    Cursor,
-	last_cursor:               Cursor,
+	cursor:                 Cursor,
+	last_cursor:            Cursor,
 
 	// Global visual style
-	colors:                    [Context_Color]Color,
+	colors:                 [Context_Color]Color,
 
 	// Frame count
-	frame:                     int,
+	frame:                  int,
 
 	// Native text input
-	text_input:                [dynamic]rune,
+	text_input:             [dynamic]rune,
 
 	// User images
-	images:                    [dynamic]Maybe(User_Image),
+	images:                 [dynamic]Maybe(User_Image),
 
 	// Call index
-	call_index:                int,
+	call_index:             int,
 
 	// Nodes by id
-	node_by_id:                map[Id]^Node,
+	node_by_id:             map[Id]^Node,
 
 	// Node memory is stored contiguously for memory efficiency.
 	// TODO: Implement a dynamic array
-	nodes:                     [16_384]Maybe(Node),
+	nodes:                  [16_384]Maybe(Node),
 
 	// All nodes wihout a parent are stored here for layout solving.
-	roots:                     [dynamic]^Node,
+	roots:                  [dynamic]^Node,
 
 	// The layout tree
-	layout_roots:              [dynamic]^Node,
+	layout_roots:           [dynamic]^Node,
 
 	// The stack of nodes being declared. May contain multiple roots, as its only a way of keeping track of the nodes currently being invoked.
-	node_stack:                [dynamic]^Node,
+	node_stack:             [dynamic]^Node,
 
 	// Nodes in sequencial order
-	node_buffer:               [dynamic]^Node,
+	node_buffer:            [dynamic]^Node,
 
 	// The hash stack
-	id_stack:                  [dynamic]Id,
+	id_stack:               [dynamic]Id,
 
 	//
-	view_stack:                [dynamic]^View,
-	current_view:              ^View,
-	view_map:                  map[Id]View,
+	view_stack:             [dynamic]^View,
+	current_view:           ^View,
+	view_map:               map[Id]View,
 
 	// Non-interactive glyphs
-	glyphs:                    [dynamic]Glyph,
+	glyphs:                 [dynamic]Glyph,
 
 	//
-	text_agent:                Text_Agent,
+	text_agent:             Text_Agent,
 
 	// default font
-	default_font:              Font,
+	default_font:           Font,
+	icon_font:              Font,
 
 	//
 	// Styles
 	//
-	style_stack:               [dynamic]^Node_Style,
-	style_array:               [dynamic]Node_Style,
+	style_stack:            [dynamic]^Node_Style,
+	style_array:            [dynamic]Node_Style,
 
 	// The top-most element of the stack
-	current_node:              ^Node,
-
-	// Profiling state
-	frame_start_time:          time.Time,
-	frame_duration:            time.Duration,
-
-	// Debug only.
-	frame_duration_sum:        time.Duration,
-	frame_duration_avg:        time.Duration,
-	interval_start_time:       time.Time,
-	interval_duration:         time.Duration,
-	compute_start_time:        time.Time,
-	compute_duration:          time.Duration,
-	compute_duration_sum:      time.Duration,
-	compute_duration_avg:      time.Duration,
-	drawn_nodes:               int,
-	sizing_passes:             int,
+	current_node:           ^Node,
 
 	// How many frames are queued for drawing
-	queued_frames:             int,
+	queued_frames:          int,
 
 	// If the graphics backend should redraw the UI
-	active:                    bool,
+	active:                 bool,
 
 	// Node inspector
-	inspector:                 Inspector,
+	inspector:              Inspector,
 }
 
 // @(private)
@@ -744,7 +734,7 @@ set_clipboard :: proc(text: string) {
 
 rate_per_second :: proc(rate: f32) -> f32 {
 	ctx := global_ctx
-	return f32(time.duration_seconds(ctx.interval_duration)) * rate
+	return f32(time.duration_seconds(ctx.performance_info.interval_duration)) * rate
 }
 
 node_update_transition :: proc(self: ^Node, index: int, condition: bool, duration_seconds: f32) {
@@ -850,6 +840,27 @@ handle_mouse_up :: proc(button: Mouse_Button) {
 	draw_frames(2)
 }
 
+handle_window_iconify :: proc() {
+	ctx := global_ctx
+	if ctx.window_interface.iconify_callback != nil {
+		ctx.window_interface.iconify_callback(ctx.window_interface.callback_data)
+	}
+}
+
+handle_window_maximize :: proc() {
+	ctx := global_ctx
+	if ctx.window_interface.maximize_callback != nil {
+		ctx.window_interface.maximize_callback(ctx.window_interface.callback_data)
+	}
+}
+
+handle_window_close :: proc() {
+	ctx := global_ctx
+	if ctx.window_interface.close_callback != nil {
+		ctx.window_interface.close_callback(ctx.window_interface.callback_data)
+	}
+}
+
 handle_window_resize :: proc(width, height: i32) {
 	kn.set_size(width, height)
 	global_ctx.screen_size = {f32(width), f32(height)}
@@ -857,7 +868,7 @@ handle_window_resize :: proc(width, height: i32) {
 }
 
 handle_window_move :: proc() {
-	global_ctx.last_draw_time = time.now()
+	global_ctx.performance_info.last_draw_time = time.now()
 }
 
 //
@@ -913,30 +924,32 @@ begin :: proc() {
 	// Update redraw state
 	ctx.active = ctx.queued_frames > 0
 	if ctx.active {
-		ctx.last_draw_time = time.now()
+		ctx.performance_info.last_draw_time = time.now()
 	}
 	ctx.queued_frames = max(0, ctx.queued_frames - 1)
 
 	// Initial frame interval
-	frame_interval := ctx.frame_interval
+	frame_interval := ctx.performance_info.frame_interval
 
 	// Cap framerate to 30 after a short period of inactivity
-	if time.since(ctx.last_draw_time) > time.Millisecond * 200 {
+	if time.since(ctx.performance_info.last_draw_time) > time.Millisecond * 200 {
 		frame_interval = time.Second / 20
 	}
 
 	// Update durations
-	if ctx.interval_start_time != {} {
-		ctx.interval_duration = time.since(ctx.interval_start_time)
+	if ctx.performance_info.interval_start_time != {} {
+		ctx.performance_info.interval_duration = time.since(
+			ctx.performance_info.interval_start_time,
+		)
 	}
-	ctx.interval_start_time = time.now()
+	ctx.performance_info.interval_start_time = time.now()
 
 	// Sleep to limit framerate
-	if ctx.interval_duration < frame_interval {
-		time.sleep(frame_interval - ctx.interval_duration)
+	if ctx.performance_info.interval_duration < frame_interval {
+		time.sleep(frame_interval - ctx.performance_info.interval_duration)
 	}
 
-	ctx.frame_start_time = time.now()
+	ctx.performance_info.frame_start_time = time.now()
 
 	//
 	// Reset ID stack
@@ -1050,9 +1063,6 @@ begin :: proc() {
 		} else {
 			node.dead = true
 			node.dirty = false
-			if id == ctx.inspector.selected_id {
-				ctx.inspector.inspected_node = node^
-			}
 		}
 	}
 
@@ -1071,36 +1081,77 @@ begin :: proc() {
 	clear(&ctx.layout_roots)
 	clear(&ctx.style_array)
 	clear(&ctx.glyphs)
+
+	// Begin root node
+	begin_node(
+		&{
+			sizing = {exact = ctx.screen_size},
+			vertical = true,
+			stroke = tw.NEUTRAL_700,
+			stroke_width = 1,
+		},
+	)
+
+	begin_node(
+		&{
+			sizing = {fit = {0, 1}, exact = {ctx.screen_size.x, 20}},
+			content_align = {0, 0.5},
+			style = {background = tw.NEUTRAL_800},
+		},
+	)
+	{
+		global_ctx.window_interface.grab_node =
+		add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?
+
+		if add_window_button(lucide.BUG, tw.ORANGE_500) {
+			global_ctx.inspector.shown = !global_ctx.inspector.shown
+		}
+		if add_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
+			handle_window_maximize()
+		}
+		if add_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
+			handle_window_iconify()
+		}
+		if add_window_button(lucide.X, tw.ROSE_500) {
+			handle_window_close()
+		}
+	}
+	end_node()
+
+	begin_node(&{sizing = {grow = 1, max = INFINITY}})
+
+	// Begin container node for user UI
+	begin_node(&{sizing = {grow = 1, max = INFINITY}})
 }
 
 end :: proc() {
 	ctx := global_ctx
 
-	ctx.frame_duration = time.since(ctx.frame_start_time)
+	// End container node
+	end_node()
 
+	// Built-in UI
+	if ctx.inspector.shown {
+		inspector_show(&ctx.inspector)
+	}
+
+	// End window node
+	end_node()
+
+	// End root node
+	end_node()
+
+	// Update performance info
+	ctx.performance_info.frame_duration = time.since(ctx.performance_info.frame_start_time)
+
+	// Copy selected text to OS clipboard
 	if key_down(.Left_Control) && key_pressed(.C) {
 		set_clipboard(text_agent_get_selection_string(&ctx.text_agent))
 	}
 
 	// Compute performance averages
 	when ODIN_DEBUG {
-		if time.since(ctx.last_average_time) >= time.Second {
-			ctx.last_average_time = time.now()
-			ctx.frames_since_last_average = max(ctx.frames_since_last_average, 1)
-			ctx.compute_duration_avg = time.Duration(
-				f64(ctx.compute_duration_sum) / f64(ctx.frames_since_last_average),
-			)
-			ctx.frame_duration_avg = time.Duration(
-				f64(ctx.frame_duration_sum) / f64(ctx.frames_since_last_average),
-			)
-			ctx.frames_since_last_average = 0
-			ctx.compute_duration_sum = 0
-			ctx.frame_duration_sum = 0
-			draw_frames(int(ctx.inspector.shown))
-		}
-		ctx.frames_since_last_average += 1
-		ctx.compute_duration_sum += ctx.compute_duration
-		ctx.frame_duration_sum += ctx.frame_duration
+		performance_info_solve(&ctx.performance_info)
 	}
 
 	clear(&ctx.text_input)
@@ -1109,16 +1160,16 @@ end :: proc() {
 	if key_down(.Left_Control) && key_down(.Left_Shift) && key_pressed(.I) {
 		ctx.inspector.shown = !ctx.inspector.shown
 	}
-	if ctx.inspector.shown {
-		inspector_show(&ctx.inspector)
-	}
 
+	// Update performance info
 	when ODIN_DEBUG {
-		ctx.drawn_nodes = 0
+		ctx.performance_info.drawn_nodes = 0
 	}
 
-	ctx.compute_start_time = time.now()
+	ctx.performance_info.compute_start_time = time.now()
+
 	ctx_solve_sizes(ctx)
+
 	if ctx.active {
 		ctx_solve_positions_and_draw(ctx)
 	}
@@ -1146,27 +1197,9 @@ end :: proc() {
 		}
 	}
 
-	//
-	// Draw debug widgets
-	//
-	if self, ok := ctx.node_by_id[ctx.inspector.inspected_id]; ok {
-		box := self.box
-		padding_paint := kn.paint_index_from_option(Color{0, 120, 255, 100})
-		if self.padding.x > 0 {
-			kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
-		}
-		if self.padding.y > 0 {
-			kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
-		}
-		if self.padding.z > 0 {
-			kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
-		}
-		if self.padding.w > 0 {
-			kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
-		}
-		kn.add_box(box, paint = Color{0, 255, 0, 80})
-		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
-	}
+	// Update inspector
+	inspector_update_mouse_selection(&ctx.inspector)
+	inspector_reset(&ctx.inspector)
 
 	// Set text cursor when hovering selectable text
 	if ctx.text_agent.hovered_view != nil {
@@ -1187,12 +1220,12 @@ end :: proc() {
 	ctx.key_was_down = ctx.key_down
 	ctx.mouse_scroll = 0
 
-	ctx.compute_duration = time.since(ctx.compute_start_time)
+	ctx.performance_info.compute_duration = time.since(ctx.performance_info.compute_start_time)
 }
 
 ctx_solve_sizes :: proc(self: ^Context) {
 	when ODIN_DEBUG {
-		self.sizing_passes = 0
+		self.performance_info.sizing_passes = 0
 	}
 
 	for root in self.layout_roots {
@@ -1206,7 +1239,7 @@ ctx_solve_sizes :: proc(self: ^Context) {
 		}
 
 		when ODIN_DEBUG {
-			self.sizing_passes += 1
+			self.performance_info.sizing_passes += 1
 		}
 	}
 }

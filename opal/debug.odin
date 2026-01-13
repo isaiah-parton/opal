@@ -1,46 +1,109 @@
 package opal
 
 import kn "../katana"
+import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
+import "core:slice"
+import "core:time"
 
 _BACKGROUND :: tw.NEUTRAL_900
 _FOREGROUND :: tw.NEUTRAL_800
 _TEXT :: tw.WHITE
 
+Performance_Info :: struct {
+	// Additional frame delay
+	frame_interval:            time.Duration,
+
+	// Time of last drawn frame
+	last_draw_time:            time.Time,
+
+	// Time of last average
+	last_average_time:         time.Time,
+	frames_since_last_average: int,
+
+	// Profiling state
+	frame_start_time:          time.Time,
+	frame_duration:            time.Duration,
+
+	// Debug only.
+	frame_duration_sum:        time.Duration,
+	frame_duration_avg:        time.Duration,
+	interval_start_time:       time.Time,
+	interval_duration:         time.Duration,
+	compute_start_time:        time.Time,
+	compute_duration:          time.Duration,
+	compute_duration_sum:      time.Duration,
+	compute_duration_avg:      time.Duration,
+	drawn_nodes:               int,
+	sizing_passes:             int,
+}
+
+performance_info_solve :: proc(self: ^Performance_Info) {
+	if time.since(self.last_average_time) >= time.Second {
+		self.last_average_time = time.now()
+		self.frames_since_last_average = max(self.frames_since_last_average, 1)
+		self.compute_duration_avg = time.Duration(
+			f64(self.compute_duration_sum) / f64(self.frames_since_last_average),
+		)
+		self.frame_duration_avg = time.Duration(
+			f64(self.frame_duration_sum) / f64(self.frames_since_last_average),
+		)
+		self.frames_since_last_average = 0
+		self.compute_duration_sum = 0
+		self.frame_duration_sum = 0
+	}
+	self.frames_since_last_average += 1
+	self.compute_duration_sum += self.compute_duration
+	self.frame_duration_sum += self.frame_duration
+}
+
 Inspector :: struct {
-	using panel:       Panel,
-	shown:             bool,
-	selected_id:       Id,
-	inspected_id:      Id,
-	inspected_node:    Node,
-	show_text_widgets: bool,
+	using panel:          Panel,
+
+	// Currently shown
+	shown:                bool,
+
+	// Currently picking a node
+	is_selecting:         bool,
+
+	//
+	selection_start_time: time.Time,
+
+	// Selected node for viewing properties
+	selected_id:          Id,
+
+	// Selected node for inspection
+	inspected_id:         Id,
+	inspected_node:       ^Node,
+
+	// Show colored highlights around text nodes to differentiate them
+	show_text_widgets:    bool,
+
+	// Nodes under mouse
+	nodes_under_mouse:    [dynamic]^Node,
+}
+
+inspector_activate_mouse_selection :: proc(self: ^Inspector) {
+	self.selection_start_time = time.now()
+	self.is_selecting = true
 }
 
 inspector_show :: proc(self: ^Inspector) {
-	if key_pressed(.T) {
-		self.show_text_widgets = !self.show_text_widgets
-	}
 	self.min_size = {300, 400}
 	self.size = linalg.max(self.size, self.min_size)
 	base_node := begin_node(
 		&{
-			exact_offset = self.position,
-			sizing = {exact = self.size},
-			bounds = get_screen_box(),
+			sizing = {fit = {1, 0}, grow = {0, 1}, max = INFINITY, exact = {300, 0}},
 			vertical = true,
 			padding = 1,
-			shadow_size = 10,
-			shadow_color = tw.BLACK,
-			stroke_width = 2,
-			stroke = tw.CYAN_800,
+			stroke_width = 1,
+			stroke = tw.NEUTRAL_700,
 			background = _BACKGROUND,
-			layer = 1,
-			radius = 7,
 		},
 	).?
 	total_nodes := len(global_ctx.node_by_id)
@@ -54,15 +117,15 @@ inspector_show :: proc(self: ^Inspector) {
 			vertical = true,
 			data = global_ctx,
 			on_draw = proc(self: ^Node) {
-				center := self.box.hi - box_height(self.box) / 2
-				radius := box_height(self.box) * 0.35
-				ctx := (^Context)(self.data)
+				// center := self.box.hi - box_height(self.box) / 2
+				// radius := box_height(self.box) * 0.35
+				// ctx := (^Context)(self.data)
 
-				kn.add_circle(center, radius, tw.AMBER_500)
-				angle: f32 = 0
-				radians := (f32(ctx.compute_duration) / f32(ctx.frame_duration)) * math.PI * 2
-				kn.add_pie(center, angle, angle + radians, radius, tw.FUCHSIA_500)
-				angle += radians
+				// kn.add_circle(center, radius, tw.AMBER_500)
+				// angle: f32 = 0
+				// radians := (f32(ctx.compute_duration) / f32(ctx.frame_duration)) * math.PI * 2
+				// kn.add_pie(center, angle, angle + radians, radius, tw.FUCHSIA_500)
+				// angle += radians
 			},
 		},
 	).?
@@ -74,29 +137,30 @@ inspector_show :: proc(self: ^Inspector) {
 		}
 		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
 		add_node(&desc)
-		desc.text = fmt.tprintf("Interval time: %v", global_ctx.interval_duration)
+		desc.text = fmt.tprintf("Interval time: %v", global_ctx.performance_info.interval_duration)
 		add_node(&desc)
-		desc.text = fmt.tprintf("Frame time: %v", global_ctx.frame_duration)
+		desc.text = fmt.tprintf("Frame time: %v", global_ctx.performance_info.frame_duration)
 		desc.foreground = tw.AMBER_500
 		add_node(&desc)
 		desc.foreground = tw.FUCHSIA_500
-		desc.text = fmt.tprintf("Compute time: %v", global_ctx.compute_duration)
+		desc.text = fmt.tprintf("Compute time: %v", global_ctx.performance_info.compute_duration)
 		add_node(&desc)
 		desc.foreground = _TEXT
 		desc.text = fmt.tprintf(
 			"%i/%i nodes drawn",
-			global_ctx.drawn_nodes,
+			global_ctx.performance_info.drawn_nodes,
 			len(global_ctx.node_by_id),
 		)
 		add_node(&desc)
-		desc.text = fmt.tprintf("Sizing passes: %i", global_ctx.sizing_passes)
+		desc.text = fmt.tprintf("Sizing passes: %i", global_ctx.performance_info.sizing_passes)
 		add_node(&desc)
+		if add_button(&{icon = lucide.SQUARE_DASHED_MOUSE_POINTER, label = "Select"}).clicked {
+			inspector_activate_mouse_selection(self)
+		}
 		add_checkbox(&{label = "Text debug", value = &self.show_text_widgets})
 		add_checkbox(&{label = "Pixel snap", value = &global_ctx.snap_to_pixels})
 	}
 	end_node()
-	panel_update(self, base_node, handle_node)
-	inspector_reset(&global_ctx.inspector)
 	inspector_build_tree(&global_ctx.inspector)
 	if self.selected_id != 0 {
 		begin_node(
@@ -238,6 +302,11 @@ inspector_show :: proc(self: ^Inspector) {
 	}
 }
 
+inspector_register_node_under_mouse :: proc(self: ^Inspector, node: ^Node) {
+	assert(node != nil)
+	append(&self.nodes_under_mouse, node)
+}
+
 inspector_build_tree :: proc(self: ^Inspector) {
 	begin_node(
 		&{
@@ -256,6 +325,45 @@ inspector_build_tree :: proc(self: ^Inspector) {
 
 inspector_reset :: proc(self: ^Inspector) {
 	self.inspected_id = 0
+	clear(&self.nodes_under_mouse)
+}
+
+inspector_update_mouse_selection :: proc(self: ^Inspector) {
+	if !self.is_selecting {
+		return
+	}
+
+	if time.since(self.selection_start_time) > time.Millisecond && mouse_pressed(.Left) {
+		self.is_selecting = false
+	}
+
+	slice.sort_by(self.nodes_under_mouse[:], proc(a, b: ^Node) -> bool {
+		return box_width(a.box) * box_height(a.box) < box_width(b.box) * box_height(b.box)
+	})
+
+	if len(self.nodes_under_mouse) > 0 {
+		self.inspected_node = self.nodes_under_mouse[0]
+	}
+
+	if self.inspected_node != nil {
+		self := self.inspected_node
+		box := self.box
+		padding_paint := kn.paint_index_from_option(Color{0, 120, 255, 100})
+		if self.padding.x > 0 {
+			kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
+		}
+		if self.padding.y > 0 {
+			kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
+		}
+		if self.padding.z > 0 {
+			kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
+		}
+		if self.padding.w > 0 {
+			kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
+		}
+		kn.add_box(box, paint = Color{0, 255, 0, 80})
+		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
+	}
 }
 
 inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
@@ -326,50 +434,5 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		end_node()
 	}
 	pop_id()
-}
-
-@(private = "file")
-Button_Descriptor :: struct {
-	using base: Node_Descriptor,
-	label:      union {
-		string,
-		rune,
-	},
-}
-
-@(private = "file")
-Button_Result :: struct {
-	node:    Maybe(^Node),
-	clicked: bool,
-}
-
-@(private = "file")
-_add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result: Button_Result) {
-	desc.padding = {7, 5, 7, 5}
-	desc.sizing = {
-		fit = 1,
-		max = INFINITY,
-	}
-	desc.text = desc.label.(string) or_else string_from_rune(desc.label.(rune))
-	desc.font_size = 14
-	desc.foreground = tw.NEUTRAL_300
-	desc.interactive = true
-
-	self := add_node(desc, loc = loc).?
-	node_update_transition(self, 0, self.is_hovered, 0.1)
-	node_update_transition(self, 1, self.is_active, 0.1)
-	// self.style.stroke_width = 4 * self.transitions[1]
-	// self.style.background = kn.blend_colors_time(
-	// 	self.style.background.(Color),
-	// 	desc.shade_color,
-	// 	self.transitions[0],
-	// )
-	self.style.transform_origin = 0.5
-	self.style.scale = 1 - 0.05 * self.transitions[1]
-	assert(self != nil)
-	result.node = self
-	result.clicked = self.was_active && !self.is_active && self.is_hovered
-
-	return
 }
 

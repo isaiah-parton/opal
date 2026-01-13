@@ -472,6 +472,9 @@ node_receive_input :: proc(self: ^Node, layer: i32) -> (mouse_overlap: bool) {
 		ctx.last_mouse_position,
 		ctx.mouse_position,
 	) {
+		when ODIN_DEBUG {
+			inspector_register_node_under_mouse(&ctx.inspector, self)
+		}
 		mouse_overlap = true
 		if self.interactive && !(ctx.hovered_node != nil && ctx.hovered_node.layer > layer) {
 			ctx.hovered_node = self
@@ -544,7 +547,7 @@ node_solve_box_recursive :: proc(
 	}
 
 	when ODIN_DEBUG {
-		global_ctx.drawn_nodes += int(!self.is_clipped)
+		global_ctx.performance_info.drawn_nodes += int(!self.is_clipped)
 	}
 
 	clip_box = box_clamped(clip_box, self.box)

@@ -28,6 +28,8 @@ import "core:reflect"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "core:unicode"
+import "core:unicode/utf8"
 import "vendor:sdl3"
 import stbi "vendor:stb/image"
 import stbtt "vendor:stb/truetype"
@@ -695,7 +697,12 @@ explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview
 		n := os.read(file, text_preview.data) or_return
 
 		text_preview.text = string(text_preview.data[:n])
-		result = text_preview
+
+		if utf8.valid_string(text_preview.text) {
+			result = text_preview
+		} else {
+			err = os.General_Error.Unsupported
+		}
 	}
 
 	return
@@ -752,6 +759,7 @@ main :: proc() {
 			app := (^Explorer)(app)
 			lucide.load()
 			components.theme.icon_font = lucide.font
+			opal.global_ctx.icon_font = lucide.font
 			opal.set_color(.Selection_Background, tw.SKY_500)
 			opal.set_color(.Selection_Foreground, tw.BLACK)
 			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
@@ -769,6 +777,18 @@ main :: proc() {
 			if err := explorer_refresh(app); err != nil {
 				fmt.eprintf("Failed to refresh explorer: %v\n", err)
 			}
+
+			opal.global_ctx.window_interface.callback_data = app
+			opal.global_ctx.window_interface.maximize_callback = proc(data: rawptr) {
+				app := (^Explorer)(data)
+			}
+			opal.global_ctx.window_interface.iconify_callback = proc(data: rawptr) {
+				app := (^Explorer)(data)
+			}
+			opal.global_ctx.window_interface.close_callback = proc(data: rawptr) {
+				app := (^Explorer)(data)
+				app.run = false
+			}
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
@@ -783,12 +803,11 @@ main :: proc() {
 				)
 
 			begin()
+			sdl3app.app_use_node_for_window_grabbing(app, global_ctx.window_interface.grab_node.?)
 			begin_node(
 				&{
-					sizing = {exact = global_ctx.screen_size},
+					sizing = {grow = 1, max = INFINITY},
 					background = theme.color.background,
-					stroke = tw.NEUTRAL_600,
-					stroke_width = 1,
 					vertical = true,
 					padding = 1,
 					radius = window_radius,
@@ -797,48 +816,6 @@ main :: proc() {
 				},
 			)
 			{
-				begin_node(
-					&{
-						sizing = {fit = {0, 1}, exact = {0, 20}, max = INFINITY, grow = {1, 0}},
-						content_align = {0, 0.5},
-						style = {background = tw.NEUTRAL_800},
-					},
-				)
-				{
-					if do_window_button(lucide.ARROW_LEFT, tw.EMERALD_500) {
-						explorer_change_folder(app, app.last_cwd)
-					}
-					if do_window_button(lucide.ARROW_UP, tw.EMERALD_500) {
-						explorer_change_folder(
-							app,
-							app.cwd[:max(strings.last_index_byte(app.cwd, '\\'), 3)],
-						)
-					}
-					if do_window_button(lucide.BUG, tw.ORANGE_500) {
-						global_ctx.inspector.shown = !global_ctx.inspector.shown
-					}
-
-					sdl3app.app_use_node_for_window_grabbing(
-						app,
-						add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?,
-					)
-					if do_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
-						sdl3.MinimizeWindow(app.window)
-					}
-					if do_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
-						if .MAXIMIZED in
-						   transmute(sdl3.WindowFlags)sdl3.GetWindowFlags(app.window) {
-							sdl3.RestoreWindow(app.window)
-						} else {
-							sdl3.MaximizeWindow(app.window)
-						}
-					}
-					if do_window_button(lucide.X, tw.ROSE_500) {
-						app.run = false
-					}
-				}
-				end_node()
-
 				if app.dragging {
 					if mouse_released(.Left) {
 						app.dragging = false
@@ -1010,7 +987,7 @@ main :: proc() {
 									{
 										if path_input, ok := &app.path_input.?; ok {
 											// Show the path input
-											field_result := components.add_field(
+											field_result := add_field(
 												&{
 													sizing = {grow = 1, max = INFINITY},
 													value_data = &path_input.path,
@@ -1118,7 +1095,7 @@ main :: proc() {
 							end_node()
 
 							// Right panel
-							if name, ok := app.primary_selection.?; ok {
+							if len(app.previews) > 0 {
 								{
 									begin_node(
 										&{
