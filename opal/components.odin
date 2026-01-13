@@ -1,6 +1,7 @@
 package opal
 
 import kn "../katana"
+import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
@@ -9,9 +10,72 @@ import "core:mem"
 import "core:strconv"
 import "core:strings"
 
-COMPONENT_TEXT_GAP :: 4
-COMPONENT_CHECKBOX_SIZE :: 18
-COMPONENT_FONT_SIZE :: 14
+Theme :: struct {
+	text_gap:        f32,
+	checkbox_size:   f32,
+	label_text_size: f32,
+	label_icon_size: f32,
+	radius_small:    f32,
+	radius_big:      f32,
+	base_size:       [2]f32,
+	animation_time:  f32,
+	font_size_small: f32,
+	font:            Font,
+	monospace_font:  Font,
+	icon_font:       Font,
+	color:           Theme_Colors,
+}
+
+Theme_Colors :: struct {
+	border:               Color,
+	primary:              Color,
+	primary_foreground:   Color,
+	secondary:            Color,
+	secondary_foreground: Color,
+	secondary_strong:     Color,
+	accent:               Color,
+	background:           Color,
+	base_strong:          Color,
+	base_foreground:      Color,
+}
+
+theme_default :: proc() -> Theme {
+	default_font :=
+		kn.load_font_from_files(
+			"../fonts/Lexend-Regular.png",
+			"../fonts/Lexend-Regular.json",
+		) or_else panic("Could not load default font")
+	monospace_font :=
+		kn.load_font_from_files(
+			"../fonts/SpaceMono-Regular.png",
+			"../fonts/SpaceMono-Regular.json",
+		) or_else panic("Could not load monospace font")
+	return Theme {
+		text_gap = 4,
+		checkbox_size = 18,
+		label_text_size = 14,
+		label_icon_size = 16,
+		base_size = 12,
+		radius_small = 6,
+		radius_big = 12,
+		font_size_small = 14,
+		color = {
+			background = tw.NEUTRAL_900,
+			base_strong = tw.NEUTRAL_950,
+			accent = tw.BLUE_500,
+			primary = tw.EMERALD_600,
+			primary_foreground = tw.NEUTRAL_950,
+			secondary = tw.NEUTRAL_700,
+			secondary_foreground = tw.NEUTRAL_950,
+			secondary_strong = tw.NEUTRAL_600,
+			border = tw.NEUTRAL_700,
+			base_foreground = tw.NEUTRAL_50,
+		},
+		font = default_font,
+		monospace_font = monospace_font,
+		icon_font = lucide.font,
+	}
+}
 
 Checkbox_Descriptor :: struct {
 	using base: Node_Descriptor,
@@ -32,6 +96,8 @@ add_checkbox :: proc(
 ) {
 	assert(desc.value != nil)
 
+	ctx := global_ctx
+
 	push_id(hash_loc(loc))
 	defer pop_id()
 
@@ -45,7 +111,7 @@ add_checkbox :: proc(
 	{
 		add_node(
 			&{
-				sizing = {exact = COMPONENT_CHECKBOX_SIZE},
+				sizing = {exact = ctx.theme.checkbox_size},
 				radius = 4,
 				background = kn.mix(node.transitions[0], tw.SLATE_900, tw.WHITE),
 			},
@@ -55,7 +121,7 @@ add_checkbox :: proc(
 				sizing = {fit = 1},
 				padding = {0, 0, 4, 0},
 				text = desc.label,
-				font_size = COMPONENT_FONT_SIZE,
+				font_size = ctx.theme.label_text_size,
 				foreground = tw.WHITE,
 			},
 		)
@@ -86,6 +152,8 @@ Button_Result :: struct {
 add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result: Button_Result) {
 	assert(desc != nil)
 
+	ctx := global_ctx
+
 	push_id(hash_loc(loc))
 	defer pop_id()
 
@@ -115,8 +183,8 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 			&{
 				foreground = tw.WHITE,
 				sizing = {fit = 1},
-				font = &global_ctx.icon_font,
-				font_size = COMPONENT_FONT_SIZE,
+				font = &global_ctx.theme.icon_font,
+				font_size = ctx.theme.label_icon_size,
 				text = string_from_rune(desc.icon),
 			},
 		)
@@ -126,7 +194,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 			&{
 				foreground = tw.WHITE,
 				sizing = {fit = 1},
-				font_size = COMPONENT_FONT_SIZE,
+				font_size = ctx.theme.label_text_size,
 				text = desc.label,
 			},
 		)
@@ -143,6 +211,8 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 }
 
 add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> bool {
+	ctx := global_ctx
+
 	self := add_node(
 		&{
 			padding = 3,
@@ -150,7 +220,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 			text = string_from_rune(icon),
 			font_size = 20,
 			foreground = tw.NEUTRAL_300,
-			font = &global_ctx.icon_font,
+			font = &ctx.theme.icon_font,
 			interactive = true,
 		},
 		loc = loc,
@@ -421,5 +491,96 @@ field_output :: proc(
 		break
 	}
 	return true
+}
+
+do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
+	ctx := global_ctx
+
+	push_id(hash(loc))
+
+	self := begin_node(
+		&{
+			padding = {4, 4, 12, 4},
+			sizing = {fit = 1, max = INFINITY, grow = {1, 0}},
+			gap = 6,
+			content_align = {0, 0.5},
+			interactive = true,
+			group = true,
+			style = {radius = 6},
+		},
+	).?
+	node_update_transition(self, 0, self.is_hovered, 0.1)
+	node_update_transition(self, 1, self.is_active, 0.1)
+	self.style.background = fade(
+		tw.NEUTRAL_600,
+		self.transitions[0] * 0.3 + self.transitions[1] * 0.3,
+	)
+	add_node(
+		&{
+			text = string_from_rune(icon),
+			sizing = {fit = 1},
+			style = {foreground = tw.NEUTRAL_300, font_size = 18, font = &ctx.theme.icon_font},
+		},
+	)
+	add_node(
+		&{text = label, sizing = {fit = 1}, style = {font_size = 14, foreground = tw.NEUTRAL_300}},
+	)
+	end_node()
+	pop_id()
+}
+
+@(deferred_out = __do_menu)
+do_menu :: proc(label: string, loc := #caller_location) -> bool {
+	push_id(hash(loc))
+	node := add_node(
+		&{
+			padding = 3,
+			radius = 3,
+			sizing = {fit = 1},
+			text = label,
+			font_size = 12,
+			interactive = true,
+		},
+	).?
+	node.style.background = fade(tw.NEUTRAL_600, (node.transitions[0] + node.transitions[1]) * 0.3)
+	node.style.foreground =
+		tw.BLUE_500 if (node.is_focused || node.has_focused_child) else tw.NEUTRAL_300
+	node_update_transition(node, 1, node.is_active, 0)
+	node_update_transition(node, 0, node.is_hovered, 0)
+	if node.is_hovered && node.parent != nil && node.parent.has_focused_child {
+		focus_node(node.id)
+	}
+
+	is_open := node.is_focused | node.has_focused_child
+
+	if is_open {
+		begin_node(
+			&{
+				is_root = true,
+				shadow_size = 5,
+				shadow_color = {0, 0, 0, 128},
+				bounds = get_screen_box(),
+				layer = 999,
+				sizing = {fit = 1},
+				padding = 4,
+				radius = 5,
+				background = tw.NEUTRAL_900,
+				stroke = tw.NEUTRAL_600,
+				stroke_width = 1,
+				vertical = true,
+			},
+		)
+	}
+
+	pop_id()
+
+	return is_open
+}
+
+@(private)
+__do_menu :: proc(is_open: bool) {
+	if is_open {
+		end_node()
+	}
 }
 

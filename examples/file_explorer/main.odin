@@ -1,6 +1,5 @@
 package example
 
-import "../../components"
 import kn "../../katana"
 import "../../katana/sdl3glue"
 import "../../lucide"
@@ -145,7 +144,7 @@ item_display_for_grid :: proc(
 			&{
 				sizing = {fit = 1, aspect_ratio = 1},
 				text = string_from_rune(icon),
-				font = &components.theme.icon_font,
+				font = &global_ctx.theme.icon_font,
 				font_size = 32,
 				foreground = node.foreground,
 			},
@@ -161,7 +160,7 @@ item_display_for_grid :: proc(
 			add_node(
 				&{
 					text = self.file_info.name,
-					font = &components.theme.font,
+					font = &global_ctx.theme.font,
 					font_size = 16,
 					sizing = {fit = 1},
 					foreground = node.foreground,
@@ -173,7 +172,7 @@ item_display_for_grid :: proc(
 					add_node(
 						&{
 							text = fmt_memory_size(self.file_info.size),
-							font = &components.theme.font,
+							font = &global_ctx.theme.font,
 							font_size = 16,
 							sizing = {fit = 1},
 							foreground = node.foreground,
@@ -182,7 +181,7 @@ item_display_for_grid :: proc(
 					add_node(
 						&{
 							text = memory_size_suffix(self.file_info.size),
-							font = &components.theme.font,
+							font = &global_ctx.theme.font,
 							font_size = 16,
 							sizing = {fit = 1},
 							foreground = fade(node.foreground.(kn.Color), 0.5),
@@ -256,7 +255,7 @@ item_display_for_list :: proc(
 			&{
 				sizing = {fit = 1, aspect_ratio = 1},
 				text = string_from_rune(icon),
-				font = &components.theme.icon_font,
+				font = &global_ctx.theme.icon_font,
 				font_size = 16,
 				foreground = node.foreground,
 			},
@@ -264,7 +263,7 @@ item_display_for_list :: proc(
 		add_node(
 			&{
 				text = self.file_info.name,
-				font = &components.theme.font,
+				font = &global_ctx.theme.font,
 				font_size = 16,
 				sizing = {fit = 1},
 				foreground = node.foreground,
@@ -275,7 +274,7 @@ item_display_for_list :: proc(
 			add_node(
 				&{
 					text = fmt_memory_size(self.file_info.size),
-					font = &components.theme.font,
+					font = &global_ctx.theme.font,
 					font_size = 16,
 					sizing = {fit = 1},
 					foreground = node.foreground,
@@ -284,7 +283,7 @@ item_display_for_list :: proc(
 			add_node(
 				&{
 					text = memory_size_suffix(self.file_info.size),
-					font = &components.theme.font,
+					font = &global_ctx.theme.font,
 					font_size = 16,
 					sizing = {fit = 1},
 					foreground = fade(node.foreground.(kn.Color), 0.5),
@@ -549,9 +548,9 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 		node := add_node(
 			&{
 				text = s,
-				foreground = components.theme.color.base_foreground,
+				foreground = global_ctx.theme.color.base_foreground,
 				font_size = 16,
-				font = &components.theme.font,
+				font = &global_ctx.theme.font,
 				interactive = true,
 				padding = {4, 2, 4, 2},
 				radius = 8,
@@ -580,8 +579,8 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 					sizing = {fit = 1, grow = {0, 1}, max = {0, INFINITY}},
 					padding = {0, 3, 0, 0},
 					content_align = {0, 0.5},
-					font = &components.theme.icon_font,
-					foreground = components.theme.color.base_foreground,
+					font = &global_ctx.theme.icon_font,
+					foreground = global_ctx.theme.color.base_foreground,
 				},
 			)
 		}
@@ -757,22 +756,11 @@ main :: proc() {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
-			lucide.load()
-			components.theme.icon_font = lucide.font
-			opal.global_ctx.icon_font = lucide.font
 			opal.set_color(.Selection_Background, tw.SKY_500)
 			opal.set_color(.Selection_Foreground, tw.BLACK)
 			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
 			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
 			opal.global_ctx.snap_to_pixels = true
-			components.theme.font, _ = kn.load_font_from_files(
-				"../fonts/Lexend-Regular.png",
-				"../fonts/Lexend-Regular.json",
-			)
-			components.theme.monospace_font, _ = kn.load_font_from_files(
-				"../fonts/SpaceMono-Regular.png",
-				"../fonts/SpaceMono-Regular.json",
-			)
 			app.cwd = os.get_current_directory()
 			if err := explorer_refresh(app); err != nil {
 				fmt.eprintf("Failed to refresh explorer: %v\n", err)
@@ -792,7 +780,7 @@ main :: proc() {
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
-			using opal, components
+			using opal
 			window_radius :=
 				app.radius *
 				f32(
@@ -807,7 +795,7 @@ main :: proc() {
 			begin_node(
 				&{
 					sizing = {grow = 1, max = INFINITY},
-					background = theme.color.background,
+					background = global_ctx.theme.color.background,
 					vertical = true,
 					padding = 1,
 					radius = window_radius,
@@ -848,7 +836,7 @@ main :: proc() {
 								align = {0, 1},
 								sizing = {fit = 1},
 								text = fmt.tprintf("%i items", len(app.selected_items)),
-								font = &theme.font,
+								font = &global_ctx.theme.font,
 								font_size = 14,
 								foreground = tw.WHITE,
 							},
@@ -896,7 +884,7 @@ main :: proc() {
 							&{
 								text = menu.file if len(app.selected_items) == 1 else fmt.tprintf("%i files", len(app.selected_items)),
 								foreground = tw.WHITE,
-								font = &theme.font,
+								font = &global_ctx.theme.font,
 								font_size = 16,
 								sizing = {fit = 1},
 								padding = {8, 4, 24, 4},
@@ -918,13 +906,13 @@ main :: proc() {
 						)
 						{
 							// Show context options
-							components.do_menu_item("New Folder", lucide.FOLDER_PLUS)
-							components.do_menu_item("New File", lucide.FILE_PLUS)
-							components.do_menu_item("Copy", lucide.COPY)
-							components.do_menu_item("Cut", lucide.SCISSORS)
-							components.do_menu_item("Paste", lucide.CLIPBOARD_PASTE)
-							components.do_menu_item("Rename", lucide.TEXT_CURSOR_INPUT)
-							components.do_menu_item("Shred", lucide.SHREDDER)
+							do_menu_item("New Folder", lucide.FOLDER_PLUS)
+							do_menu_item("New File", lucide.FILE_PLUS)
+							do_menu_item("Copy", lucide.COPY)
+							do_menu_item("Cut", lucide.SCISSORS)
+							do_menu_item("Paste", lucide.CLIPBOARD_PASTE)
+							do_menu_item("Rename", lucide.TEXT_CURSOR_INPUT)
+							do_menu_item("Shred", lucide.SHREDDER)
 						}
 						end_node()
 					}
@@ -1046,8 +1034,8 @@ main :: proc() {
 													interactive = true,
 													content_align = 0.5,
 													radius = 6,
-													font = &theme.icon_font,
-													foreground = theme.color.base_foreground,
+													font = &global_ctx.theme.icon_font,
+													foreground = global_ctx.theme.color.base_foreground,
 												},
 											).?
 											pop_id()
@@ -1132,8 +1120,8 @@ main :: proc() {
 													center := box_center(self.box)
 													color := kn.mix(
 														self.transitions[0] * 0.5,
-														components.theme.color.border,
-														components.theme.color.accent,
+														global_ctx.theme.color.border,
+														global_ctx.theme.color.accent,
 													)
 													kn.add_circle(center + {0, -7}, 2.5, color)
 													kn.add_circle(center, 2.5, color)
@@ -1181,10 +1169,10 @@ main :: proc() {
 												&{sizing = {grow = 1, max = INFINITY, fit = 1}},
 												variant.text,
 												14,
-												&theme.monospace_font,
+												&global_ctx.theme.monospace_font,
 												tw.WHITE,
 											)
-										// components.add_field(
+										// global_ctx.add_field(
 										// 	&{
 										// 		sizing = {grow = 1, max = INFINITY},
 										// 		multiline = true,
@@ -1281,7 +1269,7 @@ begin_section :: proc(name: string, loc := #caller_location) {
 		&{
 			text = name,
 			foreground = text_color,
-			font = &components.theme.font,
+			font = &global_ctx.theme.font,
 			font_size = 16,
 			sizing = {fit = 1},
 		},

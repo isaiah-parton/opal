@@ -335,8 +335,7 @@ Context :: struct {
 	text_agent:             Text_Agent,
 
 	// default font
-	default_font:           Font,
-	icon_font:              Font,
+	theme:                  Theme,
 
 	//
 	// Styles
@@ -687,6 +686,9 @@ pop_id :: proc() {
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
 
+	lucide.load()
+	ctx.theme = theme_default()
+
 	reserve(&ctx.roots, 64)
 	reserve(&ctx.node_stack, 64)
 	reserve(&ctx.id_stack, 64)
@@ -695,15 +697,6 @@ context_init :: proc(ctx: ^Context) {
 
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
-
-	if font, ok := kn.load_font_from_files(
-		"../fonts/Roboto-Regular.png",
-		"../fonts/Roboto-Regular.json",
-	); ok {
-		ctx.default_font = font
-	} else {
-		fmt.eprintln("Failed to load default font")
-	}
 }
 
 context_deinit :: proc(ctx: ^Context) {
@@ -1092,9 +1085,10 @@ begin :: proc() {
 		},
 	)
 
+	// Show window controls
 	begin_node(
 		&{
-			sizing = {fit = {0, 1}, exact = {ctx.screen_size.x, 20}},
+			sizing = {fit = {0, 1}, exact = {0, 20}, grow = {1, 0}, max = INFINITY},
 			content_align = {0, 0.5},
 			style = {background = tw.NEUTRAL_800},
 		},
@@ -1103,9 +1097,12 @@ begin :: proc() {
 		global_ctx.window_interface.grab_node =
 		add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?
 
-		if add_window_button(lucide.BUG, tw.ORANGE_500) {
-			global_ctx.inspector.shown = !global_ctx.inspector.shown
+		when ODIN_DEBUG {
+			if add_window_button(lucide.BUG, tw.ORANGE_500) {
+				global_ctx.inspector.shown = !global_ctx.inspector.shown
+			}
 		}
+
 		if add_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
 			handle_window_maximize()
 		}
@@ -1175,23 +1172,6 @@ end :: proc() {
 	}
 
 	for &view in ctx.text_agent.array {
-		// if len(view.points) > 3 {
-		// 	kn.begin_path()
-		// 	for point, i in view.points {
-		// 		if i == 0 {
-		// 			kn.move_to(point)
-		// 		} else {
-		// 			kn.line_to(point)
-		// 		}
-		// 		// kn.add_circle(point, 3, paint = kn.WHITE)
-		// 	}
-		// 	kn.close_path()
-		// 	kn.fill_path(kn.WHITE)
-		// }
-		// for i in 0 ..< len(view.points) {
-		// 	j := (i + 1) % len(view.points)
-		// 	kn.add_line(view.points[i], view.points[j], 2, kn.WHITE)
-		// }
 		for box in view.selection_boxes {
 			kn.add_box_lines(box, 1, paint = kn.WHITE)
 		}
