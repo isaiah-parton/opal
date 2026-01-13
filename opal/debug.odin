@@ -63,29 +63,46 @@ performance_info_solve :: proc(self: ^Performance_Info) {
 }
 
 Inspector :: struct {
-	using panel:          Panel,
+	using panel:            Panel,
 
 	// Currently shown
-	shown:                bool,
+	shown:                  bool,
 
 	// Currently picking a node
-	is_selecting:         bool,
+	is_selecting:           bool,
 
 	//
-	selection_start_time: time.Time,
+	selection_start_time:   time.Time,
 
 	// Selected node for viewing properties
-	selected_id:          Id,
+	selected_id:            Id,
 
 	// Selected node for inspection
-	inspected_id:         Id,
-	inspected_node:       ^Node,
+	inspected_id:           Id,
+	inspected_node:         ^Node,
+	inspected_node_parents: [dynamic]Id,
+	inspected_time:         time.Time,
+
+	// Hovered node
+	hovered_node:           ^Node,
 
 	// Show colored highlights around text nodes to differentiate them
-	show_text_widgets:    bool,
+	show_text_widgets:      bool,
 
 	// Nodes under mouse
-	nodes_under_mouse:    [dynamic]^Node,
+	nodes_under_mouse:      [dynamic]^Node,
+}
+
+inspector_set_inspected_node :: proc(self: ^Inspector, node: ^Node) {
+	assert(node != nil)
+	clear(&self.inspected_node_parents)
+	parent := node.parent
+	for parent != nil {
+		append(&self.inspected_node_parents, parent.id)
+		parent = parent.parent
+	}
+	self.inspected_id = node.id
+	self.inspected_time = time.now()
 }
 
 inspector_activate_mouse_selection :: proc(self: ^Inspector) {
@@ -324,7 +341,6 @@ inspector_build_tree :: proc(self: ^Inspector) {
 }
 
 inspector_reset :: proc(self: ^Inspector) {
-	self.inspected_id = 0
 	clear(&self.nodes_under_mouse)
 }
 
@@ -333,20 +349,16 @@ inspector_update_mouse_selection :: proc(self: ^Inspector) {
 		return
 	}
 
-	if time.since(self.selection_start_time) > time.Millisecond && mouse_pressed(.Left) {
-		self.is_selecting = false
-	}
-
 	slice.sort_by(self.nodes_under_mouse[:], proc(a, b: ^Node) -> bool {
 		return box_width(a.box) * box_height(a.box) < box_width(b.box) * box_height(b.box)
 	})
 
 	if len(self.nodes_under_mouse) > 0 {
-		self.inspected_node = self.nodes_under_mouse[0]
+		self.hovered_node = self.nodes_under_mouse[0]
 	}
 
-	if self.inspected_node != nil {
-		self := self.inspected_node
+	if self.hovered_node != nil {
+		self := self.hovered_node
 		box := self.box
 		padding_paint := kn.paint_index_from_option(Color{0, 120, 255, 100})
 		if self.padding.x > 0 {
@@ -363,6 +375,13 @@ inspector_update_mouse_selection :: proc(self: ^Inspector) {
 		}
 		kn.add_box(box, paint = Color{0, 255, 0, 80})
 		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
+	}
+
+	if time.since(self.selection_start_time) > time.Millisecond && mouse_pressed(.Left) {
+		self.is_selecting = false
+		if self.hovered_node != nil {
+			inspector_set_inspected_node(self, self.hovered_node)
+		}
 	}
 }
 
@@ -391,13 +410,12 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			sizing = {fit = 1},
 			style = {
 				font_size = 14,
-				foreground = tw.EMERALD_500 if self.selected_id == node.id else kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.children) > 0))),
+				foreground = tw.WHITE if self.inspected_id == node.id else (tw.EMERALD_500 if self.selected_id == node.id else kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
 			},
 		},
 	)
 	end_node()
 	if button_node.is_hovered {
-		self.inspected_id = node.id
 		if button_node.was_active && !button_node.is_active {
 			button_node.is_toggled = !button_node.is_toggled
 		}
@@ -409,11 +427,19 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			self.selected_id = node.id
 		}
 	}
-	button_node.background = kn.fade(
-		tw.STONE_600,
-		f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)),
-	)
+	button_node.background =
+		tw.BLUE_500 if self.inspected_id == node.id else kn.fade(tw.STONE_600, f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)))
 	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)
+
+	if time.since(self.inspected_time) < time.Millisecond * 200 {
+		for id in self.inspected_node_parents {
+			if node.id == id {
+				button_node.is_toggled = true
+				break
+			}
+		}
+	}
+
 	if button_node.transitions[0] > 0.01 {
 		begin_node(
 			&{
