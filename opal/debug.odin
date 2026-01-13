@@ -68,6 +68,9 @@ Inspector :: struct {
 	// Currently shown
 	shown:                  bool,
 
+	// width
+	width:                  f32,
+
 	// Currently picking a node
 	is_selecting:           bool,
 
@@ -113,23 +116,23 @@ inspector_activate_mouse_selection :: proc(self: ^Inspector) {
 inspector_show :: proc(self: ^Inspector) {
 	self.min_size = {300, 400}
 	self.size = linalg.max(self.size, self.min_size)
+	self.width = max(self.width, 300)
 	base_node := begin_node(
 		&{
-			sizing = {fit = {1, 0}, grow = {0, 1}, max = INFINITY, exact = {300, 0}},
+			sizing = {fit = {1, 0}, grow = {0, 1}, max = INFINITY, exact = {self.width, 0}},
 			vertical = true,
-			padding = 1,
-			stroke_width = 1,
-			stroke = tw.NEUTRAL_700,
-			background = _BACKGROUND,
+			gap = 4,
+			background = global_ctx.theme.color.background,
 		},
 	).?
 	total_nodes := len(global_ctx.node_by_id)
 	handle_node := begin_node(
 		&{
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
-			padding = 5,
+			padding = global_ctx.theme.min_spacing,
+			radius = global_ctx.theme.radius_small,
 			gap = 5,
-			style = {background = _FOREGROUND},
+			style = {background = global_ctx.theme.color.base_strong},
 			interactive = true,
 			vertical = true,
 			data = global_ctx,
@@ -150,7 +153,7 @@ inspector_show :: proc(self: ^Inspector) {
 		desc := Node_Descriptor {
 			sizing = {fit = 1},
 			font_size = 12,
-			foreground = _TEXT,
+			foreground = global_ctx.theme.color.base_foreground,
 		}
 		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
 		add_node(&desc)
@@ -162,7 +165,7 @@ inspector_show :: proc(self: ^Inspector) {
 		desc.foreground = tw.FUCHSIA_500
 		desc.text = fmt.tprintf("Compute time: %v", global_ctx.performance_info.compute_duration)
 		add_node(&desc)
-		desc.foreground = _TEXT
+		desc.foreground = global_ctx.theme.color.base_foreground
 		desc.text = fmt.tprintf(
 			"%i/%i nodes drawn",
 			global_ctx.performance_info.drawn_nodes,
@@ -174,6 +177,7 @@ inspector_show :: proc(self: ^Inspector) {
 		if add_button(&{icon = lucide.SQUARE_DASHED_MOUSE_POINTER, label = "Select"}).clicked {
 			inspector_activate_mouse_selection(self)
 		}
+		add_button(&{icon = lucide.X, label = "Close"})
 		add_checkbox(&{label = "Text debug", value = &self.show_text_widgets})
 		add_checkbox(&{label = "Pixel snap", value = &global_ctx.snap_to_pixels})
 	}
@@ -383,10 +387,17 @@ inspector_update_mouse_selection :: proc(self: ^Inspector) {
 			inspector_set_inspected_node(self, self.hovered_node)
 		}
 	}
+
+	if key_pressed(.Escape) || mouse_pressed(.Right) {
+		self.is_selecting = false
+	}
 }
 
 inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
+
+	ctx := global_ctx
+
 	push_id(int(node.id))
 	button_node := begin_node(
 		&{
@@ -401,7 +412,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	add_node(
 		&{sizing = {exact = 14}, on_draw = nil if len(node.children) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
-				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), kn.WHITE)
+				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), global_ctx.theme.color.base_foreground)
 			}},
 	)
 	add_node(
@@ -410,7 +421,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			sizing = {fit = 1},
 			style = {
 				font_size = 14,
-				foreground = tw.WHITE if self.inspected_id == node.id else (tw.EMERALD_500 if self.selected_id == node.id else kn.fade(tw.EMERALD_50, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
+				foreground = ctx.theme.color.base_foreground if self.inspected_id == node.id else (tw.EMERALD_700 if self.selected_id == node.id else kn.fade(ctx.theme.color.base_foreground, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
 			},
 		},
 	)

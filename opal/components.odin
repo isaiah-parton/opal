@@ -5,6 +5,7 @@ import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
+import "core:math"
 import "core:math/ease"
 import "core:mem"
 import "core:strconv"
@@ -15,6 +16,7 @@ Theme :: struct {
 	checkbox_size:   f32,
 	label_text_size: f32,
 	label_icon_size: f32,
+	min_spacing:     f32,
 	radius_small:    f32,
 	radius_big:      f32,
 	base_size:       [2]f32,
@@ -56,20 +58,21 @@ theme_default :: proc() -> Theme {
 		label_text_size = 14,
 		label_icon_size = 16,
 		base_size = 12,
+		min_spacing = 12,
 		radius_small = 6,
 		radius_big = 12,
 		font_size_small = 14,
 		color = {
-			background = tw.NEUTRAL_900,
-			base_strong = tw.NEUTRAL_950,
+			background = tw.NEUTRAL_100,
+			base_strong = tw.NEUTRAL_300,
 			accent = tw.BLUE_500,
-			primary = tw.EMERALD_600,
-			primary_foreground = tw.NEUTRAL_950,
+			primary = tw.NEUTRAL_800,
+			primary_foreground = tw.WHITE,
 			secondary = tw.NEUTRAL_700,
 			secondary_foreground = tw.NEUTRAL_950,
 			secondary_strong = tw.NEUTRAL_600,
-			border = tw.NEUTRAL_700,
-			base_foreground = tw.NEUTRAL_50,
+			border = tw.NEUTRAL_950,
+			base_foreground = tw.BLACK,
 		},
 		font = default_font,
 		monospace_font = monospace_font,
@@ -113,7 +116,18 @@ add_checkbox :: proc(
 			&{
 				sizing = {exact = ctx.theme.checkbox_size},
 				radius = 4,
-				background = kn.mix(node.transitions[0], tw.SLATE_900, tw.WHITE),
+				stroke_width = 2,
+				stroke = ctx.theme.color.border,
+				text = string_from_rune(lucide.CHECK),
+				font = &ctx.theme.icon_font,
+				content_align = 0.5,
+				font_size = ctx.theme.label_icon_size,
+				foreground = kn.fade(ctx.theme.color.background, node.transitions[0]),
+				background = kn.mix(
+					node.transitions[0],
+					ctx.theme.color.base_strong,
+					ctx.theme.color.border,
+				),
 			},
 		)
 		add_node(
@@ -122,7 +136,7 @@ add_checkbox :: proc(
 				padding = {0, 0, 4, 0},
 				text = desc.label,
 				font_size = ctx.theme.label_text_size,
-				foreground = tw.WHITE,
+				foreground = ctx.theme.color.base_foreground,
 			},
 		)
 	}
@@ -160,52 +174,67 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 	desc.sizing = {
 		fit = 1,
 	}
-	desc.padding = {8, 4, 8, 4}
-	desc.radius = 4
-	desc.content_align = 0.5
 	desc.interactive = true
-	desc.transform_origin = 0.5
-	desc.gap = 4
+	desc.radius = 4
+	desc.background = global_ctx.theme.color.base_foreground
+
+	color: Color
 	switch desc.variant {
 	case .Primary:
-		desc.background = tw.GREEN_600
+		color = tw.GREEN_600
 	case .Outline:
 		desc.stroke = tw.NEUTRAL_500
 		desc.stroke_width = 1
 	case .Ghost:
-		desc.background = tw.NEUTRAL_800
+		color = tw.NEUTRAL_800
 	case .Link:
 
 	}
+
 	result.node = begin_node(desc)
-	if desc.icon != 0 {
-		add_node(
+	{
+		face_node := begin_node(
 			&{
-				foreground = tw.WHITE,
 				sizing = {fit = 1},
-				font = &global_ctx.theme.icon_font,
-				font_size = ctx.theme.label_icon_size,
-				text = string_from_rune(desc.icon),
+				background = color,
+				gap = 4,
+				padding = {8, 4, 8, 4},
+				radius = 4,
+				content_align = 0.5,
 			},
-		)
-	}
-	if desc.label != "" {
-		add_node(
-			&{
-				foreground = tw.WHITE,
-				sizing = {fit = 1},
-				font_size = ctx.theme.label_text_size,
-				text = desc.label,
-			},
-		)
+		).?
+		{
+			if desc.icon != 0 {
+				add_node(
+					&{
+						foreground = ctx.theme.color.base_foreground,
+						sizing = {fit = 1},
+						font = &global_ctx.theme.icon_font,
+						font_size = ctx.theme.label_icon_size,
+						text = string_from_rune(desc.icon),
+					},
+				)
+			}
+			if desc.label != "" {
+				add_node(
+					&{
+						foreground = ctx.theme.color.base_foreground,
+						sizing = {fit = 1},
+						font_size = ctx.theme.label_text_size,
+						text = desc.label,
+					},
+				)
+			}
+		}
+		end_node()
+		if node, ok := result.node.?; ok {
+			result.clicked = node.is_active && !node.was_active
+			node_update_transition(node, 0, node.is_hovered, 0.15)
+			node_update_transition(node, 1, node.is_active, 0.15)
+			face_node.translate = -math.lerp(f32(2), f32(0), node.transitions[1])
+		}
 	}
 	end_node()
-	if node, ok := result.node.?; ok {
-		result.clicked = node.is_active && !node.was_active
-		node_update_transition(node, 0, node.is_hovered, 0.15)
-		node_update_transition(node, 1, node.is_active, 0.15)
-		node.scale = 1 - ease.cubic_in_out(node.transitions[1]) * 0.075
-	}
 
 	return
 }
@@ -219,7 +248,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 			sizing = {fit = 1, max = INFINITY},
 			text = string_from_rune(icon),
 			font_size = 20,
-			foreground = tw.NEUTRAL_300,
+			foreground = ctx.theme.color.base_foreground,
 			font = &ctx.theme.icon_font,
 			interactive = true,
 		},
@@ -228,7 +257,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 	node_update_transition(self, 0, self.is_hovered, 0.1)
 	node_update_transition(self, 1, self.is_active, 0.1)
 	self.style.background = fade(color, self.transitions[0])
-	self.style.foreground = mix(self.transitions[0], tw.WHITE, tw.NEUTRAL_900)
+	// self.style.foreground = mix(self.transitions[0], tw.WHITE, tw.NEUTRAL_900)
 	assert(self != nil)
 	return self.was_active && !self.is_active && self.is_hovered
 }
@@ -582,5 +611,88 @@ __do_menu :: proc(is_open: bool) {
 	if is_open {
 		end_node()
 	}
+}
+
+Orientation :: enum {
+	Horizontal,
+	Vertical,
+}
+
+Resizer_Descriptor :: struct {
+	using base:  Node_Descriptor,
+	orientation: Orientation,
+	value:       ^f32,
+}
+
+Resizer_Result :: struct {
+	node: Maybe(^Node),
+}
+
+add_resizer :: proc(
+	desc: ^Resizer_Descriptor,
+	loc := #caller_location,
+) -> (
+	result: Resizer_Result,
+) {
+	assert(desc.value != nil)
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	switch desc.orientation {
+	case .Horizontal:
+		desc.sizing.grow.x = 1
+		desc.sizing.exact.y = 2
+	case .Vertical:
+		desc.sizing.grow.y = 1
+		desc.sizing.exact.x = 2
+	}
+
+	desc.sizing.max = INFINITY
+	desc.layer = 1
+	desc.group = true
+	desc.background = global_ctx.theme.color.border
+
+	begin_node(desc)
+	{
+		node := add_node(
+			&{
+				absolute = true,
+				sizing = {relative = {0, 1}, exact = {8, 0}},
+				exact_offset = {-3, 0},
+				interactive = true,
+				sticky = true,
+				cursor = Cursor.Resize_EW,
+				data = desc.value,
+				on_draw = proc(self: ^Node) {
+					value := (^f32)(self.data)
+					if self.is_active {
+						value^ =
+							self.parent.parent.box.hi.x -
+							self.parent.parent.padding.z -
+							self.parent.parent.gap -
+							box_width(self.box) / 2 -
+							global_ctx.mouse_position.x
+					}
+					center := box_center(self.box)
+					color := kn.mix(
+						self.transitions[0] * 0.5,
+						global_ctx.theme.color.border,
+						global_ctx.theme.color.accent,
+					)
+					box := Box{center - {4, 10}, center + {4, 10}}
+					radius := box_width(self.box) / 2
+					kn.add_box(box, radius, global_ctx.theme.color.background)
+					kn.add_box_lines(box, 2, radius, color)
+				},
+			},
+		).?
+		node_update_transition(node, 0, node.is_hovered || node.is_active, 0.1)
+		node_update_transition(node, 1, node.is_active, 0.2)
+		result.node = node
+	}
+	end_node()
+
+	return
 }
 

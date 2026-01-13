@@ -1090,7 +1090,7 @@ begin :: proc() {
 		&{
 			sizing = {fit = {0, 1}, exact = {0, 20}, grow = {1, 0}, max = INFINITY},
 			content_align = {0, 0.5},
-			style = {background = tw.NEUTRAL_800},
+			style = {background = ctx.theme.color.background},
 		},
 	)
 	{
@@ -1129,6 +1129,7 @@ end :: proc() {
 
 	// Built-in UI
 	if ctx.inspector.shown {
+		add_resizer(&{orientation = .Vertical, value = &ctx.inspector.width})
 		inspector_show(&ctx.inspector)
 	}
 

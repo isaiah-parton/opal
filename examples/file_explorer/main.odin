@@ -239,9 +239,9 @@ item_display_for_list :: proc(
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			content_align = {0, 0.5},
 			gap = 4,
-			foreground = tw.BLUE_500 if self.file_info.is_dir else kn.WHITE,
-			stroke = tw.BLUE_500,
-			stroke_width = f32(i32(self.name == app.primary_selection)),
+			foreground = tw.BLUE_700 if self.file_info.is_dir else kn.BLACK,
+			stroke = global_ctx.theme.color.border,
+			stroke_width = f32(i32(self.selected)) * 2,
 		},
 	).?
 	{
@@ -319,7 +319,11 @@ item_display_for_list :: proc(
 	node_update_transition(node, 2, self.expanded, 0.2)
 
 	node.background = kn.fade(
-		kn.mix(f32(i32(self.selected)) * 0.5, tw.NEUTRAL_700, tw.BLUE_700),
+		kn.mix(
+			f32(i32(self.selected)) * 0.5,
+			global_ctx.theme.color.base_strong,
+			global_ctx.theme.color.accent,
+		),
 		max(f32(i32(self.selected)) * 0.5, node.transitions[0]),
 	)
 
@@ -675,9 +679,9 @@ explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview
 				defer delete(image_pixels)
 				for i in 0 ..< len(glyph_pixels) {
 					j := i * 4
-					image_pixels[j] = 255
-					image_pixels[j + 1] = 255
-					image_pixels[j + 2] = 255
+					image_pixels[j] = 0
+					image_pixels[j + 1] = 0
+					image_pixels[j + 2] = 0
 					image_pixels[j + 3] = glyph_pixels[i]
 				}
 				result = Image_Preview {
@@ -810,7 +814,7 @@ main :: proc() {
 					}
 					begin_node(
 						&{
-							style = {background = tw.NEUTRAL_900},
+							style = {background = global_ctx.theme.color.background},
 							layer = 3,
 							radius = 4,
 							shadow_color = tw.BLACK,
@@ -858,8 +862,8 @@ main :: proc() {
 							exact_offset = menu.position,
 							sizing = {exact = {0, 0}, fit = 1, max = INFINITY},
 							radius = 10,
-							background = tw.NEUTRAL_800,
-							stroke = tw.NEUTRAL_600,
+							background = global_ctx.theme.color.background,
+							stroke = global_ctx.theme.color.border,
 							shadow_color = tw.BLACK,
 							shadow_offset = 2,
 							shadow_size = 10,
@@ -920,11 +924,7 @@ main :: proc() {
 				}
 
 				begin_node(
-					&{
-						sizing = {max = INFINITY, grow = 1, fit = 1},
-						content_align = {0, 0.5},
-						style = {background = tw.NEUTRAL_900},
-					},
+					&{sizing = {max = INFINITY, grow = 1, fit = 1}, content_align = {0, 0.5}},
 				)
 				{
 					begin_node(
@@ -935,24 +935,19 @@ main :: proc() {
 								exact = {200, 0},
 								fit = {1, 0},
 							},
-							gap = 2,
-							padding = 4,
 							vertical = true,
 						},
 					)
 					{
 						// Main stuff
-						begin_node(&{sizing = {max = INFINITY, grow = 1}, padding = 4, gap = 4})
+						begin_node(&{sizing = {max = INFINITY, grow = 1}})
 						{
 							// Body
 							begin_node(
 								&{
 									sizing = {fit = {1, 0}, max = INFINITY, grow = 1},
-									padding = 8,
-									gap = 8,
 									vertical = true,
-									background = tw.NEUTRAL_800,
-									radius = 10,
+									background = global_ctx.theme.color.background,
 								},
 							)
 							{
@@ -962,6 +957,7 @@ main :: proc() {
 										sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
 										content_align = {0, 0.5},
 										gap = 4,
+										padding = 8,
 									},
 								)
 								{
@@ -969,6 +965,7 @@ main :: proc() {
 										&{
 											sizing = {grow = 1, max = INFINITY},
 											clip_content = true,
+											content_align = {0, 0.5},
 											interactive = true,
 										},
 									).?
@@ -1013,27 +1010,38 @@ main :: proc() {
 									begin_node(
 										&{
 											sizing = {fit = 1},
-											padding = 2,
 											radius = 8,
-											gap = 2,
-											background = tw.NEUTRAL_900,
+											padding = 2,
+											// background = global_ctx.theme.color.base_strong,
+											stroke = global_ctx.theme.color.border,
+											stroke_width = 2,
 										},
 									)
 									{
+										mode_icons := [Item_Display_Mode]rune {
+											.Grid = lucide.GRID_2X2,
+											.List = lucide.ROWS_3,
+										}
 										for mode, i in Item_Display_Mode {
+											radius: [4]f32 = 6
+											if i == 0 {
+												radius[1] = 0
+												radius[3] = 0
+											} else if i == len(Item_Display_Mode) - 1 {
+												radius[0] = 0
+												radius[2] = 0
+											}
+
 											push_id(i)
 											node := add_node(
 												&{
-													text = string_from_rune(
-														lucide.GRID_2X2 if mode == .Grid else lucide.ROWS_3,
-													),
+													text = string_from_rune(mode_icons[mode]),
 													sizing = {fit = 1, aspect_ratio = 1},
-													padding = 4,
+													padding = 6,
 													font_size = 16,
-													stroke_width = 2,
 													interactive = true,
 													content_align = 0.5,
-													radius = 6,
+													radius = radius,
 													font = &global_ctx.theme.icon_font,
 													foreground = global_ctx.theme.color.base_foreground,
 												},
@@ -1042,7 +1050,7 @@ main :: proc() {
 
 											node_update_transition(node, 0, node.is_hovered, 0.1)
 											node.background =
-												tw.NEUTRAL_700 if app.display_mode == mode else fade(tw.NEUTRAL_700, 0.4 * node.transitions[0])
+												tw.GREEN_500 if app.display_mode == mode else fade(tw.NEUTRAL_400, 0.4 * node.transitions[0])
 											if node.is_active && !node.was_active {
 												app.display_mode = mode
 											}
@@ -1060,6 +1068,7 @@ main :: proc() {
 										show_scrollbars = true,
 										clip_content = true,
 										interactive = true,
+										padding = 8,
 									},
 								)
 								{
@@ -1084,61 +1093,9 @@ main :: proc() {
 
 							// Right panel
 							if len(app.previews) > 0 {
-								{
-									begin_node(
-										&{
-											sizing = {
-												grow = {0, 1},
-												max = INFINITY,
-												exact = {1, 0},
-											},
-											layer = 1,
-											group = true,
-										},
-									)
-									{
-										node := add_node(
-											&{
-												absolute = true,
-												sizing = {relative = {0, 1}, exact = {7, 0}},
-												exact_offset = {-3, 0},
-												interactive = true,
-												radius = 2,
-												sticky = true,
-												cursor = Cursor.Resize_EW,
-												data = app,
-												on_draw = proc(self: ^Node) {
-													app := (^Explorer)(self.data)
-													if self.is_active {
-														app.right_panel_width =
-															self.parent.parent.box.hi.x -
-															self.parent.parent.padding.z -
-															self.parent.parent.gap -
-															box_width(self.box) / 2 -
-															opal.global_ctx.mouse_position.x
-													}
-													center := box_center(self.box)
-													color := kn.mix(
-														self.transitions[0] * 0.5,
-														global_ctx.theme.color.border,
-														global_ctx.theme.color.accent,
-													)
-													kn.add_circle(center + {0, -7}, 2.5, color)
-													kn.add_circle(center, 2.5, color)
-													kn.add_circle(center + {0, 7}, 2.5, color)
-												},
-											},
-										).?
-										node_update_transition(
-											node,
-											0,
-											node.is_hovered || node.is_active,
-											0.1,
-										)
-										node_update_transition(node, 1, node.is_active, 0.2)
-									}
-									end_node()
-								}
+								add_resizer(
+									&{orientation = .Vertical, value = &app.right_panel_width},
+								)
 								app.right_panel_width = max(app.right_panel_width, 240)
 								begin_node(
 									&{
@@ -1150,13 +1107,12 @@ main :: proc() {
 										},
 										content_align = {0.5, 0.5},
 										vertical = true,
-										padding = 8,
-										gap = 8,
-										background = tw.NEUTRAL_800,
+										padding = 12,
+										gap = 12,
+										background = global_ctx.theme.color.background,
 										show_scrollbars = true,
 										clip_content = true,
 										interactive = true,
-										radius = 10,
 									},
 								)
 								{
@@ -1170,7 +1126,7 @@ main :: proc() {
 												variant.text,
 												14,
 												&global_ctx.theme.monospace_font,
-												tw.WHITE,
+												global_ctx.theme.color.base_foreground,
 											)
 										// global_ctx.add_field(
 										// 	&{
@@ -1203,6 +1159,12 @@ main :: proc() {
 																node.box,
 																kn.WHITE,
 															),
+														)
+														kn.add_box_lines(
+															node.box,
+															2,
+															4,
+															global_ctx.theme.color.border,
 														)
 													},
 												},
@@ -1245,7 +1207,7 @@ begin_section :: proc(name: string, loc := #caller_location) {
 	push_id(hash_loc(loc))
 	begin_node(
 		&{
-			background = tw.NEUTRAL_800,
+			background = global_ctx.theme.color.background,
 			radius = 10,
 			vertical = true,
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
@@ -1361,7 +1323,13 @@ do_text :: proc(
 				push_id(i)
 				i += 1
 
-				word_end := strings.index_any(line, " .")
+				word_end := 0
+				is_white_space := unicode.is_white_space(rune(line[0]))
+				for s, i in line {
+					if unicode.is_white_space(s) != is_white_space {
+						word_end = i
+					}
+				}
 				if word_end == -1 {
 					word_end = len(line)
 				} else {
