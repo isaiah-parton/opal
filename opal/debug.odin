@@ -92,6 +92,9 @@ Inspector :: struct {
 	// Show colored highlights around text nodes to differentiate them
 	show_text_widgets:      bool,
 
+	// Show highlights around nodes whose contents are clipped with graphical scissors
+	show_clipped_nodes:     bool,
+
 	// Nodes under mouse
 	nodes_under_mouse:      [dynamic]^Node,
 }
@@ -121,18 +124,23 @@ inspector_show :: proc(self: ^Inspector) {
 		&{
 			sizing = {fit = {1, 0}, grow = {0, 1}, max = INFINITY, exact = {self.width, 0}},
 			vertical = true,
-			gap = 4,
+			gap = global_ctx.theme.min_spacing,
+			padding = global_ctx.theme.min_spacing,
 			background = global_ctx.theme.color.background,
 		},
 	).?
 	total_nodes := len(global_ctx.node_by_id)
+
+	// Analytics card
 	handle_node := begin_node(
 		&{
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			padding = global_ctx.theme.min_spacing,
 			radius = global_ctx.theme.radius_small,
+			stroke_width = 2,
+			stroke = global_ctx.theme.color.border,
+			background = global_ctx.theme.color.accent,
 			gap = 5,
-			style = {background = global_ctx.theme.color.base_strong},
 			interactive = true,
 			vertical = true,
 			data = global_ctx,
@@ -160,9 +168,7 @@ inspector_show :: proc(self: ^Inspector) {
 		desc.text = fmt.tprintf("Interval time: %v", global_ctx.performance_info.interval_duration)
 		add_node(&desc)
 		desc.text = fmt.tprintf("Frame time: %v", global_ctx.performance_info.frame_duration)
-		desc.foreground = tw.AMBER_500
 		add_node(&desc)
-		desc.foreground = tw.FUCHSIA_500
 		desc.text = fmt.tprintf("Compute time: %v", global_ctx.performance_info.compute_duration)
 		add_node(&desc)
 		desc.foreground = global_ctx.theme.color.base_foreground
@@ -174,14 +180,19 @@ inspector_show :: proc(self: ^Inspector) {
 		add_node(&desc)
 		desc.text = fmt.tprintf("Sizing passes: %i", global_ctx.performance_info.sizing_passes)
 		add_node(&desc)
+	}
+	end_node()
+
+	// Options
+	{
 		if add_button(&{icon = lucide.SQUARE_DASHED_MOUSE_POINTER, label = "Select"}).clicked {
 			inspector_activate_mouse_selection(self)
 		}
-		add_button(&{icon = lucide.X, label = "Close"})
 		add_checkbox(&{label = "Text debug", value = &self.show_text_widgets})
+		add_checkbox(&{label = "Show clipped nodes", value = &self.show_clipped_nodes})
 		add_checkbox(&{label = "Pixel snap", value = &global_ctx.snap_to_pixels})
 	}
-	end_node()
+
 	inspector_build_tree(&global_ctx.inspector)
 	if self.selected_id != 0 {
 		begin_node(

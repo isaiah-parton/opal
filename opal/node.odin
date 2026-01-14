@@ -1012,6 +1012,12 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 	// Apply clipping
 	if enable_scissor {
+		when ODIN_DEBUG {
+			if global_ctx.inspector.show_clipped_nodes {
+				kn.add_box_lines(self.box, 1, self.style.radius, kn.RED)
+				kn.add_box(self.box, self.style.radius, kn.fade(kn.RED, 0.3))
+			}
+		}
 		kn.push_scissor(kn.make_box(self.box, self.style.radius))
 	}
 

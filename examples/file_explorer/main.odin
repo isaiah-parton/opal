@@ -265,11 +265,12 @@ item_display_for_list :: proc(
 				text = self.file_info.name,
 				font = &global_ctx.theme.font,
 				font_size = 16,
-				sizing = {fit = 1},
+				sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
 				foreground = node.foreground,
+				clip_content = true,
 			},
 		)
-		add_node(&{sizing = {grow = {1, 0}, max = INFINITY}})
+		// add_node(&{sizing = {grow = {1, 0}, max = INFINITY}})
 		if !self.is_dir {
 			add_node(
 				&{
@@ -773,9 +774,15 @@ main :: proc() {
 			opal.global_ctx.window_interface.callback_data = app
 			opal.global_ctx.window_interface.maximize_callback = proc(data: rawptr) {
 				app := (^Explorer)(data)
+				if .MAXIMIZED in sdl3.GetWindowFlags(app.window) {
+					sdl3.RestoreWindow(app.window)
+				} else {
+					sdl3.MaximizeWindow(app.window)
+				}
 			}
 			opal.global_ctx.window_interface.iconify_callback = proc(data: rawptr) {
 				app := (^Explorer)(data)
+				sdl3.MinimizeWindow(app.window)
 			}
 			opal.global_ctx.window_interface.close_callback = proc(data: rawptr) {
 				app := (^Explorer)(data)

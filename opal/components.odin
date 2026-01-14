@@ -183,12 +183,9 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 	case .Primary:
 		color = tw.GREEN_600
 	case .Outline:
-		desc.stroke = tw.NEUTRAL_500
-		desc.stroke_width = 1
 	case .Ghost:
 		color = tw.NEUTRAL_800
 	case .Link:
-
 	}
 
 	result.node = begin_node(desc)
@@ -197,6 +194,8 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 			&{
 				sizing = {fit = 1},
 				background = color,
+				stroke_width = 2,
+				stroke = ctx.theme.color.border,
 				gap = 4,
 				padding = {8, 4, 8, 4},
 				radius = 4,

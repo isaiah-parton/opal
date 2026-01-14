@@ -1104,10 +1104,10 @@ begin :: proc() {
 		}
 
 		if add_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
-			handle_window_maximize()
+			handle_window_iconify()
 		}
 		if add_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
-			handle_window_iconify()
+			handle_window_maximize()
 		}
 		if add_window_button(lucide.X, tw.ROSE_500) {
 			handle_window_close()
