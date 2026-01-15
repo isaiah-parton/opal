@@ -1,5 +1,6 @@
 package example
 
+import tj "../../../turbojpeg-odin"
 import kn "../../katana"
 import "../../katana/sdl3glue"
 import "../../lucide"
@@ -7,11 +8,12 @@ import opal "../../opal"
 import "../../sdl3app"
 import tw "../../tailwind_colors"
 import "base:runtime"
+import "core:bytes"
 import "core:c/libc"
+import c "core:c/libc"
 import "core:fmt"
-import "core:image"
+import img "core:image"
 import "core:image/bmp"
-import "core:image/jpeg"
 import "core:image/png"
 import "core:image/qoi"
 import "core:image/tga"
@@ -234,7 +236,7 @@ item_display_for_list :: proc(
 		&{
 			interactive = true,
 			sticky = true,
-			radius = 8,
+			radius = global_ctx.theme.radius_small,
 			padding = {8 + f32(depth) * 20, 4, 8, 4},
 			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
 			content_align = {0, 0.5},
@@ -265,7 +267,7 @@ item_display_for_list :: proc(
 				text = self.file_info.name,
 				font = &global_ctx.theme.font,
 				font_size = 16,
-				sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
+				sizing = {fit = {1, 1}, grow = {1, 0}, max = INFINITY},
 				foreground = node.foreground,
 				clip_content = true,
 			},
@@ -341,10 +343,13 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 	update_selection: bool
 	defer if update_selection do explorer_update_selection(app)
 
-	if node.is_active &&
-	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 10 &&
+	// Handle click-n-drag
+	if !app.dragging &&
+	   node.is_active &&
+	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 1 &&
 	   global_ctx.last_mouse_down_button == .Left {
-		if !multi_select && len(app.selected_items) == 1 {
+		if !multi_select {
+			// Select only the hovered item
 			for &item, j in app.items {
 				item_deselect_children(&item)
 				item.selected = false
@@ -355,7 +360,8 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 		app.dragging = true
 	}
 
-	if node.is_active && !node.was_active {
+	// Handle mouse pressed
+	if !app.dragging && node.is_active && !node.was_active {
 		if global_ctx.last_mouse_down_button == .Right {
 			app.context_menu = Context_Menu {
 				position = global_ctx.mouse_position,
@@ -370,8 +376,10 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 		update_selection = true
 	}
 
+	// Handle mouse relased
 	if node.was_active && !node.is_active {
 		if node.click_count == 2 {
+			// Handle double click
 			if self.file_info.is_dir {
 				explorer_change_folder(app, self.file_info.name)
 			} else if self.file_info.mode == 1049014 {
@@ -392,6 +400,7 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 					item_deselect_children(&item, self)
 					item.selected = false
 				}
+				update_selection = true
 			}
 			if self.file_info.is_dir {
 				self.expanded = !self.expanded
@@ -400,7 +409,6 @@ item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
 				}
 			}
 		}
-		update_selection = true
 	}
 }
 
@@ -424,7 +432,7 @@ Text_Preview :: struct {
 }
 
 Image_Preview :: struct {
-	source: kn.Box,
+	resource: kn.Atlas_Resource,
 }
 
 Context_Menu :: struct {
@@ -592,6 +600,46 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 	}
 }
 
+make_image_preview :: proc(image: ^img.Image) -> Image_Preview {
+	MAX_DIMENSION :: 512
+
+	shrink_x := max(image.width - MAX_DIMENSION, 0)
+	shrink_y := max(image.height - MAX_DIMENSION, 0)
+
+	new_width := image.width
+	new_height := image.height
+	if shrink_x > shrink_y {
+		new_width = image.width - shrink_x
+		new_height = int(f32(image.height) * (f32(new_width) / f32(image.width)))
+	} else {
+		new_height = image.height - shrink_y
+		new_width = int(f32(image.width) * (f32(new_height) / f32(image.height)))
+	}
+
+	new_data := make([]u8, new_width * new_height * 4)
+	defer delete(new_data)
+
+	stbi.resize_uint8(
+		raw_data(image.pixels.buf),
+		i32(image.width),
+		i32(image.height),
+		0,
+		raw_data(new_data),
+		i32(new_width),
+		i32(new_height),
+		0,
+		4,
+	)
+
+	return Image_Preview {
+		resource = kn.Atlas_Resource {
+			pixels = raw_data(new_data),
+			width = new_width,
+			height = new_height,
+		},
+	}
+}
+
 explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview, err: os.Error) {
 	self.primary_selection = name
 
@@ -604,43 +652,53 @@ explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview
 	defer os.close(file)
 
 	switch filepath.ext(name) {
-	case ".png", ".jpg", ".jpeg", ".qoi", ".tga", ".bmp":
-		if img, err := image.load_from_file(name, {.alpha_add_if_missing}); err == nil {
-			defer image.destroy(img)
+	case ".jpg", ".jpeg":
+		data := os.read_entire_file_from_handle_or_err(file) or_return
+		defer delete(data)
 
-			MAX_DIMENSION :: 512
+		// Prepare decompressor instance
+		h := tj.init_decompress()
+		defer tj.destroy(h)
 
-			shrink_x := max(img.width - MAX_DIMENSION, 0)
-			shrink_y := max(img.height - MAX_DIMENSION, 0)
+		// Decompress header
+		width, height: c.int
+		tj.decompress_header(h, raw_data(data), c.ulong(len(data)), &width, &height)
 
-			new_width := img.width
-			new_height := img.height
-			if shrink_x > shrink_y {
-				new_width = img.width - shrink_x
-				new_height = int(f32(img.height) * (f32(new_width) / f32(img.width)))
-			} else {
-				new_height = img.height - shrink_y
-				new_width = int(f32(img.width) * (f32(new_height) / f32(img.height)))
-			}
+		// Prepare destination buffer
+		pixels := make([]u8, int(width) * int(height) * 4)
+		defer delete(pixels)
 
-			new_data := make([]u8, new_width * new_height * 4)
-			defer delete(new_data)
+		// Decompress pixels
+		tj.decompress2(
+			h,
+			raw_data(data),
+			c.ulong(len(data)),
+			raw_data(pixels),
+			width,
+			0,
+			height,
+			.RGBA,
+			{.FASTDCT},
+		)
 
-			stbi.resize_uint8(
-				raw_data(img.pixels.buf),
-				i32(img.width),
-				i32(img.height),
-				0,
-				raw_data(new_data),
-				i32(new_width),
-				i32(new_height),
-				0,
-				4,
-			)
+		// Create image
+		image := img.Image {
+			width    = int(width),
+			height   = int(height),
+			channels = 4,
+			depth    = 8,
+		}
+		defer img.destroy(&image)
 
-			result = Image_Preview {
-				source = kn.copy_image_to_atlas(raw_data(new_data), new_width, new_height),
-			}
+		// Populate image pixel buffer
+		bytes.buffer_write(&image.pixels, pixels)
+
+		result = make_image_preview(&image)
+	case ".png", ".qoi", ".tga", ".bmp":
+		if image, err := img.load_from_file(name, {.alpha_add_if_missing}); err == nil {
+			defer img.destroy(image)
+
+			result = make_image_preview(image)
 		} else {
 			fmt.eprintln(err)
 		}
@@ -686,7 +744,11 @@ explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview
 					image_pixels[j + 3] = glyph_pixels[i]
 				}
 				result = Image_Preview {
-					source = kn.copy_image_to_atlas(raw_data(image_pixels), int(w), int(h)),
+					resource = kn.Atlas_Resource {
+						pixels = raw_data(image_pixels),
+						width = int(w),
+						height = int(h),
+					},
 				}
 			}
 		} else {
@@ -821,11 +883,16 @@ main :: proc() {
 					}
 					begin_node(
 						&{
-							style = {background = global_ctx.theme.color.background},
-							layer = 3,
-							radius = 4,
-							shadow_color = tw.BLACK,
-							shadow_size = 10,
+							style = {
+								background = global_ctx.theme.color.background,
+								stroke_width = 2,
+								stroke = global_ctx.theme.color.border,
+							},
+							layer = 9,
+							radius = global_ctx.theme.radius_small,
+							shadow_color = kn.fade(tw.BLACK, 0.5),
+							shadow_offset = {0, 2},
+							shadow_size = 8,
 							exact_offset = global_ctx.mouse_position,
 							is_root = true,
 							sizing = {fit = 1, exact = {300, 0}},
@@ -842,14 +909,14 @@ main :: proc() {
 						}
 						add_node(
 							&{
-								layer = 4,
+								layer = 10,
 								absolute = true,
 								align = {0, 1},
 								sizing = {fit = 1},
 								text = fmt.tprintf("%i items", len(app.selected_items)),
 								font = &global_ctx.theme.font,
 								font_size = 14,
-								foreground = tw.WHITE,
+								foreground = global_ctx.theme.color.base_foreground,
 							},
 						)
 					}
@@ -865,16 +932,16 @@ main :: proc() {
 					menu_root := begin_node(
 						&Node_Descriptor {
 							layer = 9,
-							absolute = true,
+							is_root = true,
 							exact_offset = menu.position,
 							sizing = {exact = {0, 0}, fit = 1, max = INFINITY},
 							radius = 10,
 							background = global_ctx.theme.color.background,
 							stroke = global_ctx.theme.color.border,
-							shadow_color = tw.BLACK,
-							shadow_offset = 2,
-							shadow_size = 10,
-							stroke_width = 1,
+							shadow_color = kn.fade(tw.BLACK, 0.5),
+							shadow_offset = {0, 2},
+							shadow_size = 8,
+							stroke_width = 2,
 							interactive = true,
 							vertical = true,
 						},
@@ -894,7 +961,7 @@ main :: proc() {
 						add_node(
 							&{
 								text = menu.file if len(app.selected_items) == 1 else fmt.tprintf("%i files", len(app.selected_items)),
-								foreground = tw.WHITE,
+								foreground = global_ctx.theme.color.base_foreground,
 								font = &global_ctx.theme.font,
 								font_size = 16,
 								sizing = {fit = 1},
@@ -903,8 +970,8 @@ main :: proc() {
 						)
 						add_node(
 							&{
-								sizing = {exact = {0, 1}, max = {INFINITY, 1}, grow = {1, 0}},
-								background = tw.NEUTRAL_600,
+								sizing = {exact = {0, 2}, max = {INFINITY, 2}, grow = {1, 0}},
+								background = global_ctx.theme.color.border,
 							},
 						)
 						begin_node(
@@ -1146,14 +1213,16 @@ main :: proc() {
 										// 	},
 										// )
 										case (Image_Preview):
+											size := [2]f32 {
+												f32(variant.resource.width),
+												f32(variant.resource.height),
+											}
 											add_node(
 												&{
 													sizing = {
 														grow = 1,
-														max = variant.source.hi -
-														variant.source.lo,
-														aspect_ratio = box_width(variant.source) /
-														box_height(variant.source),
+														max = size,
+														aspect_ratio = size.x / size.y,
 													},
 													data = &preview,
 													on_draw = proc(node: ^Node) {
@@ -1162,7 +1231,7 @@ main :: proc() {
 															node.box,
 															4,
 															kn.make_atlas_sample(
-																(^Image_Preview)(node.data)^.source,
+																&(^Image_Preview)(node.data).resource,
 																node.box,
 																kn.WHITE,
 															),

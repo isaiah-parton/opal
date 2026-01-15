@@ -943,7 +943,7 @@ node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Pa
 		if source, ok := use_image(v.index); ok {
 			return kn.add_paint(
 				kn.make_atlas_sample(
-					source,
+					&source,
 					{self.box.lo + v.offset * size, self.box.lo + v.size * size},
 					kn.WHITE,
 				),
@@ -1001,6 +1001,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		kn.translate(-transform_origin + self.style.translate)
 	}
 
+	// Shadow
 	if self.shadow_color != {} {
 		kn.add_box_shadow(
 			{self.box.lo + self.shadow_offset, self.box.hi + self.shadow_offset},
@@ -1029,6 +1030,8 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 			paint = node_convert_paint_variant(self, self.background),
 		)
 	}
+
+	// Text highlight
 	if self.style.foreground != nil && len(self.glyphs) > 0 {
 		self.text_origin =
 			linalg.lerp(
@@ -1092,6 +1095,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		}
 	}
 
+	// Custom draw method
 	if self.on_draw != nil {
 		self.on_draw(self)
 	}
@@ -1105,6 +1109,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		kn.pop_scissor()
 	}
 
+	// Outline
 	if self.style.stroke != nil {
 		kn.add_box_lines(
 			self.box,

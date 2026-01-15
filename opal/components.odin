@@ -59,8 +59,8 @@ theme_default :: proc() -> Theme {
 		label_icon_size = 16,
 		base_size = 12,
 		min_spacing = 12,
-		radius_small = 6,
-		radius_big = 12,
+		radius_small = 8,
+		radius_big = 16,
 		font_size_small = 14,
 		color = {
 			background = tw.NEUTRAL_100,
@@ -540,18 +540,26 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 	node_update_transition(self, 0, self.is_hovered, 0.1)
 	node_update_transition(self, 1, self.is_active, 0.1)
 	self.style.background = fade(
-		tw.NEUTRAL_600,
+		ctx.theme.color.base_strong,
 		self.transitions[0] * 0.3 + self.transitions[1] * 0.3,
 	)
 	add_node(
 		&{
 			text = string_from_rune(icon),
 			sizing = {fit = 1},
-			style = {foreground = tw.NEUTRAL_300, font_size = 18, font = &ctx.theme.icon_font},
+			style = {
+				foreground = ctx.theme.color.base_foreground,
+				font_size = 18,
+				font = &ctx.theme.icon_font,
+			},
 		},
 	)
 	add_node(
-		&{text = label, sizing = {fit = 1}, style = {font_size = 14, foreground = tw.NEUTRAL_300}},
+		&{
+			text = label,
+			sizing = {fit = 1},
+			style = {font_size = 14, foreground = ctx.theme.color.base_foreground},
+		},
 	)
 	end_node()
 	pop_id()

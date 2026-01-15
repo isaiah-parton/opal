@@ -113,10 +113,7 @@ Paint_Variant :: union #no_nil {
 }
 
 User_Image :: struct {
-	source: Maybe(Box),
-	data:   rawptr,
-	width:  i32,
-	height: i32,
+	resource: kn.Atlas_Resource,
 }
 
 Stroke_Type :: enum {
@@ -384,16 +381,22 @@ load_image :: proc(file: string) -> (index: int, ok: bool) {
 
 	image: User_Image
 
-	image.data = stbi.load(
+	width, height: i32
+
+	pixel_data := stbi.load(
 		strings.clone_to_cstring(file, context.temp_allocator),
-		&image.width,
-		&image.height,
+		&width,
+		&height,
 		nil,
 		4,
 	)
-	if image.data == nil {
+	if pixel_data == nil {
 		return
 	}
+
+	image.resource.pixels = pixel_data
+	image.resource.width = int(width)
+	image.resource.height = int(height)
 
 	ok = true
 
@@ -412,16 +415,14 @@ load_image :: proc(file: string) -> (index: int, ok: bool) {
 }
 
 // Use an already loaded user image, copying it to the atlas if it wasn't yet
-use_image :: proc(index: int) -> (source: Box, ok: bool) {
+use_image :: proc(index: int) -> (resource: kn.Atlas_Resource, ok: bool) {
 	ctx := global_ctx
 	if index < 0 || index >= len(ctx.images) {
 		return {}, false
 	}
 	#no_bounds_check image := (&ctx.images[index].?) or_return
-	if image.source == nil {
-		image.source = kn.copy_image_to_atlas(image.data, int(image.width), int(image.height))
-	}
-	return image.source.?
+	resource = image.resource
+	return
 }
 
 get_screen_box :: proc() -> Box {
