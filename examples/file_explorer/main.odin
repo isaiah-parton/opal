@@ -40,127 +40,6 @@ import "vendor:wgpu"
 
 FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
 
-Preview :: union {
-	Text_Preview,
-	Image_Preview,
-}
-
-preview_uninit :: proc(self: ^Preview) {
-	switch variant in self {
-	case Text_Preview:
-		delete(variant.data)
-	case Image_Preview:
-	}
-	self^ = {}
-}
-
-Text_Preview :: struct {
-	data: []u8,
-	text: string,
-}
-
-Image_Preview :: struct {
-	mutex:    sync.Mutex,
-	file:     string,
-	resource: Maybe(kn.Atlas_Resource),
-}
-
-image_preview_init :: proc(self: ^Image_Preview, file: string) -> (err: os.Error) {
-	image: ^img.Image
-	defer if image != nil do img.destroy(image)
-
-	switch filepath.ext(file) {
-	case ".jpg", ".jpeg":
-		data := os.read_entire_file_from_filename_or_err(file) or_return
-		defer delete(data)
-
-		// Prepare decompressor instance
-		h := tj.init_decompress()
-		defer tj.destroy(h)
-
-		// Decompress header
-		width, height: c.int
-		tj.decompress_header(h, raw_data(data), c.ulong(len(data)), &width, &height)
-
-		// Prepare destination buffer
-		pixels := make([]u8, int(width) * int(height) * 4)
-		defer delete(pixels)
-
-		// Decompress pixels
-		tj.decompress2(
-			h,
-			raw_data(data),
-			c.ulong(len(data)),
-			raw_data(pixels),
-			width,
-			0,
-			height,
-			.RGBA,
-			{.FASTDCT},
-		)
-
-		// Create image
-		image = new_clone(
-			img.Image{width = int(width), height = int(height), channels = 4, depth = 8},
-		)
-
-		// Populate image pixel buffer
-		bytes.buffer_write(&image.pixels, pixels)
-	case ".png", ".qoi", ".tga", ".bmp":
-		if loaded_image, err := img.load_from_file(file, {.alpha_add_if_missing}); err == nil {
-			image = loaded_image
-		} else {
-			fmt.eprintln(err)
-		}
-	}
-
-	MAX_DIMENSION :: 512
-
-	shrink_x := max(image.width - MAX_DIMENSION, 0)
-	shrink_y := max(image.height - MAX_DIMENSION, 0)
-
-	new_width := image.width
-	new_height := image.height
-	if shrink_x > shrink_y {
-		new_width = image.width - shrink_x
-		new_height = int(f32(image.height) * (f32(new_width) / f32(image.width)))
-	} else {
-		new_height = image.height - shrink_y
-		new_width = int(f32(image.width) * (f32(new_height) / f32(image.height)))
-	}
-
-	new_data := make([]u8, new_width * new_height * 4)
-
-	stbi.resize_uint8(
-		raw_data(image.pixels.buf),
-		i32(image.width),
-		i32(image.height),
-		0,
-		raw_data(new_data),
-		i32(new_width),
-		i32(new_height),
-		0,
-		4,
-	)
-
-	sync.guard(&self.mutex)
-	self.resource = kn.Atlas_Resource {
-		pixels = raw_data(new_data),
-		width  = new_width,
-		height = new_height,
-	}
-
-	return
-}
-
-image_preview_init_async :: proc(self: ^Image_Preview, file: string) {
-	self.file = strings.clone(file)
-	thread.run_with_data(self, proc(data: rawptr) {
-		self := (^Image_Preview)(data)
-		image_preview_init(self, self.file)
-	})
-}
-
 Context_Menu :: struct {
 	position: [2]f32,
 	file:     string,
@@ -184,7 +63,7 @@ Explorer :: struct {
 	selected_items:    [dynamic]Item,
 	selection_count:   int,
 	primary_selection: Maybe(string),
-	previews:          [dynamic]Preview,
+	previews:          File_Previews,
 	context_menu:      Maybe(Context_Menu),
 	display_mode:      Item_Display_Mode,
 	dragging:          bool,
@@ -227,10 +106,7 @@ explorer_change_folder :: proc(self: ^Explorer, folder: string) {
 }
 
 explorer_update_selection :: proc(self: ^Explorer) {
-	for &preview in self.previews {
-		preview_uninit(&preview)
-	}
-	clear(&self.previews)
+	file_previews_clear(&self.previews)
 	clear(&self.selected_items)
 	explorer_populate_previews(self, self.items[:])
 }
@@ -257,9 +133,7 @@ explorer_populate_previews :: proc(self: ^Explorer, items: []Item) {
 		if item.selected {
 			append(&self.selected_items, item)
 			if !item.is_dir {
-				if preview, err := explorer_make_preview(self, item.fullpath); err == nil {
-					append(&self.previews, preview)
-				} else {
+				if _, err := file_previews_add(&self.previews, item.fullpath); err != nil {
 					fmt.eprintfln("Failed to create preview for %v: %v", item.name, err)
 				}
 			}
@@ -324,94 +198,6 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 			)
 		}
 	}
-}
-
-explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview, err: os.Error) {
-	self.primary_selection = name
-
-	if os.is_dir(name) {
-		err = os.General_Error.Invalid_File
-		return
-	}
-
-	file := os.open(name, os.O_RDONLY) or_return
-	defer os.close(file)
-
-	switch filepath.ext(name) {
-	case ".jpg", ".jpeg", ".png", ".qoi", ".tga", ".bmp":
-		image_preview: Image_Preview
-		image_preview_init_async(&image_preview, name)
-		result = image_preview
-	case ".ttf", ".otf":
-		if data, ok := os.read_entire_file(name); ok {
-			font: stbtt.fontinfo
-			if !stbtt.InitFont(&font, raw_data(data), 0) {
-				fmt.eprintln("Failed to initialize font")
-			}
-
-			x, y, w, h: i32
-			codepoint: rune
-			for i := 0;; i += 1 {
-				index := stbtt.FindGlyphIndex(&font, rune(i))
-				if index != 0 && !stbtt.IsGlyphEmpty(&font, index) {
-					codepoint = rune(i)
-					break
-				}
-			}
-			scale := stbtt.ScaleForPixelHeight(&font, 32)
-			glyph_pixels := stbtt.GetGlyphBitmap(
-				&font,
-				scale,
-				scale,
-				i32(codepoint),
-				&w,
-				&h,
-				&x,
-				&y,
-			)[:w *
-			h]
-			// defer stbtt.FreeBitmap(glyph_pixels, nil)
-			if glyph_pixels == nil {
-				fmt.eprintln("Failed to get codepoint bitmap")
-			} else {
-				image_pixels := make([]u8, w * h * 4)
-				defer delete(image_pixels)
-				for i in 0 ..< len(glyph_pixels) {
-					j := i * 4
-					image_pixels[j] = 0
-					image_pixels[j + 1] = 0
-					image_pixels[j + 2] = 0
-					image_pixels[j + 3] = glyph_pixels[i]
-				}
-				result = Image_Preview {
-					resource = kn.Atlas_Resource {
-						pixels = raw_data(image_pixels),
-						width = int(w),
-						height = int(h),
-					},
-				}
-			}
-		} else {
-			fmt.eprintln("Failed to read font file")
-		}
-	case:
-		text_preview := Text_Preview {
-			data = make([]u8, 1024),
-		}
-		defer if err != nil do delete(text_preview.data)
-
-		n := os.read(file, text_preview.data) or_return
-
-		text_preview.text = string(text_preview.data[:n])
-
-		if utf8.valid_string(text_preview.text) {
-			result = text_preview
-		} else {
-			err = os.General_Error.Unsupported
-		}
-	}
-
-	return
 }
 
 explorer_refresh :: proc(self: ^Explorer) -> os.Error {
@@ -806,7 +592,7 @@ main :: proc() {
 							end_node()
 
 							// Right panel
-							if len(app.previews) > 0 {
+							if len(app.previews.items) > 0 {
 								add_resizer(
 									&{orientation = .Vertical, value = &app.right_panel_width},
 								)
@@ -830,62 +616,7 @@ main :: proc() {
 									},
 								)
 								{
-									for &preview, i in app.previews {
-										push_id(int(i + 1))
-										defer pop_id()
-										switch &variant in preview {
-										case (Text_Preview):
-											do_text(
-												&{sizing = {grow = 1, max = INFINITY, fit = 1}},
-												variant.text,
-												14,
-												&global_ctx.theme.monospace_font,
-												global_ctx.theme.color.base_foreground,
-											)
-										// global_ctx.add_field(
-										// 	&{
-										// 		sizing = {grow = 1, max = INFINITY},
-										// 		multiline = true,
-										// 		value_data = &variant.text,
-										// 		value_type_info = type_info_of(
-										// 			type_of(variant.text),
-										// 		),
-										// 	},
-										// )
-										case (Image_Preview):
-											if resource, ok := variant.resource.?; ok {
-												size := [2]f32 {
-													f32(resource.width),
-													f32(resource.height),
-												}
-												add_node(
-													&{
-														sizing = {
-															grow = 1,
-															max = size,
-															aspect_ratio = size.x / size.y,
-														},
-														data = &preview,
-														on_draw = proc(node: ^Node) {
-															app := (^Explorer)(node.data)
-															resource := &(^Image_Preview)(node.data).resource.?
-															kn.add_box(
-																node.box,
-																4,
-																kn.make_atlas_sample(resource, node.box, kn.WHITE) if resource.pixels != nil else tw.TRANSPARENT,
-															)
-															kn.add_box_lines(
-																node.box,
-																2,
-																4,
-																global_ctx.theme.color.border,
-															)
-														},
-													},
-												)
-											}
-										}
-									}
+									file_previews_display(&app.previews)
 								}
 								end_node()
 							}

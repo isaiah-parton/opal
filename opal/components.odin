@@ -66,7 +66,7 @@ theme_default :: proc() -> Theme {
 			background = tw.NEUTRAL_100,
 			base_strong = tw.NEUTRAL_300,
 			accent = tw.BLUE_500,
-			primary = tw.NEUTRAL_800,
+			primary = tw.LIME_600,
 			primary_foreground = tw.WHITE,
 			secondary = tw.NEUTRAL_700,
 			secondary_foreground = tw.NEUTRAL_950,
@@ -176,32 +176,39 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 	}
 	desc.interactive = true
 	desc.radius = 4
-	desc.background = global_ctx.theme.color.base_foreground
+	desc.background = ctx.theme.color.base_foreground
 
-	color: Color
+	face_node_desc := Node_Descriptor {
+		sizing = {fit = 1},
+		stroke_width = 2,
+		stroke = ctx.theme.color.border,
+		gap = 4,
+		padding = {8, 4, 8, 4},
+		radius = 4,
+		content_align = 0.5,
+	}
+
+	depth: f32 = 2
 	switch desc.variant {
 	case .Primary:
-		color = tw.GREEN_600
+		face_node_desc.background = ctx.theme.color.primary
 	case .Outline:
+		face_node_desc.background = ctx.theme.color.background
 	case .Ghost:
-		color = tw.NEUTRAL_800
+		face_node_desc.background = ctx.theme.color.base_strong
+		face_node_desc.stroke_width = 0
+		desc.background = mix(0.5, ctx.theme.color.base_strong, tw.BLACK)
 	case .Link:
+		face_node_desc.background = ctx.theme.color.background
+		face_node_desc.stroke_width = 0
+		depth = 0
+		desc.cursor = .Pointer
+		desc.background = tw.TRANSPARENT
 	}
 
 	result.node = begin_node(desc)
 	{
-		face_node := begin_node(
-			&{
-				sizing = {fit = 1},
-				background = color,
-				stroke_width = 2,
-				stroke = ctx.theme.color.border,
-				gap = 4,
-				padding = {8, 4, 8, 4},
-				radius = 4,
-				content_align = 0.5,
-			},
-		).?
+		face_node := begin_node(&face_node_desc).?
 		{
 			if desc.icon != 0 {
 				add_node(
@@ -211,6 +218,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 						font = &global_ctx.theme.icon_font,
 						font_size = ctx.theme.label_icon_size,
 						text = string_from_rune(desc.icon),
+						underline = desc.variant == .Link && result.node.?.is_hovered,
 					},
 				)
 			}
@@ -221,6 +229,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 						sizing = {fit = 1},
 						font_size = ctx.theme.label_text_size,
 						text = desc.label,
+						underline = desc.variant == .Link && result.node.?.is_hovered,
 					},
 				)
 			}
@@ -229,8 +238,8 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 		if node, ok := result.node.?; ok {
 			result.clicked = node.is_active && !node.was_active
 			node_update_transition(node, 0, node.is_hovered, 0.15)
-			node_update_transition(node, 1, node.is_active, 0.15)
-			face_node.translate = -math.lerp(f32(2), f32(0), node.transitions[1])
+			node_update_transition(node, 1, node.is_active, 0.1)
+			face_node.translate = -math.lerp(depth, f32(0), node.transitions[1])
 		}
 	}
 	end_node()

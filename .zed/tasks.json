@@ -1,19 +1,30 @@
 [
 	{
-		"label": "Run",
+		"label": "Run file_explorer",
 		"command": "odin",
 		"args": [
 			"run",
 			"file_explorer",
 			"-debug",
-			"-collection:local='C:/dev/odin/projects'"
+			"-collection:local='C:/dev/odin/projects'",
 		],
-		"cwd": "$ZED_WORKTREE_ROOT/examples"
+		"cwd": "$ZED_WORKTREE_ROOT/examples",
+	},
+	{
+		"label": "Run widget_gallery",
+		"command": "odin",
+		"args": [
+			"run",
+			"widget_gallery",
+			"-debug",
+			"-collection:local='C:/dev/odin/projects'",
+		],
+		"cwd": "$ZED_WORKTREE_ROOT/examples",
 	},
 	{
 		"label": "Run (Blazingly Fast)",
 		"command": "odin",
 		"args": ["run", "file_explorer", "-o:speed", "-no-bounds-check"],
-		"cwd": "$ZED_WORKTREE_ROOT/examples"
-	}
+		"cwd": "$ZED_WORKTREE_ROOT/examples",
+	},
 ]

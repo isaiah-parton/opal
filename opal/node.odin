@@ -30,19 +30,20 @@ Node_Style :: struct {
 	transform_origin: [2]f32,
 
 	// Transformation applied to self and children
-	scale:            [2]f32,
-	translate:        [2]f32,
-	rotation:         f32,
 	stroke_type:      Stroke_Type,
 	stroke:           Paint_Option,
 	background:       Paint_Variant,
 	foreground:       Paint_Option,
 	font:             ^Font `fmt:"-"`,
 	shadow_color:     Color,
+	scale:            [2]f32,
+	translate:        [2]f32,
+	rotation:         f32,
 	shadow_offset:    [2]f32,
 	stroke_width:     f32,
 	font_size:        f32,
 	shadow_size:      f32,
+	underline:        bool,
 }
 
 /*
@@ -516,9 +517,9 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 	self.box.hi = self.box.lo + self.size
 
 	// Re-implement this
-	// if global_ctx.snap_to_pixels {
-	// 	box_snap(&self.box)
-	// }
+	if global_ctx.snap_to_pixels {
+		box_snap(&self.box)
+	}
 }
 
 node_get_is_size_affected_by_parent :: proc(self: ^Node) -> bool {
@@ -633,6 +634,19 @@ node_solve_child_placement_in_range :: proc(self: ^Node, from, to: int, span, li
 
 	// Starting position for children along layout axis
 	offset: f32 = self.padding[i] + length_left * self.content_align[i]
+
+	// Apply aspect ratios
+	for node in children {
+		if node.sizing.aspect_ratio != 0 {
+			target_aspect := node.sizing.aspect_ratio
+			// Invert ratios if layout is horizontal
+			if i == 0 {
+				target_aspect = 1 / target_aspect
+			}
+			// Clamp max growable size based on aspect ratio
+			node.size[1 - i] = node.size[i] * target_aspect
+		}
+	}
 
 	// Next, position children along layout axis + grow and position them across it
 	for node in children {
@@ -816,15 +830,15 @@ node_grow_children :: proc(self: ^Node, array: ^[dynamic]^Node, length: f32) -> 
 				// Check for aspect ratio to enforce
 				// We need to enforce aspect ratio anywhere growth or fitting happens
 				// TODO: Maybe move this functionality to a node_resize proc?
-				if node.sizing.aspect_ratio != 0 {
-					target_aspect := node.sizing.aspect_ratio
-					// Invert ratios if layout is horizontal
-					if i == 0 {
-						target_aspect = 1 / target_aspect
-					}
-					// Clamp max growable size based on aspect ratio
-					node.size[1 - i] = node.size[i] * target_aspect
-				}
+				// if node.sizing.aspect_ratio != 0 {
+				// 	target_aspect := node.sizing.aspect_ratio
+				// 	// Invert ratios if layout is horizontal
+				// 	if i == 0 {
+				// 		target_aspect = 1 / target_aspect
+				// 	}
+				// 	// Clamp max growable size based on aspect ratio
+				// 	node.size[1 - i] = node.size[i] * target_aspect
+				// }
 
 				// Add content size (this is important)
 				self.content_size[i] += size_to_add
@@ -1025,10 +1039,15 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	// Draw self
 	if self.background != {} {
 		kn.add_box(
-			self.box,
-			self.style.radius,
+			box_shrink(self.box, self.style.stroke_width),
+			self.style.radius - self.style.stroke_width,
 			paint = node_convert_paint_variant(self, self.background),
 		)
+	}
+
+	// Custom draw method
+	if self.on_draw != nil {
+		self.on_draw(self)
 	}
 
 	// Text highlight
@@ -1044,6 +1063,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		line_height := self.font.line_height * self.font_size
 
+		// Draw debug helpers
 		when ODIN_DEBUG {
 			if global_ctx.inspector.show_text_widgets {
 				rgba := linalg.vector4_hsl_to_rgb(
@@ -1056,6 +1076,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 			}
 		}
 
+		// Draw selection
 		if self.enable_selection && self.text_view.active {
 			// TODO: implement custom selection color
 			paint := kn.paint_index_from_option(fade(tw.INDIGO_700, 1))
@@ -1082,10 +1103,25 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		paint := kn.paint_index_from_option(self.foreground)
 
+		// Draw individual glyphs
 		for &glyph in self.glyphs {
 			kn.add_glyph(glyph, self.font_size, self.text_origin + glyph.offset, paint)
 		}
 
+		// Draw underline
+		if self.style.underline {
+			y_offset := self.font.ascend * self.font_size + 2
+			kn.add_box(
+				{
+					self.text_origin + {0, y_offset},
+					self.text_origin + {self.text_size.x, y_offset + 2},
+				},
+				0,
+				paint,
+			)
+		}
+
+		// Draw cursor
 		cursor_index := self.text_view.selection[1] - self.text_byte_index
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
@@ -1093,11 +1129,6 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 				kn.add_box(self.text_view.cursor_box, paint = get_text_cursor_color())
 			}
 		}
-	}
-
-	// Custom draw method
-	if self.on_draw != nil {
-		self.on_draw(self)
 	}
 
 	// Draw children
@@ -1110,7 +1141,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	}
 
 	// Outline
-	if self.style.stroke != nil {
+	if self.style.stroke != nil && self.style.stroke_width > 0 {
 		kn.add_box_lines(
 			self.box,
 			self.style.stroke_width,
