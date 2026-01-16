@@ -29,6 +29,7 @@ FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc qu
 App :: struct {
 	using app:     sdl3app.App,
 	toggle_switch: bool,
+	boolean:       bool,
 	slider:        f32,
 	text:          string,
 }
@@ -58,11 +59,6 @@ main :: proc() {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^App)(app)
-			opal.set_color(.Selection_Background, tw.SKY_500)
-			opal.set_color(.Selection_Foreground, tw.BLACK)
-			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
-			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
-
 			opal.global_ctx.window_interface.callback_data = app
 			opal.global_ctx.window_interface.maximize_callback = proc(data: rawptr) {
 				app := (^App)(data)
@@ -130,6 +126,15 @@ main :: proc() {
 					}
 				}
 				end_node()
+
+				add_checkbox(&{value = &app.boolean, label = "Checkbox"})
+				add_field(
+					&{
+						sizing = {exact = {300, 30}, fit = {1, 0}},
+						value_data = &app.text,
+						value_type_info = type_info_of(type_of(app.text)),
+					},
+				)
 			}
 			end_node()
 			end()

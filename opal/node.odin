@@ -1039,7 +1039,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	// Draw self
 	if self.background != {} {
 		kn.add_box(
-			box_shrink(self.box, self.style.stroke_width),
+			box_shrink(self.box, self.style.stroke_width - 0.5) if self.style.stroke_type == .Inner else self.box,
 			self.style.radius - self.style.stroke_width,
 			paint = node_convert_paint_variant(self, self.background),
 		)
@@ -1079,7 +1079,9 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		// Draw selection
 		if self.enable_selection && self.text_view.active {
 			// TODO: implement custom selection color
-			paint := kn.paint_index_from_option(fade(tw.INDIGO_700, 1))
+			paint := kn.paint_index_from_option(
+				fade(global_ctx.theme.color.selection_background, 0.5),
+			)
 
 			selection := [2]int {
 				clamp(self.text_view.selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
@@ -1126,7 +1128,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
-				kn.add_box(self.text_view.cursor_box, paint = get_text_cursor_color())
+				kn.add_box(box_floored(self.text_view.cursor_box), paint = get_text_cursor_color())
 			}
 		}
 	}
@@ -1440,8 +1442,8 @@ end_node :: proc() {
 		push_id(self.id)
 
 		scrollbar_style := Node_Style {
-			background = ctx.colors[.Scrollbar_Background],
-			foreground = ctx.colors[.Scrollbar_Foreground],
+			background = ctx.theme.color.selection_background,
+			foreground = ctx.theme.color.selection_foreground,
 			radius     = SCROLLBAR_SIZE / 2,
 		}
 

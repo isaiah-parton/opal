@@ -283,9 +283,6 @@ Context :: struct {
 	cursor:                 Cursor,
 	last_cursor:            Cursor,
 
-	// Global visual style
-	colors:                 [Context_Color]Color,
-
 	// Frame count
 	frame:                  int,
 
@@ -369,10 +366,6 @@ add_style :: proc(style: Node_Style) -> ^Node_Style {
 	ctx := global_ctx
 	append(&ctx.style_array, style)
 	return &ctx.style_array[len(ctx.style_array) - 1]
-}
-
-set_color :: proc(which: Context_Color, value: Color) {
-	global_ctx.colors[which] = value
 }
 
 // Load a user image to the next available slot
@@ -1268,7 +1261,7 @@ default_node_style :: proc() -> Node_Style {
 get_text_cursor_color :: proc() -> Color {
 	draw_frames(1)
 	return fade(
-		global_ctx.colors[.Selection_Background],
+		global_ctx.theme.color.selection_background,
 		math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
 	)
 }

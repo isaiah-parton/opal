@@ -39,6 +39,8 @@ Theme_Colors :: struct {
 	background:           Color,
 	base_strong:          Color,
 	base_foreground:      Color,
+	selection_background: Color,
+	selection_foreground: Color,
 }
 
 theme_default :: proc() -> Theme {
@@ -73,6 +75,8 @@ theme_default :: proc() -> Theme {
 			secondary_strong = tw.NEUTRAL_600,
 			border = tw.NEUTRAL_950,
 			base_foreground = tw.BLACK,
+			selection_background = tw.INDIGO_500,
+			selection_foreground = tw.BLACK,
 		},
 		font = default_font,
 		monospace_font = monospace_font,
@@ -108,9 +112,10 @@ add_checkbox :: proc(
 	if node.is_active && !node.was_active {
 		desc.value^ = !desc.value^
 	}
+	node_update_transition(node, 0, desc.value^, 0.1)
 	node_update_transition(node, 1, node.is_hovered, 0.1)
-	node_update_transition(node, 0, desc.value^, 0.2)
-	node.background = kn.fade(tw.SLATE_200, 0.2 * node.transitions[1])
+	node_update_transition(node, 2, node.is_active, 0.1)
+	node.background = kn.fade(ctx.theme.color.base_strong, 0.2 * node.transitions[1])
 	{
 		add_node(
 			&{
@@ -118,16 +123,14 @@ add_checkbox :: proc(
 				radius = 4,
 				stroke_width = 2,
 				stroke = ctx.theme.color.border,
-				text = string_from_rune(lucide.CHECK),
+				text = string_from_rune(lucide.X),
 				font = &ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
 				foreground = kn.fade(ctx.theme.color.background, node.transitions[0]),
-				background = kn.mix(
-					node.transitions[0],
-					ctx.theme.color.base_strong,
-					ctx.theme.color.border,
-				),
+				background = kn.fade(ctx.theme.color.border, node.transitions[0]),
+				transform_origin = 0.5,
+				scale = math.lerp(f32(1), f32(0.9), node.transitions[2]),
 			},
 		)
 		add_node(
@@ -290,8 +293,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	ctx := global_ctx
 
-	desc.background = tw.NEUTRAL_950
-	desc.stroke = tw.NEUTRAL_500
+	desc.background = ctx.theme.color.base_strong
+	desc.stroke = ctx.theme.color.border
 	desc.font_size = 14
 	desc.padding = 4
 	desc.radius = 5
@@ -397,7 +400,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 				&{
 					font = desc.font,
 					font_size = desc.font_size,
-					foreground = tw.NEUTRAL_500,
+					foreground = ctx.theme.color.base_strong,
 					text = desc.placeholder,
 					sizing = {fit = 1},
 				},
@@ -419,7 +422,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 				&{
 					font = desc.font,
 					font_size = desc.font_size,
-					foreground = tw.WHITE,
+					foreground = ctx.theme.color.base_foreground,
 					text = text[:i],
 					sizing = {fit = 1},
 					interactive = true,
@@ -452,8 +455,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
 	node_update_transition(cont_node, 1, edit, 0.1)
-	cont_node.style.stroke = tw.LIME_500
-	cont_node.style.stroke_width = 3 * cont_node.transitions[1]
+	cont_node.style.stroke = ctx.theme.color.border
+	cont_node.style.stroke_width = 2 * cont_node.transitions[1]
 
 	if res.was_changed {
 		field_output(desc.value_data, desc.value_type_info, strings.to_string(text_view.builder))
