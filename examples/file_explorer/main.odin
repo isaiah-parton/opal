@@ -1,4 +1,4 @@
-package example
+package file_explorer
 
 import tj "../../../turbojpeg-odin"
 import kn "../../katana"
@@ -28,6 +28,8 @@ import "core:path/filepath"
 import "core:reflect"
 import "core:slice"
 import "core:strings"
+import "core:sync"
+import "core:thread"
 import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
@@ -36,381 +38,7 @@ import stbi "vendor:stb/image"
 import stbtt "vendor:stb/truetype"
 import "vendor:wgpu"
 
-
 FILLER_TEXT :: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis malesuada metus, a placerat lacus. Mauris aliquet congue blandit. Praesent elementum efficitur lorem, sed mattis ipsum viverra a. Integer blandit neque eget ultricies commodo. In sapien libero, gravida sit amet egestas quis, pharetra non mi. In nec ligula molestie, placerat dui vitae, ultricies nisl. Curabitur ultrices iaculis urna, in convallis dui dictum id. Nullam suscipit, massa ac venenatis finibus, turpis augue ultrices dolor, at accumsan est sem eu dui. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Curabitur sem neque, varius in eros non, vestibulum condimentum ante. In molestie nulla non nulla pulvinar placerat. Nullam sit amet imperdiet turpis.`
-
-Item_Display_Mode :: enum {
-	List,
-	Grid,
-}
-
-Item :: struct {
-	using file_info: os.File_Info,
-	children:        [dynamic]Item,
-	selected:        bool,
-	expanded:        bool,
-}
-
-item_deselect_children :: proc(self: ^Item, exception: ^Item = nil) {
-	for &child in self.children {
-		if exception != nil && child.fullpath == exception.fullpath {
-			continue
-		}
-		child.selected = false
-		item_deselect_children(&child, exception)
-	}
-}
-
-item_destroy :: proc(self: ^Item) {
-	os.file_info_delete(self.file_info)
-	delete(self.children)
-	self^ = {}
-}
-
-item_clear_children :: proc(self: ^Item) {
-	for &child in self.children {
-		item_clear_children(&child)
-		item_destroy(&child)
-	}
-	clear(&self.children)
-}
-
-item_load_children :: proc(self: ^Item) -> os.Error {
-	folder := os.open(self.fullpath) or_return
-	defer os.close(folder)
-
-	files := os.read_dir(folder, -1) or_return
-	defer delete(files)
-
-	item_clear_children(self)
-
-	for file_info in files {
-		append(&self.children, Item{file_info = file_info})
-	}
-
-	slice.sort_by(self.children[:], proc(a, b: Item) -> bool {
-		if a.is_dir != b.is_dir {
-			return a.is_dir
-		}
-		return strings.compare(a.file_info.name, b.file_info.name) < 0
-	})
-
-	return nil
-}
-
-item_display_for_grid :: proc(
-	self: ^Item,
-	app: ^Explorer,
-	loc := #caller_location,
-) -> (
-	node: ^opal.Node,
-) {
-	using opal
-
-	push_id(hash_loc(loc))
-	defer pop_id()
-
-	if self.selected {
-		app.selection_count += 1
-	}
-
-	node =
-	begin_node(
-		&{
-			interactive = true,
-			radius = 8,
-			padding = 6,
-			sizing = {
-				exact = {200, 0},
-				fit = {1, 1},
-				relative = {0.25, 0},
-				grow = {1, 0},
-				max = INFINITY,
-			},
-			content_align = {0, 0.5},
-			gap = 4,
-			foreground = tw.BLUE_500 if self.file_info.is_dir else kn.WHITE,
-			stroke = tw.BLUE_500,
-			stroke_width = f32(i32(self.name == app.primary_selection)),
-			clip_content = true,
-		},
-	).?
-	{
-		icon: rune = lucide.FILE
-		if self.is_dir {
-			icon = lucide.FOLDER
-		} else if self.file_info.mode == 1049014 {
-			icon = lucide.FOLDER_SYMLINK
-		}
-		add_node(
-			&{
-				sizing = {fit = 1, aspect_ratio = 1},
-				text = string_from_rune(icon),
-				font = &global_ctx.theme.icon_font,
-				font_size = 32,
-				foreground = node.foreground,
-			},
-		)
-		begin_node(
-			&{
-				sizing = {grow = 1, max = INFINITY, fit = {1, 0}},
-				vertical = true,
-				content_align = {0, 0.5},
-			},
-		)
-		{
-			add_node(
-				&{
-					text = self.file_info.name,
-					font = &global_ctx.theme.font,
-					font_size = 16,
-					sizing = {fit = 1},
-					foreground = node.foreground,
-				},
-			)
-			if !self.is_dir {
-				begin_node(&{sizing = {grow = {1, 0}, max = INFINITY, fit = 1}})
-				{
-					add_node(
-						&{
-							text = fmt_memory_size(self.file_info.size),
-							font = &global_ctx.theme.font,
-							font_size = 16,
-							sizing = {fit = 1},
-							foreground = node.foreground,
-						},
-					)
-					add_node(
-						&{
-							text = memory_size_suffix(self.file_info.size),
-							font = &global_ctx.theme.font,
-							font_size = 16,
-							sizing = {fit = 1},
-							foreground = fade(node.foreground.(kn.Color), 0.5),
-						},
-					)
-				}
-				end_node()
-			}
-		}
-		end_node()
-	}
-	end_node()
-
-	if node.is_hovered && !node.was_hovered {
-		node.transitions[0] = 1
-	}
-
-	node_update_transition(node, 0, node.is_hovered, 0.1)
-	node_update_transition(node, 1, node.is_active, 0.1)
-
-	node.background = kn.fade(
-		kn.mix(f32(i32(self.selected)) * 0.5, tw.NEUTRAL_700, tw.BLUE_700),
-		max(f32(i32(self.selected)) * 0.5, node.transitions[0]),
-	)
-
-	item_handle_node_input(self, app, node)
-
-	return
-}
-
-item_display_for_list :: proc(
-	self: ^Item,
-	app: ^Explorer,
-	depth := 0,
-	loc := #caller_location,
-) -> (
-	node: ^opal.Node,
-) {
-	using opal
-
-	push_id(hash_loc(loc))
-	defer pop_id()
-
-	if self.selected {
-		app.selection_count += 1
-	}
-
-	node =
-	begin_node(
-		&{
-			interactive = true,
-			sticky = true,
-			radius = global_ctx.theme.radius_small,
-			padding = {8 + f32(depth) * 20, 4, 8, 4},
-			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
-			content_align = {0, 0.5},
-			gap = 4,
-			foreground = tw.BLUE_700 if self.file_info.is_dir else kn.BLACK,
-			stroke = global_ctx.theme.color.border,
-			stroke_width = f32(i32(self.selected)) * 2,
-		},
-	).?
-	{
-		icon: rune = lucide.FILE
-		if self.is_dir {
-			icon = lucide.FOLDER_OPEN if self.expanded else lucide.FOLDER
-		} else if self.file_info.mode == 1049014 {
-			icon = lucide.FOLDER_SYMLINK
-		}
-		add_node(
-			&{
-				sizing = {fit = 1, aspect_ratio = 1},
-				text = string_from_rune(icon),
-				font = &global_ctx.theme.icon_font,
-				font_size = 16,
-				foreground = node.foreground,
-			},
-		)
-		add_node(
-			&{
-				text = self.file_info.name,
-				font = &global_ctx.theme.font,
-				font_size = 16,
-				sizing = {fit = {1, 1}, grow = {1, 0}, max = INFINITY},
-				foreground = node.foreground,
-				clip_content = true,
-			},
-		)
-		// add_node(&{sizing = {grow = {1, 0}, max = INFINITY}})
-		if !self.is_dir {
-			add_node(
-				&{
-					text = fmt_memory_size(self.file_info.size),
-					font = &global_ctx.theme.font,
-					font_size = 16,
-					sizing = {fit = 1},
-					foreground = node.foreground,
-				},
-			)
-			add_node(
-				&{
-					text = memory_size_suffix(self.file_info.size),
-					font = &global_ctx.theme.font,
-					font_size = 16,
-					sizing = {fit = 1},
-					foreground = fade(node.foreground.(kn.Color), 0.5),
-				},
-			)
-		}
-	}
-	end_node()
-
-	if node.transitions[2] > 0 {
-		begin_node(
-			&{
-				sizing = {grow = {1, 0}, max = INFINITY, fit = {1, node.transitions[2]}},
-				clip_content = true,
-				vertical = true,
-				padding = {0, 0, 0, 0},
-			},
-		)
-		for &child, i in self.children {
-			push_id(i + 1)
-			item_display_for_list(&child, app, depth + 1)
-			pop_id()
-		}
-		end_node()
-	}
-
-	if node.is_hovered && !node.was_hovered {
-		node.transitions[0] = 1
-	}
-
-	node_update_transition(node, 0, node.is_hovered, 0.1)
-	node_update_transition(node, 1, node.is_active, 0.1)
-	node_update_transition(node, 2, self.expanded, 0.2)
-
-	node.background = kn.fade(
-		kn.mix(
-			f32(i32(self.selected)) * 0.5,
-			global_ctx.theme.color.base_strong,
-			global_ctx.theme.color.accent,
-		),
-		max(f32(i32(self.selected)) * 0.5, node.transitions[0]),
-	)
-
-	item_handle_node_input(self, app, node)
-
-	return
-}
-
-item_handle_node_input :: proc(self: ^Item, app: ^Explorer, node: ^opal.Node) {
-	using opal
-
-	multi_select := key_down(.Left_Control) || key_down(.Right_Control)
-
-	update_selection: bool
-	defer if update_selection do explorer_update_selection(app)
-
-	// Handle click-n-drag
-	if !app.dragging &&
-	   node.is_active &&
-	   linalg.distance(global_ctx.mouse_position, global_ctx.mouse_click_position) > 1 &&
-	   global_ctx.last_mouse_down_button == .Left {
-		if !multi_select {
-			// Select only the hovered item
-			for &item, j in app.items {
-				item_deselect_children(&item)
-				item.selected = false
-			}
-			self.selected = true
-			update_selection = true
-		}
-		app.dragging = true
-	}
-
-	// Handle mouse pressed
-	if !app.dragging && node.is_active && !node.was_active {
-		if global_ctx.last_mouse_down_button == .Right {
-			app.context_menu = Context_Menu {
-				position = global_ctx.mouse_position,
-				file     = self.file_info.name,
-			}
-		}
-		if multi_select {
-			self.selected = !self.selected
-		} else {
-			self.selected = true
-		}
-		update_selection = true
-	}
-
-	// Handle mouse relased
-	if node.was_active && !node.is_active {
-		if node.click_count == 2 {
-			// Handle double click
-			if self.file_info.is_dir {
-				explorer_change_folder(app, self.file_info.name)
-			} else if self.file_info.mode == 1049014 {
-				h, _ := os.open(self.file_info.name)
-				fi, _ := os.read_dir(h, 1)
-				if len(fi) > 0 {
-					explorer_change_folder(app, filepath.dir(fi[0].fullpath))
-				}
-			} else {
-				libc.system(fmt.ctprintf(`start "" "%s"`, self.fullpath))
-			}
-		} else {
-			if !multi_select && !app.dragging {
-				for &item, j in app.items {
-					if item.fullpath == self.fullpath {
-						continue
-					}
-					item_deselect_children(&item, self)
-					item.selected = false
-				}
-				update_selection = true
-			}
-			if self.file_info.is_dir {
-				self.expanded = !self.expanded
-				if self.expanded {
-					item_load_children(self)
-				}
-			}
-		}
-	}
-}
 
 Preview :: union {
 	Text_Preview,
@@ -432,7 +60,105 @@ Text_Preview :: struct {
 }
 
 Image_Preview :: struct {
-	resource: kn.Atlas_Resource,
+	mutex:    sync.Mutex,
+	file:     string,
+	resource: Maybe(kn.Atlas_Resource),
+}
+
+image_preview_init :: proc(self: ^Image_Preview, file: string) -> (err: os.Error) {
+	image: ^img.Image
+	defer if image != nil do img.destroy(image)
+
+	switch filepath.ext(file) {
+	case ".jpg", ".jpeg":
+		data := os.read_entire_file_from_filename_or_err(file) or_return
+		defer delete(data)
+
+		// Prepare decompressor instance
+		h := tj.init_decompress()
+		defer tj.destroy(h)
+
+		// Decompress header
+		width, height: c.int
+		tj.decompress_header(h, raw_data(data), c.ulong(len(data)), &width, &height)
+
+		// Prepare destination buffer
+		pixels := make([]u8, int(width) * int(height) * 4)
+		defer delete(pixels)
+
+		// Decompress pixels
+		tj.decompress2(
+			h,
+			raw_data(data),
+			c.ulong(len(data)),
+			raw_data(pixels),
+			width,
+			0,
+			height,
+			.RGBA,
+			{.FASTDCT},
+		)
+
+		// Create image
+		image = new_clone(
+			img.Image{width = int(width), height = int(height), channels = 4, depth = 8},
+		)
+
+		// Populate image pixel buffer
+		bytes.buffer_write(&image.pixels, pixels)
+	case ".png", ".qoi", ".tga", ".bmp":
+		if loaded_image, err := img.load_from_file(file, {.alpha_add_if_missing}); err == nil {
+			image = loaded_image
+		} else {
+			fmt.eprintln(err)
+		}
+	}
+
+	MAX_DIMENSION :: 512
+
+	shrink_x := max(image.width - MAX_DIMENSION, 0)
+	shrink_y := max(image.height - MAX_DIMENSION, 0)
+
+	new_width := image.width
+	new_height := image.height
+	if shrink_x > shrink_y {
+		new_width = image.width - shrink_x
+		new_height = int(f32(image.height) * (f32(new_width) / f32(image.width)))
+	} else {
+		new_height = image.height - shrink_y
+		new_width = int(f32(image.width) * (f32(new_height) / f32(image.height)))
+	}
+
+	new_data := make([]u8, new_width * new_height * 4)
+
+	stbi.resize_uint8(
+		raw_data(image.pixels.buf),
+		i32(image.width),
+		i32(image.height),
+		0,
+		raw_data(new_data),
+		i32(new_width),
+		i32(new_height),
+		0,
+		4,
+	)
+
+	sync.guard(&self.mutex)
+	self.resource = kn.Atlas_Resource {
+		pixels = raw_data(new_data),
+		width  = new_width,
+		height = new_height,
+	}
+
+	return
+}
+
+image_preview_init_async :: proc(self: ^Image_Preview, file: string) {
+	self.file = strings.clone(file)
+	thread.run_with_data(self, proc(data: rawptr) {
+		self := (^Image_Preview)(data)
+		image_preview_init(self, self.file)
+	})
 }
 
 Context_Menu :: struct {
@@ -600,46 +326,6 @@ explorer_display_breadcrumbs :: proc(self: ^Explorer) {
 	}
 }
 
-make_image_preview :: proc(image: ^img.Image) -> Image_Preview {
-	MAX_DIMENSION :: 512
-
-	shrink_x := max(image.width - MAX_DIMENSION, 0)
-	shrink_y := max(image.height - MAX_DIMENSION, 0)
-
-	new_width := image.width
-	new_height := image.height
-	if shrink_x > shrink_y {
-		new_width = image.width - shrink_x
-		new_height = int(f32(image.height) * (f32(new_width) / f32(image.width)))
-	} else {
-		new_height = image.height - shrink_y
-		new_width = int(f32(image.width) * (f32(new_height) / f32(image.height)))
-	}
-
-	new_data := make([]u8, new_width * new_height * 4)
-	defer delete(new_data)
-
-	stbi.resize_uint8(
-		raw_data(image.pixels.buf),
-		i32(image.width),
-		i32(image.height),
-		0,
-		raw_data(new_data),
-		i32(new_width),
-		i32(new_height),
-		0,
-		4,
-	)
-
-	return Image_Preview {
-		resource = kn.Atlas_Resource {
-			pixels = raw_data(new_data),
-			width = new_width,
-			height = new_height,
-		},
-	}
-}
-
 explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview, err: os.Error) {
 	self.primary_selection = name
 
@@ -652,56 +338,10 @@ explorer_make_preview :: proc(self: ^Explorer, name: string) -> (result: Preview
 	defer os.close(file)
 
 	switch filepath.ext(name) {
-	case ".jpg", ".jpeg":
-		data := os.read_entire_file_from_handle_or_err(file) or_return
-		defer delete(data)
-
-		// Prepare decompressor instance
-		h := tj.init_decompress()
-		defer tj.destroy(h)
-
-		// Decompress header
-		width, height: c.int
-		tj.decompress_header(h, raw_data(data), c.ulong(len(data)), &width, &height)
-
-		// Prepare destination buffer
-		pixels := make([]u8, int(width) * int(height) * 4)
-		defer delete(pixels)
-
-		// Decompress pixels
-		tj.decompress2(
-			h,
-			raw_data(data),
-			c.ulong(len(data)),
-			raw_data(pixels),
-			width,
-			0,
-			height,
-			.RGBA,
-			{.FASTDCT},
-		)
-
-		// Create image
-		image := img.Image {
-			width    = int(width),
-			height   = int(height),
-			channels = 4,
-			depth    = 8,
-		}
-		defer img.destroy(&image)
-
-		// Populate image pixel buffer
-		bytes.buffer_write(&image.pixels, pixels)
-
-		result = make_image_preview(&image)
-	case ".png", ".qoi", ".tga", ".bmp":
-		if image, err := img.load_from_file(name, {.alpha_add_if_missing}); err == nil {
-			defer img.destroy(image)
-
-			result = make_image_preview(image)
-		} else {
-			fmt.eprintln(err)
-		}
+	case ".jpg", ".jpeg", ".png", ".qoi", ".tga", ".bmp":
+		image_preview: Image_Preview
+		image_preview_init_async(&image_preview, name)
+		result = image_preview
 	case ".ttf", ".otf":
 		if data, ok := os.read_entire_file(name); ok {
 			font: stbtt.fontinfo
@@ -1213,38 +853,37 @@ main :: proc() {
 										// 	},
 										// )
 										case (Image_Preview):
-											size := [2]f32 {
-												f32(variant.resource.width),
-												f32(variant.resource.height),
-											}
-											add_node(
-												&{
-													sizing = {
-														grow = 1,
-														max = size,
-														aspect_ratio = size.x / size.y,
-													},
-													data = &preview,
-													on_draw = proc(node: ^Node) {
-														app := (^Explorer)(node.data)
-														kn.add_box(
-															node.box,
-															4,
-															kn.make_atlas_sample(
-																&(^Image_Preview)(node.data).resource,
+											if resource, ok := variant.resource.?; ok {
+												size := [2]f32 {
+													f32(resource.width),
+													f32(resource.height),
+												}
+												add_node(
+													&{
+														sizing = {
+															grow = 1,
+															max = size,
+															aspect_ratio = size.x / size.y,
+														},
+														data = &preview,
+														on_draw = proc(node: ^Node) {
+															app := (^Explorer)(node.data)
+															resource := &(^Image_Preview)(node.data).resource.?
+															kn.add_box(
 																node.box,
-																kn.WHITE,
-															),
-														)
-														kn.add_box_lines(
-															node.box,
-															2,
-															4,
-															global_ctx.theme.color.border,
-														)
+																4,
+																kn.make_atlas_sample(resource, node.box, kn.WHITE) if resource.pixels != nil else tw.TRANSPARENT,
+															)
+															kn.add_box_lines(
+																node.box,
+																2,
+																4,
+																global_ctx.theme.color.border,
+															)
+														},
 													},
-												},
-											)
+												)
+											}
 										}
 									}
 								}
