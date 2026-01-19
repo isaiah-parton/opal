@@ -102,7 +102,9 @@ main :: proc() {
 				},
 			)
 			{
-				begin_node(&{sizing = {fit = 1}, gap = global_ctx.theme.min_spacing})
+				begin_node(
+					&{sizing = {fit = 1, max = INFINITY}, gap = global_ctx.theme.min_spacing},
+				)
 				{
 					for variant in Button_Variant {
 						push_id(int(variant))
@@ -111,7 +113,9 @@ main :: proc() {
 					}
 				}
 				end_node()
-				begin_node(&{sizing = {fit = 1}, gap = global_ctx.theme.min_spacing})
+				begin_node(
+					&{sizing = {fit = 1, max = INFINITY}, gap = global_ctx.theme.min_spacing},
+				)
 				{
 					for variant in Button_Variant {
 						push_id(int(variant))
@@ -130,7 +134,7 @@ main :: proc() {
 				add_checkbox(&{value = &app.boolean, label = "Checkbox"})
 				add_field(
 					&{
-						sizing = {exact = {300, 30}, fit = {1, 0}},
+						sizing = {exact = {300, 30}, fit = {1, 0}, max = {400, INFINITY}},
 						value_data = &app.text,
 						value_type_info = type_info_of(type_of(app.text)),
 					},

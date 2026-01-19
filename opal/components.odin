@@ -10,6 +10,7 @@ import "core:math/ease"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
+import "core:unicode"
 
 Theme :: struct {
 	text_gap:        f32,
@@ -108,7 +109,9 @@ add_checkbox :: proc(
 	push_id(hash_loc(loc))
 	defer pop_id()
 
-	node := begin_node(&{sizing = {fit = 1}, gap = 4, radius = 4, interactive = true}).?
+	node := begin_node(
+		&{sizing = {fit = 1, max = INFINITY}, gap = 4, radius = 4, interactive = true},
+	).?
 	if node.is_active && !node.was_active {
 		desc.value^ = !desc.value^
 	}
@@ -135,7 +138,7 @@ add_checkbox :: proc(
 		)
 		add_node(
 			&{
-				sizing = {fit = 1},
+				sizing = {fit = 1, max = INFINITY},
 				padding = {0, 0, 4, 0},
 				text = desc.label,
 				font_size = ctx.theme.label_text_size,
@@ -176,13 +179,14 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 
 	desc.sizing = {
 		fit = 1,
+		max = INFINITY,
 	}
 	desc.interactive = true
 	desc.radius = 4
 	desc.background = ctx.theme.color.base_foreground
 
 	face_node_desc := Node_Descriptor {
-		sizing = {fit = 1},
+		sizing = {fit = 1, max = INFINITY},
 		stroke_width = 2,
 		stroke = ctx.theme.color.border,
 		gap = 4,
@@ -217,7 +221,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 				add_node(
 					&{
 						foreground = ctx.theme.color.base_foreground,
-						sizing = {fit = 1},
+						sizing = {fit = 1, max = INFINITY},
 						font = &global_ctx.theme.icon_font,
 						font_size = ctx.theme.label_icon_size,
 						text = string_from_rune(desc.icon),
@@ -229,7 +233,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 				add_node(
 					&{
 						foreground = ctx.theme.color.base_foreground,
-						sizing = {fit = 1},
+						sizing = {fit = 1, max = INFINITY},
 						font_size = ctx.theme.label_text_size,
 						text = desc.label,
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -242,7 +246,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 			result.clicked = node.is_active && !node.was_active
 			node_update_transition(node, 0, node.is_hovered, 0.15)
 			node_update_transition(node, 1, node.is_active, 0.1)
-			face_node.translate = -math.lerp(depth, f32(0), node.transitions[1])
+			face_node.translate = {0, -math.lerp(depth, f32(0), node.transitions[1])}
 		}
 	}
 	end_node()
@@ -293,8 +297,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	ctx := global_ctx
 
-	desc.background = ctx.theme.color.base_strong
 	desc.stroke = ctx.theme.color.border
+	desc.stroke_width = 2
 	desc.font_size = 14
 	desc.padding = 4
 	desc.radius = 5
@@ -318,6 +322,8 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	text_view := begin_text_view(
 		{id = hash_loc(loc), show_cursor = true, editing = edit, container_node = cont_node},
 	).?
+
+	text: string
 
 	if edit {
 		cmd: Command
@@ -385,7 +391,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 	}
 
 	{
-		text: string
+
 		if edit {
 			text = strings.to_string(text_view.builder)
 		} else {
@@ -395,59 +401,91 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			)
 		}
 
-		if len(desc.placeholder) > 0 && len(text) == 0 {
-			add_node(
-				&{
-					font = desc.font,
-					font_size = desc.font_size,
-					foreground = ctx.theme.color.base_strong,
-					text = desc.placeholder,
-					sizing = {fit = 1},
-				},
-			)
+		s := text
+
+		i := 1
+
+		for len(s) > 0 {
+			push_id(i)
+			i += 1
+
+			line_end := strings.index_byte(s, '\n')
+			if line_end == -1 {
+				line_end = len(s)
+			} else {
+				line_end += 1
+			}
+			line := s[:line_end]
+
+			begin_node(&{wrapped = true, sizing = {fit = 1, max = INFINITY, grow = {1, 0}}})
+			pop_id()
+			{
+				for len(line) > 0 {
+					push_id(i)
+					i += 1
+
+					word_end := 0
+					is_white_space := unicode.is_white_space(rune(line[0]))
+					for s, i in line {
+						if unicode.is_white_space(s) != is_white_space {
+							word_end = i
+						}
+					}
+					if word_end == -1 {
+						word_end = len(line)
+					} else {
+						word_end += 1
+					}
+
+					text := line[:word_end]
+
+					add_node(
+						&{
+							foreground = ctx.theme.color.base_foreground,
+							sizing = {fit = 1, max = INFINITY},
+							text = text,
+							font = &ctx.theme.font,
+							font_size = ctx.theme.font_size_small,
+							interactive = true,
+							enable_selection = true,
+						},
+					)
+					pop_id()
+					line = line[word_end:]
+				}
+			}
+			end_node()
+
+			s = s[line_end:]
 		}
 
-		j := 1
-
-		for len(text) > 0 {
-			i := strings.index_byte(text, ' ')
-			if i == -1 {
-				i = len(text)
-			} else {
-				i += 1
-			}
-
-			push_id(j)
+		if len(text) == 0 {
 			add_node(
 				&{
 					font = desc.font,
 					font_size = desc.font_size,
 					foreground = ctx.theme.color.base_foreground,
-					text = text[:i],
-					sizing = {fit = 1},
+					text = "\u0000",
+					sizing = {fit = 1, max = INFINITY},
 					interactive = true,
 					enable_selection = true,
 				},
 			)
-			pop_id()
-
-			j += 1
-			text = text[i:]
 		}
 	}
 
 	end_text_view()
 
-	// Cursor placeholder
-	if edit && len(text_view.glyphs) == 0 {
-		push_id(text_view.id)
+	if len(desc.placeholder) > 0 && len(text) == 0 {
 		add_node(
 			&{
-				sizing = {max = INFINITY, exact = {2, 0}, grow = {0, 1}},
-				background = get_text_cursor_color(),
+				font = desc.font,
+				font_size = desc.font_size,
+				foreground = ctx.theme.color.base_strong,
+				text = desc.placeholder,
+				sizing = {fit = 1},
 			},
 		)
-		pop_id()
 	}
 
 	end_node()
@@ -455,8 +493,11 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	node_update_transition(cont_node, 0, cont_node.is_hovered, 0.1)
 	node_update_transition(cont_node, 1, edit, 0.1)
-	cont_node.style.stroke = ctx.theme.color.border
-	cont_node.style.stroke_width = 2 * cont_node.transitions[1]
+	cont_node.background = mix(
+		cont_node.transitions[1],
+		ctx.theme.color.base_strong,
+		ctx.theme.color.background,
+	)
 
 	if res.was_changed {
 		field_output(desc.value_data, desc.value_type_info, strings.to_string(text_view.builder))

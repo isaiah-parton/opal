@@ -63,40 +63,44 @@ performance_info_solve :: proc(self: ^Performance_Info) {
 }
 
 Inspector :: struct {
-	using panel:            Panel,
+	using panel:             Panel,
 
 	// Currently shown
-	shown:                  bool,
+	shown:                   bool,
 
 	// width
-	width:                  f32,
+	width:                   f32,
 
 	// Currently picking a node
-	is_selecting:           bool,
+	is_selecting:            bool,
 
 	//
-	selection_start_time:   time.Time,
+	selection_start_time:    time.Time,
 
 	// Selected node for viewing properties
-	selected_id:            Id,
+	selected_id:             Id,
 
 	// Selected node for inspection
-	inspected_id:           Id,
-	inspected_node:         ^Node,
-	inspected_node_parents: [dynamic]Id,
-	inspected_time:         time.Time,
+	inspected_id:            Id,
+	inspected_node:          ^Node,
+	inspected_node_parents:  [dynamic]Id,
+	inspected_time:          time.Time,
 
 	// Hovered node
-	hovered_node:           ^Node,
+	hovered_node:            ^Node,
+	selected_node:           Node,
+
+	//
+	inspected_node_snapshot: Node,
 
 	// Show colored highlights around text nodes to differentiate them
-	show_text_widgets:      bool,
+	show_text_widgets:       bool,
 
 	// Show highlights around nodes whose contents are clipped with graphical scissors
-	show_clipped_nodes:     bool,
+	show_clipped_nodes:      bool,
 
 	// Nodes under mouse
-	nodes_under_mouse:      [dynamic]^Node,
+	nodes_under_mouse:       [dynamic]^Node,
 }
 
 inspector_set_inspected_node :: proc(self: ^Inspector, node: ^Node) {
@@ -114,6 +118,14 @@ inspector_set_inspected_node :: proc(self: ^Inspector, node: ^Node) {
 inspector_activate_mouse_selection :: proc(self: ^Inspector) {
 	self.selection_start_time = time.now()
 	self.is_selecting = true
+}
+
+inspector_update_node_snapshot :: proc(self: ^Inspector) {
+	if self.inspected_id != 0 {
+		if node, ok := global_ctx.node_by_id[self.inspected_id]; ok {
+			self.inspected_node_snapshot = node^
+		}
+	}
 }
 
 inspector_show :: proc(self: ^Inspector) {
@@ -159,7 +171,7 @@ inspector_show :: proc(self: ^Inspector) {
 	).?
 	{
 		desc := Node_Descriptor {
-			sizing = {fit = 1},
+			sizing = {fit = 1, max = INFINITY},
 			font_size = 12,
 			foreground = global_ctx.theme.color.base_foreground,
 		}
@@ -194,7 +206,7 @@ inspector_show :: proc(self: ^Inspector) {
 	}
 
 	inspector_build_tree(&global_ctx.inspector)
-	if self.selected_id != 0 {
+	if self.inspected_id != 0 {
 		begin_node(
 			&{
 				sizing = {exact = {0, 200}, grow = 1, max = INFINITY},
@@ -207,7 +219,7 @@ inspector_show :: proc(self: ^Inspector) {
 			},
 		)
 		begin_node(&{sizing = {grow = {1, 0}, fit = 1, max = INFINITY}, vertical = true})
-		add_value_node("Node", &self.inspected_node, type_info_of(Node))
+		add_value_node("Node", &self.inspected_node_snapshot, type_info_of(Node))
 		end_node()
 		end_node()
 	}
@@ -252,14 +264,26 @@ inspector_show :: proc(self: ^Inspector) {
 					foreground = tw.ORANGE_500,
 					font_size = 12,
 					text = fmt.tprintf("%c%s", '-' if node.is_toggled else '+', name),
-					sizing = {fit = 1},
+					sizing = {fit = 1, max = INFINITY},
 				},
 			)
 		} else {
-			add_node(&{foreground = _TEXT, font_size = 12, text = name, sizing = {fit = 1}})
+			add_node(
+				&{
+					foreground = _TEXT,
+					font_size = 12,
+					text = name,
+					sizing = {fit = 1, max = INFINITY},
+				},
+			)
 			if text != "" {
 				add_node(
-					&{text = text, foreground = tw.INDIGO_600, font_size = 12, sizing = {fit = 1}},
+					&{
+						text = text,
+						foreground = tw.INDIGO_600,
+						font_size = 12,
+						sizing = {fit = 1, max = INFINITY},
+					},
 				)
 			}
 		}
@@ -429,7 +453,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	add_node(
 		&{
 			text = node.text if len(node.text) > 0 else fmt.tprintf("%x", node.id),
-			sizing = {fit = 1},
+			sizing = {fit = 1, max = INFINITY},
 			style = {
 				font_size = 14,
 				foreground = ctx.theme.color.base_foreground if self.inspected_id == node.id else (tw.EMERALD_700 if self.selected_id == node.id else kn.fade(ctx.theme.color.base_foreground, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
@@ -437,17 +461,15 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		},
 	)
 	end_node()
-	if button_node.is_hovered {
-		if button_node.was_active && !button_node.is_active {
-			button_node.is_toggled = !button_node.is_toggled
+	if button_node.was_active && !button_node.is_active {
+		if self.inspected_id == node.id {
+			self.inspected_id = 0
+		} else {
+			self.inspected_id = node.id
 		}
 	}
 	if button_node.is_hovered && mouse_pressed(.Right) {
-		if self.selected_id == node.id {
-			self.selected_id = 0
-		} else {
-			self.selected_id = node.id
-		}
+		button_node.is_toggled = !button_node.is_toggled
 	}
 	button_node.background =
 		tw.BLUE_500 if self.inspected_id == node.id else kn.fade(tw.STONE_600, f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)))

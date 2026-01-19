@@ -1173,6 +1173,7 @@ end :: proc() {
 	}
 
 	// Update inspector
+	inspector_update_node_snapshot(&ctx.inspector)
 	inspector_update_mouse_selection(&ctx.inspector)
 	inspector_reset(&ctx.inspector)
 

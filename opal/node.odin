@@ -246,6 +246,7 @@ Node :: struct {
 	text_size:         [2]f32,
 	text_view:         ^Text_View,
 	text_byte_index:   int,
+	text_byte_length:  int,
 	text_glyph_index:  int,
 	text_hash:         u32,
 	glyphs:            []Glyph `fmt:"-"`,
@@ -389,16 +390,12 @@ node_on_child_end :: proc(self: ^Node, child: ^Node) {
 	// Propagate dirty state
 	self.dirty |= child.dirty
 	// Propagate content size
-	if self.wrapped {
-		self.content_size = linalg.max(self.content_size, child.size)
+	if self.vertical {
+		self.content_size.y += child.size.y
+		self.content_size.x = max(self.content_size.x, child.size.x)
 	} else {
-		if self.vertical {
-			self.content_size.y += child.size.y
-			self.content_size.x = max(self.content_size.x, child.size.x)
-		} else {
-			self.content_size.x += child.size.x
-			self.content_size.y = max(self.content_size.y, child.size.y)
-		}
+		self.content_size.x += child.size.x
+		self.content_size.y = max(self.content_size.y, child.size.y)
 	}
 }
 
@@ -654,10 +651,7 @@ node_solve_child_placement_in_range :: proc(self: ^Node, from, to: int, span, li
 		node.position[i] = offset
 
 		// Place child across axis
-		node.position[j] =
-			self.padding[j] +
-			line_offset +
-			(span + self.overflow[j] - node.size[j]) * self.content_align[j]
+		node.position[j] = self.padding[j] + line_offset
 
 		offset += node.size[i] + spacing
 	}
@@ -673,10 +667,7 @@ node_enforce_aspect_ratio :: proc(node: ^Node) {
 	}
 }
 
-//
-// Solve wrapped or normal layout
-//
-node_solve_child_placement :: proc(self: ^Node) -> (needs_resolve: bool) {
+node_wrap_children :: proc(self: ^Node) -> (needs_resolve: bool) {
 	i := int(self.vertical)
 	j := 1 - i
 
@@ -686,92 +677,107 @@ node_solve_child_placement :: proc(self: ^Node) -> (needs_resolve: bool) {
 	// The maximum span (size across layout axis) of all child nodes
 	line_span: f32
 
+	// Calculate content size
+	line_start: int
+	content_size: [2]f32
+
+	for child, child_index in self.layout_children {
+		// Detect when the content size would excede the available space
+		if offset + child.size[i] > max_offset {
+
+			// Grow the nodes that do fit
+			node_solve_child_placement_in_range(
+				self,
+				line_start,
+				child_index,
+				line_span,
+				content_size[j],
+			)
+
+			// Check if there's only one child
+			if offset == 0 {
+				// If so, include it's size
+				content_size[i] = max(content_size[i], offset + child.size[i])
+			} else {
+				// Otherwise, reset offset
+				content_size[i] = max(content_size[i], offset)
+				offset = 0
+			}
+
+			// Grow the parent node to fit the wrapped content
+			// Increase span by the line span + gap
+			content_size[j] += line_span + self.gap
+
+			line_start = child_index
+			line_span = 0
+		}
+		line_span = max(line_span, child.size[j])
+		offset += child.size[i] + self.gap
+	}
+
+	if line_span == 0 {
+		line_span = node_get_span(self)
+	}
+
+	// Solve sizes
+	node_solve_child_placement_in_range(
+		self,
+		line_start,
+		len(self.layout_children),
+		line_span,
+		content_size[j],
+	)
+
+	// Add padding to content size
+	content_size += self.padding.xy + self.padding.zw
+
+	// Fit final run of nodes
+	content_size[j] += line_span
+
+	// TODO: Remove or keep this
+	// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
+	// if self.parent != nil && self.parent.vertical == self.vertical {
+	// 	line_offset = min(
+	// 		line_offset,
+	// 		self.parent.size[j] - self.parent.padding[j] - self.parent.padding[j + 2],
+	// 	)
+	// }
+
+	// Check if the node should grow
+	if self.wrapped && self.content_size != content_size {
+		self.content_size = content_size
+		node_fit_to_content(self)
+
+		// Trigger resolve of entire tree
+		needs_resolve = true
+	}
+
+	for child in self.layout_children {
+		child.position[j] += (node_get_span(self) - child.size[j]) * self.content_align[j]
+	}
+
+	return
+}
+
+//
+// Solve wrapped or normal layout
+//
+node_solve_child_placement :: proc(self: ^Node) -> (needs_resolve: bool) {
+	i := int(self.vertical)
+	j := 1 - i
+
+	// Solve sizes normally
+	node_solve_child_placement_in_range(
+		self,
+		0,
+		len(self.layout_children),
+		self.size[j] - self.padding[j] - self.padding[j + 2],
+		0,
+	)
+
 	// Check if wrapping is enabled
 	if self.wrapped {
-
-		// Calculate content size
-		line_start: int
-		content_size: [2]f32
-
-		for child, child_index in self.layout_children {
-			// Detect when the content size would excede the available space
-			if offset + child.size[i] > max_offset {
-
-				// Grow the nodes that do fit
-				node_solve_child_placement_in_range(
-					self,
-					line_start,
-					child_index,
-					line_span,
-					content_size[j],
-				)
-
-				// Check if there's only one child
-				if offset == 0 {
-					// If so, include it's size
-					content_size[i] = max(content_size[i], offset + child.size[i])
-				} else {
-					// Otherwise, reset offset
-					content_size[i] = max(content_size[i], offset)
-					offset = 0
-				}
-
-				// Grow the parent node to fit the wrapped content
-				// Increase span by the line span + gap
-				content_size[j] += line_span + self.gap
-
-				line_start = child_index
-				line_span = 0
-			}
-			line_span = max(line_span, child.size[j])
-			offset += child.size[i] + self.gap
-		}
-
-		if line_span == 0 {
-			line_span = node_get_span(self)
-		}
-
-		// Solve sizes
-		node_solve_child_placement_in_range(
-			self,
-			line_start,
-			len(self.layout_children),
-			line_span,
-			content_size[j],
-		)
-
-		// Add padding to content size
-		content_size += self.padding.xy + self.padding.zw
-
-		// Fit final run of nodes
-		content_size[j] += line_span
-
-		// TODO: Remove or keep this
-		// WORKAROUND: Prevents nodes that wrap on different axis from 'fighting for space' when they share a parent. This lets only nodes with a different axis from their parent grow when wrapped.
-		// if self.parent != nil && self.parent.vertical == self.vertical {
-		// 	line_offset = min(
-		// 		line_offset,
-		// 		self.parent.size[j] - self.parent.padding[j] - self.parent.padding[j + 2],
-		// 	)
-		// }
-
-		// Check if the node should grow
-		if self.wrapped && self.content_size != content_size {
-			self.content_size = content_size
-			node_fit_to_content(self)
-
-			// Trigger resolve of entire tree
-			needs_resolve = true
-		}
-	} else {
-		// Solve sizes normally
-		node_solve_child_placement_in_range(
-			self,
-			0,
-			len(self.layout_children),
-			self.size[j] - self.padding[j] - self.padding[j + 2],
-			0,
-		)
+		needs_resolve = node_wrap_children(self)
 	}
 
 	return
@@ -1083,9 +1089,11 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 				fade(global_ctx.theme.color.selection_background, 0.5),
 			)
 
-			selection := [2]int {
-				clamp(self.text_view.selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
-				clamp(self.text_view.selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
+			selection := text_view_get_glyph_selection(self.text_view) or_else {}
+
+			selection = [2]int {
+				clamp(selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
+				clamp(selection[1] - self.text_glyph_index, 0, len(self.glyphs)),
 			}
 
 			ordered_selection := selection
@@ -1124,7 +1132,11 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		}
 
 		// Draw cursor
-		cursor_index := self.text_view.selection[1] - self.text_byte_index
+		cursor_index :=
+			text_view_get_glyph_index_from_byte_index(
+				self.text_view,
+				self.text_view.selection[1] - self.text_glyph_index,
+			) or_else 0
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
@@ -1180,7 +1192,12 @@ node_fit_to_content :: proc(self: ^Node) {
 		return
 	}
 
-	self.size = linalg.max(self.content_size * self.sizing.fit, self.size)
+	self.size = linalg.min(
+		linalg.max(self.content_size * self.sizing.fit, self.size),
+		self.sizing.max,
+	)
+
+	self.overflow = linalg.max(self.content_size - self.size, 0)
 
 	// Enforce non-zero aspect ratios
 	if self.sizing.aspect_ratio != 0 {
@@ -1314,6 +1331,10 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 					break
 				}
 
+				if char == 0 {
+					break
+				}
+
 				hash = hash ~ (u32(char) * FNV1A32_PRIME)
 
 				switch char {
@@ -1374,7 +1395,19 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				if self.enable_selection {
 					self.text_view.byte_length += length
 				}
+
+				self.text_byte_length += length
 			}
+
+			// Append tail glyph
+			append(
+				glyphs,
+				Glyph {
+					node = self,
+					index = self.text_view.byte_length,
+					offset = {self.text_size.x, 0},
+				},
+			)
 
 			if hash != self.text_hash {
 				draw_frames(1)
@@ -1408,9 +1441,7 @@ end_node :: proc() {
 	//
 	// Determine known size
 	//
-	if !self.wrapped {
-		self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
-	}
+	self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
 
 	self.content_size += self.padding.xy + self.padding.zw
 

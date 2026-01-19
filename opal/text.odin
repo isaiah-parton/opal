@@ -93,46 +93,46 @@ Text_View_Descriptor :: struct {
 // Any interactive node with text will be included in only the top text on the stack at the time.
 //
 Text_View :: struct {
-	using desc:       Text_View_Descriptor,
+	using desc:          Text_View_Descriptor,
 
 	// Length in bytes of the text displayed in this view
-	byte_length:      int,
+	byte_length:         int,
 
 	// Hovered glyph index
-	hover_index:      int,
+	hovered_glyph_index: int,
 
 	// Selection in glyph indices
-	selection:        [2]int,
+	selection:           [2]int,
 
-	//
-	last_selection:   [2]int,
+	// Previous selection before it changed
+	last_selection:      [2]int,
 
 	// Anchor for word selection
-	anchor:           int,
+	anchor:              int,
 
 	//
-	cursor_box:       Box,
+	cursor_box:          Box,
 
 	// Interactive nodes with text
-	nodes:            [dynamic]^Node,
+	nodes:               [dynamic]^Node,
 
 	// All glyphs, interactive or not
-	glyphs:           [dynamic]Glyph,
+	glyphs:              [dynamic]Glyph,
 
-	// Selection shape
-	selection_boxes:  [dynamic]Box,
+	// Bounding boxes of current selection
+	selection_boxes:     [dynamic]Box,
 
 	// Text
-	builder:          strings.Builder,
+	builder:             strings.Builder,
 
 	// Active text container node
-	active_container: Id,
+	active_container:    Id,
 
-	// Active
-	active:           bool,
+	// Actively being selected or manipulated
+	active:              bool,
 
 	// Kill flag
-	dead:             bool,
+	dead:                bool,
 }
 
 text_view_translate :: proc(self: ^Text_View, pos: int, t: Translation) -> int {
@@ -389,7 +389,7 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 
 			if dist < min_dist.x {
 				min_dist.x = dist
-				self.hover_index = glyph_index + node.text_glyph_index
+				self.hovered_glyph_index = glyph_index + node.text_glyph_index
 				self.active_container = node.parent.id if node.parent != nil else 0
 			}
 		}
@@ -399,11 +399,41 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 
 			if dist < min_dist.x {
 				min_dist.x = dist
-				self.hover_index = len(node.glyphs) + node.text_glyph_index
+				self.hovered_glyph_index = len(node.glyphs) + node.text_glyph_index
 				self.active_container = node.parent.id if node.parent != nil else 0
 			}
 		}
 	}
+}
+
+text_view_get_glyph_index_from_byte_index :: proc(
+	self: ^Text_View,
+	byte_index: int,
+) -> (
+	glyph_index: int,
+	ok: bool,
+) {
+	for &glyph, i in self.glyphs {
+		if glyph.index == byte_index {
+			glyph_index = i
+			ok = true
+			break
+		}
+	}
+	return
+}
+
+text_view_get_glyph_selection :: proc(self: ^Text_View) -> (glyph_selection: [2]int, ok: bool) {
+	glyph_selection = {
+		text_view_get_glyph_index_from_byte_index(self, self.selection[0]) or_return,
+		text_view_get_glyph_index_from_byte_index(self, self.selection[1]) or_return,
+	}
+	ok = true
+	return
+}
+
+text_view_get_hovered_text_index :: proc(self: ^Text_View) -> int {
+	return self.glyphs[self.hovered_glyph_index].index
 }
 
 text_view_get_glyph_position :: proc(self: ^Text_View, index: int) -> [2]f32 {
@@ -412,8 +442,9 @@ text_view_get_glyph_position :: proc(self: ^Text_View, index: int) -> [2]f32 {
 }
 
 text_view_on_mouse_down :: proc(self: ^Text_View, index: int) {
-	self.selection = self.hover_index
-	self.anchor = self.hover_index
+	hovered_index := text_view_get_hovered_text_index(self)
+	self.selection = hovered_index
+	self.anchor = hovered_index
 }
 
 text_view_when_mouse_down :: proc(self: ^Text_View, index: int) {
@@ -426,16 +457,18 @@ text_view_when_mouse_down :: proc(self: ^Text_View, index: int) {
 
 	last_selection := self.selection
 
+	hover_index := text_view_get_hovered_text_index(self)
+
 	switch index {
 	case 0:
-		self.selection[1] = self.hover_index
+		self.selection[1] = hover_index
 
 	case 1:
-		allow_precision := self.hover_index != self.selection[0]
+		allow_precision := hover_index != self.selection[0]
 
-		if self.hover_index < self.anchor {
+		if hover_index < self.anchor {
 			self.selection[1] =
-				self.hover_index if (allow_precision && is_separator(rune(data[self.hover_index]))) else max(0, strings.last_index_proc(data[:min(self.hover_index, len(data))], is_separator) + 1)
+				hover_index if (allow_precision && is_separator(rune(data[hover_index]))) else max(0, strings.last_index_proc(data[:min(hover_index, len(data))], is_separator) + 1)
 
 			self.selection[0] = strings.index_proc(data[self.anchor:], is_separator)
 
@@ -451,12 +484,12 @@ text_view_when_mouse_down :: proc(self: ^Text_View, index: int) {
 			)
 
 			self.selection[1] =
-				0 if (allow_precision && is_separator(rune(data[self.hover_index - 1]))) else strings.index_proc(data[self.hover_index:], is_separator)
+				0 if (allow_precision && is_separator(rune(data[hover_index - 1]))) else strings.index_proc(data[hover_index:], is_separator)
 
 			if self.selection[1] == -1 {
 				self.selection[1] = len(data)
 			} else {
-				self.selection[1] += self.hover_index
+				self.selection[1] += hover_index
 			}
 		}
 
@@ -473,7 +506,7 @@ text_view_get_ordered_selection :: proc(self: ^Text_View) -> [2]int {
 }
 
 text_view_update_cursor_box :: proc(self: ^Text_View) {
-	cursor_index := self.selection[1]
+	cursor_index := text_view_get_glyph_index_from_byte_index(self, self.selection[1]) or_else 0
 
 	if len(self.glyphs) > 0 && cursor_index >= 0 && cursor_index <= len(self.glyphs) {
 		glyph := self.glyphs[min(cursor_index, len(self.glyphs) - 1)]
