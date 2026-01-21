@@ -394,42 +394,32 @@ text_view_on_mouse_move :: proc(self: ^Text_View, mouse_position: [2]f32) {
 			}
 		}
 
-		if len(node.glyphs) > 0 {
-			dist := abs((node.text_origin.x + node.text_size.x) - mouse_position.x)
+		// if len(node.glyphs) > 0 {
+		// 	dist := abs((node.text_origin.x + node.text_size.x) - mouse_position.x)
 
-			if dist < min_dist.x {
-				min_dist.x = dist
-				self.hovered_glyph_index = len(node.glyphs) + node.text_glyph_index
-				self.active_container = node.parent.id if node.parent != nil else 0
-			}
-		}
+		// 	if dist < min_dist.x {
+		// 		min_dist.x = dist
+		// 		self.hovered_glyph_index = len(node.glyphs) + node.text_glyph_index
+		// 		self.active_container = node.parent.id if node.parent != nil else 0
+		// 	}
+		// }
 	}
 }
 
-text_view_get_glyph_index_from_byte_index :: proc(
-	self: ^Text_View,
-	byte_index: int,
-) -> (
-	glyph_index: int,
-	ok: bool,
-) {
+text_view_get_glyph_index_from_byte_index :: proc(self: ^Text_View, byte_index: int) -> int {
 	for &glyph, i in self.glyphs {
 		if glyph.index == byte_index {
-			glyph_index = i
-			ok = true
-			break
+			return i
 		}
 	}
-	return
+	return len(self.glyphs) - 1
 }
 
-text_view_get_glyph_selection :: proc(self: ^Text_View) -> (glyph_selection: [2]int, ok: bool) {
-	glyph_selection = {
-		text_view_get_glyph_index_from_byte_index(self, self.selection[0]) or_return,
-		text_view_get_glyph_index_from_byte_index(self, self.selection[1]) or_return,
+text_view_get_glyph_selection :: proc(self: ^Text_View) -> [2]int {
+	return {
+		text_view_get_glyph_index_from_byte_index(self, self.selection[0]),
+		text_view_get_glyph_index_from_byte_index(self, self.selection[1]),
 	}
-	ok = true
-	return
 }
 
 text_view_get_hovered_text_index :: proc(self: ^Text_View) -> int {
@@ -506,7 +496,7 @@ text_view_get_ordered_selection :: proc(self: ^Text_View) -> [2]int {
 }
 
 text_view_update_cursor_box :: proc(self: ^Text_View) {
-	cursor_index := text_view_get_glyph_index_from_byte_index(self, self.selection[1]) or_else 0
+	cursor_index := text_view_get_glyph_index_from_byte_index(self, self.selection[1])
 
 	if len(self.glyphs) > 0 && cursor_index >= 0 && cursor_index <= len(self.glyphs) {
 		glyph := self.glyphs[min(cursor_index, len(self.glyphs) - 1)]

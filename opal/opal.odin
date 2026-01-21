@@ -972,30 +972,34 @@ begin :: proc() {
 			node := ctx.hovered_node
 			ctx.hovered_id = node.id
 
-			if node.enable_selection && node.text_view != nil {
-				// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
-				ctx.text_agent.hovered_view = node.text_view
-				// }
-			}
-
 			if node.interactive {
 				ctx.widget_hovered = true
+
+				// Select the node's text view
+				if node.enable_selection && node.text_view != nil {
+					// if point_in_box(ctx.mouse_position, node_get_text_box(node)) {
+					ctx.text_agent.hovered_view = node.text_view
+					// }
+				}
 			}
 		}
 
+		// Update text agent mouse selection
 		text_agent_on_mouse_move(&ctx.text_agent, ctx.mouse_position)
 
-		// Active nodes deactivate when the mouse leaves them
 		if activation, ok := ctx.node_activation.?; ok {
+			// Deactivate nodes when no longer hovered
 			if ctx.hovered_id != activation.which && !activation.captured {
 				ctx.node_activation = nil
 			}
 
-			if mouse_released(.Left) {
+			// Deactivate nodes when the mouse button that was clicked gets released
+			if mouse_released(ctx.last_mouse_down_button) {
 				ctx.node_activation = nil
 			}
 		}
 
+		// Release hover of text views
 		if mouse_released(.Left) {
 			ctx.text_agent.hovered_view = nil
 			text_agent_on_mouse_up(&ctx.text_agent)
@@ -1056,14 +1060,19 @@ begin :: proc() {
 	//
 	// Catch problems before they cause undefined behavior
 	//
-	assert(len(ctx.style_stack) == 0)
-	assert(len(ctx.node_stack) == 0)
+	assert(
+		len(ctx.style_stack) == 0,
+		"The style stack was not empty! You forgot to call pop_style() somewhere.",
+	)
+	assert(
+		len(ctx.node_stack) == 0,
+		"The node stack was not empty! You forgot to call end_node() somewhere.",
+	)
 
-	//
-	// Reset for new frame
 	//
 	text_agent_on_new_frame(&ctx.text_agent)
 
+	// Reset arrays for rebuilding UI
 	clear(&ctx.roots)
 	clear(&ctx.layout_roots)
 	clear(&ctx.style_array)

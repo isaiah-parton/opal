@@ -213,7 +213,6 @@ inspector_show :: proc(self: ^Inspector) {
 				padding = 4,
 				clip_content = true,
 				show_scrollbars = true,
-				style = {background = tw.NEUTRAL_950},
 				interactive = true,
 				vertical = true,
 			},
@@ -270,7 +269,7 @@ inspector_show :: proc(self: ^Inspector) {
 		} else {
 			add_node(
 				&{
-					foreground = _TEXT,
+					foreground = global_ctx.theme.color.base_foreground,
 					font_size = 12,
 					text = name,
 					sizing = {fit = 1, max = INFINITY},
@@ -288,7 +287,7 @@ inspector_show :: proc(self: ^Inspector) {
 			}
 		}
 		end_node()
-		node.background = fade(tw.NEUTRAL_900, f32(i32(node.is_hovered)))
+		node.background = fade(global_ctx.theme.color.base_strong, f32(i32(node.is_hovered)))
 		if expandable {
 			node_update_transition(node, 0, node.is_toggled, 0.2)
 			if node.was_active && node.is_hovered && !node.is_active {
@@ -461,16 +460,23 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 		},
 	)
 	end_node()
+
 	if button_node.was_active && !button_node.is_active {
-		if self.inspected_id == node.id {
-			self.inspected_id = 0
-		} else {
-			self.inspected_id = node.id
+		if global_ctx.last_mouse_down_button == .Right {
+			button_node.is_toggled = !button_node.is_toggled
 		}
 	}
-	if button_node.is_hovered && mouse_pressed(.Right) {
-		button_node.is_toggled = !button_node.is_toggled
+
+	if button_node.is_active && !button_node.was_active {
+		if global_ctx.last_mouse_down_button == .Left {
+			if self.inspected_id == node.id {
+				self.inspected_id = 0
+			} else {
+				self.inspected_id = node.id
+			}
+		}
 	}
+
 	button_node.background =
 		tw.BLUE_500 if self.inspected_id == node.id else kn.fade(tw.STONE_600, f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)))
 	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)

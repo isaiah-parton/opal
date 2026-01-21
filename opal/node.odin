@@ -1089,7 +1089,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 				fade(global_ctx.theme.color.selection_background, 0.5),
 			)
 
-			selection := text_view_get_glyph_selection(self.text_view) or_else {}
+			selection := text_view_get_glyph_selection(self.text_view)
 
 			selection = [2]int {
 				clamp(selection[0] - self.text_glyph_index, 0, len(self.glyphs)),
@@ -1132,11 +1132,10 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 		}
 
 		// Draw cursor
-		cursor_index :=
-			text_view_get_glyph_index_from_byte_index(
-				self.text_view,
-				self.text_view.selection[1] - self.text_glyph_index,
-			) or_else 0
+		cursor_index := text_view_get_glyph_index_from_byte_index(
+			self.text_view,
+			self.text_view.selection[1] - self.text_glyph_index,
+		)
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
@@ -1304,6 +1303,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 		}
 
 		self.text_view = get_current_text() or_else panic("No text context initialized!")
+		glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
 
 		// Create text layout
 		if reader, ok := reader.?; ok {
@@ -1320,8 +1320,6 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				}
 			}
 
-			glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
-
 			hash: u32 = FNV1A32_OFFSET_BASIS
 
 			for {
@@ -1332,7 +1330,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				}
 
 				if char == 0 {
-					break
+					continue
 				}
 
 				hash = hash ~ (u32(char) * FNV1A32_PRIME)
@@ -1390,8 +1388,6 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 					}
 				}
 
-				self.text_size.x += self.gap
-
 				if self.enable_selection {
 					self.text_view.byte_length += length
 				}
@@ -1399,6 +1395,21 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				self.text_byte_length += length
 			}
 
+			// Trigger redraw if text hash changed
+			if hash != self.text_hash {
+				draw_frames(1)
+				self.text_hash = hash
+			}
+
+			// Add width for text gap
+			self.text_size.x += self.gap * f32(len(glyphs) - self.text_glyph_index)
+			self.text_size.y = self.font.line_height * self.font_size
+
+			// Include text as content size
+			self.content_size = linalg.max(self.content_size, self.text_size)
+		}
+
+		if self.enable_selection {
 			// Append tail glyph
 			append(
 				glyphs,
@@ -1409,18 +1420,14 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 				},
 			)
 
-			if hash != self.text_hash {
-				draw_frames(1)
-				self.text_hash = hash
-			}
-
-			self.text_size.x -= self.gap
-			self.text_size.y = self.font.line_height * self.font_size
-
-			self.glyphs = glyphs[self.text_glyph_index:]
-
-			self.content_size = linalg.max(self.content_size, self.text_size)
+			// Node requires a minimum size so the cursor appears correctly
+			self.content_size = linalg.max(
+				self.content_size,
+				[2]f32{0, self.font.line_height * self.font_size},
+			)
 		}
+
+		self.glyphs = glyphs[self.text_glyph_index:]
 
 		push_node(self)
 	}

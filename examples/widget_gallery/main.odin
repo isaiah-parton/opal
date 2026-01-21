@@ -134,11 +134,13 @@ main :: proc() {
 				add_checkbox(&{value = &app.boolean, label = "Checkbox"})
 				add_field(
 					&{
-						sizing = {exact = {300, 30}, fit = {1, 0}, max = {400, INFINITY}},
+						sizing = {exact = {300, 0}, fit = {1, 1}, max = {400, INFINITY}},
 						value_data = &app.text,
+						placeholder = "Something",
 						value_type_info = type_info_of(type_of(app.text)),
 					},
 				)
+				add_progress_bar(&{value = 0.5})
 			}
 			end_node()
 			end()

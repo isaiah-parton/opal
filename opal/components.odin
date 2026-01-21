@@ -66,10 +66,14 @@ theme_default :: proc() -> Theme {
 		radius_big = 16,
 		font_size_small = 14,
 		color = {
-			background = tw.NEUTRAL_100,
-			base_strong = tw.NEUTRAL_300,
-			accent = tw.BLUE_500,
-			primary = tw.LIME_600,
+			background = tw.AMBER_100,
+			base_strong = kn.color_from_rgba(
+				kn.color_from_hsla_array(
+					kn.hsla_from_rgba(kn.rgba_from_color(tw.AMBER_200)) * [4]f32{1, 0.5, 1, 1},
+				),
+			),
+			accent = tw.PURPLE_400,
+			primary = tw.EMERALD_500,
 			primary_foreground = tw.WHITE,
 			secondary = tw.NEUTRAL_700,
 			secondary_foreground = tw.NEUTRAL_950,
@@ -141,6 +145,7 @@ add_checkbox :: proc(
 				sizing = {fit = 1, max = INFINITY},
 				padding = {0, 0, 4, 0},
 				text = desc.label,
+				font = &ctx.theme.font,
 				font_size = ctx.theme.label_text_size,
 				foreground = ctx.theme.color.base_foreground,
 			},
@@ -234,6 +239,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 					&{
 						foreground = ctx.theme.color.base_foreground,
 						sizing = {fit = 1, max = INFINITY},
+						font = &ctx.theme.font,
 						font_size = ctx.theme.label_text_size,
 						text = desc.label,
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -299,6 +305,9 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 
 	desc.stroke = ctx.theme.color.border
 	desc.stroke_width = 2
+	if desc.font == nil {
+		desc.font = &ctx.theme.font
+	}
 	desc.font_size = 14
 	desc.padding = 4
 	desc.radius = 5
@@ -424,33 +433,37 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					push_id(i)
 					i += 1
 
-					word_end := 0
-					is_white_space := unicode.is_white_space(rune(line[0]))
+					word_end := -1
+
+					starts_with_white_space := unicode.is_white_space(rune(line[0]))
+
 					for s, i in line {
-						if unicode.is_white_space(s) != is_white_space {
+						is_white_space := unicode.is_white_space(rune(s))
+						if is_white_space != starts_with_white_space {
 							word_end = i
+							break
 						}
 					}
+
 					if word_end == -1 {
 						word_end = len(line)
-					} else {
-						word_end += 1
 					}
 
-					text := line[:word_end]
+					word := line[:word_end]
 
 					add_node(
 						&{
 							foreground = ctx.theme.color.base_foreground,
 							sizing = {fit = 1, max = INFINITY},
-							text = text,
-							font = &ctx.theme.font,
-							font_size = ctx.theme.font_size_small,
+							text = word,
+							font = desc.font,
+							font_size = desc.font_size,
 							interactive = true,
 							enable_selection = true,
 						},
 					)
 					pop_id()
+
 					line = line[word_end:]
 				}
 			}
@@ -465,7 +478,6 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 					font = desc.font,
 					font_size = desc.font_size,
 					foreground = ctx.theme.color.base_foreground,
-					text = "\u0000",
 					sizing = {fit = 1, max = INFINITY},
 					interactive = true,
 					enable_selection = true,
@@ -481,9 +493,9 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			&{
 				font = desc.font,
 				font_size = desc.font_size,
-				foreground = ctx.theme.color.base_strong,
+				foreground = kn.fade(ctx.theme.color.base_foreground, 0.5),
 				text = desc.placeholder,
-				sizing = {fit = 1},
+				sizing = {fit = 1, max = INFINITY},
 			},
 		)
 	}
@@ -753,6 +765,38 @@ add_resizer :: proc(
 	}
 	end_node()
 
+	return
+}
+
+Progress_Bar_Descriptor :: struct {
+	using base: Node_Descriptor,
+	color:      Maybe(Color),
+	value:      f32,
+}
+
+add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node)) {
+	desc.sizing.exact = {200, global_ctx.theme.base_size.y}
+	desc.style.stroke = global_ctx.theme.color.border
+	desc.style.stroke_width = 2
+	desc.style.background = global_ctx.theme.color.background
+	desc.style.foreground = desc.color.? or_else global_ctx.theme.color.accent
+	desc.on_draw = proc(self: ^Node) {
+		self.radius = box_height(self.box) / 2
+		kn.add_box(self.box, self.radius, node_convert_paint_variant(self, self.style.background))
+		kn.push_scissor(kn.make_box(self.box, self.radius))
+		kn.add_box(
+			{
+				self.box.lo,
+				{math.lerp(self.box.lo.x, self.box.hi.x, self.transitions[0]), self.box.hi.y},
+			},
+			0,
+			self.style.foreground,
+		)
+		kn.pop_scissor()
+		kn.add_box_lines(self.box, self.style.stroke_width, self.radius, self.style.stroke)
+	}
+	result = add_node(desc)
+	result.?.transitions[0] = desc.value
 	return
 }
 
