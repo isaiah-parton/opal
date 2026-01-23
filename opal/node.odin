@@ -183,6 +183,9 @@ Node_Descriptor :: struct {
 
 	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
 	data:             rawptr,
+
+	// Owned state
+	on_destroy:       proc(_: ^Node),
 }
 
 Glyph :: struct {
@@ -285,6 +288,9 @@ Node :: struct {
 	// Needs scissor
 	has_clipped_child: bool,
 	is_clipped:        bool,
+
+	// Data owned by this node for its lifetime
+	owned_data:        rawptr,
 }
 
 push_node :: proc(node: ^Node) {
@@ -304,7 +310,11 @@ pop_node :: proc() {
 }
 
 node_destroy :: proc(self: ^Node) {
+	if self.on_destroy != nil {
+		self.on_destroy(self)
+	}
 	delete(self.children)
+	self^ = {}
 }
 
 node_update_input :: proc(self: ^Node) {
@@ -661,9 +671,9 @@ node_enforce_aspect_ratio :: proc(node: ^Node) {
 	current_aspect := node.size.x / node.size.y
 
 	if node.sizing.aspect_ratio > current_aspect {
-		node.size.y = node.size.x / node.sizing.aspect_ratio
+		node.size.y = math.round(node.size.x / node.sizing.aspect_ratio)
 	} else {
-		node.size.x = node.size.y * node.sizing.aspect_ratio
+		node.size.x = math.round(node.size.y * node.sizing.aspect_ratio)
 	}
 }
 
@@ -1045,8 +1055,8 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	// Draw self
 	if self.background != {} {
 		kn.add_box(
-			box_shrink(self.box, self.style.stroke_width - 0.5) if self.style.stroke_type == .Inner else self.box,
-			self.style.radius - self.style.stroke_width,
+			self.box,
+			self.style.radius,
 			paint = node_convert_paint_variant(self, self.background),
 		)
 	}
@@ -1191,9 +1201,8 @@ node_fit_to_content :: proc(self: ^Node) {
 		return
 	}
 
-	self.size = linalg.min(
-		linalg.max(self.content_size * self.sizing.fit, self.size),
-		self.sizing.max,
+	self.size = linalg.floor(
+		linalg.min(linalg.max(self.content_size * self.sizing.fit, self.size), self.sizing.max),
 	)
 
 	self.overflow = linalg.max(self.content_size - self.size, 0)

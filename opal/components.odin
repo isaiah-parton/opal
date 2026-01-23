@@ -7,6 +7,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:math/ease"
+import "core:math/linalg"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
@@ -21,6 +22,7 @@ Theme :: struct {
 	radius_small:    f32,
 	radius_big:      f32,
 	base_size:       [2]f32,
+	border_width:    f32,
 	animation_time:  f32,
 	font_size_small: f32,
 	font:            Font,
@@ -58,6 +60,7 @@ theme_default :: proc() -> Theme {
 	return Theme {
 		text_gap = 4,
 		checkbox_size = 18,
+		border_width = 2,
 		label_text_size = 14,
 		label_icon_size = 16,
 		base_size = 12,
@@ -78,7 +81,7 @@ theme_default :: proc() -> Theme {
 			secondary = tw.NEUTRAL_700,
 			secondary_foreground = tw.NEUTRAL_950,
 			secondary_strong = tw.NEUTRAL_600,
-			border = tw.NEUTRAL_950,
+			border = tw.GRAY_900,
 			base_foreground = tw.BLACK,
 			selection_background = tw.INDIGO_500,
 			selection_foreground = tw.BLACK,
@@ -122,7 +125,7 @@ add_checkbox :: proc(
 	node_update_transition(node, 0, desc.value^, 0.1)
 	node_update_transition(node, 1, node.is_hovered, 0.1)
 	node_update_transition(node, 2, node.is_active, 0.1)
-	node.background = kn.fade(ctx.theme.color.base_strong, 0.2 * node.transitions[1])
+	node.background = kn.fade(ctx.theme.color.base_strong, node.transitions[1])
 	{
 		add_node(
 			&{
@@ -134,8 +137,12 @@ add_checkbox :: proc(
 				font = &ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
-				foreground = kn.fade(ctx.theme.color.background, node.transitions[0]),
-				background = kn.fade(ctx.theme.color.border, node.transitions[0]),
+				foreground = kn.fade(ctx.theme.color.base_strong, node.transitions[0]),
+				background = kn.mix(
+					node.transitions[0],
+					ctx.theme.color.background,
+					ctx.theme.color.border,
+				),
 				transform_origin = 0.5,
 				scale = math.lerp(f32(1), f32(0.9), node.transitions[2]),
 			},
@@ -797,6 +804,301 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 	}
 	result = add_node(desc)
 	result.?.transitions[0] = desc.value
+	return
+}
+
+Color_Picker_Descriptor :: struct {
+	using base: Node_Descriptor,
+	value:      ^Color,
+}
+
+Color_Picker_Result :: struct {
+	node:    ^Node,
+	changed: bool,
+}
+
+Color_Picker_State :: struct {
+	hsla:  [4]f32,
+	value: ^Color,
+}
+
+barycentric :: proc(point, a, b, c: [2]f32) -> (u, v: f32) {
+	d := c - a
+	e := b - a
+	f := point - a
+	dd := linalg.dot(d, d)
+	ed := linalg.dot(e, d)
+	fd := linalg.dot(f, d)
+	ee := linalg.dot(e, e)
+	fe := linalg.dot(f, e)
+	denom := dd * ee - ed * ed
+	u = (ee * fd - ed * fe) / denom
+	v = (dd * fe - ed * fd) / denom
+	return
+}
+
+nearest_point_on_line :: proc(a, b, p: [2]f32) -> [2]f32 {
+	ap := p - a
+	ab_dir := b - a
+	dot := ap.x * ab_dir.x + ap.y * ab_dir.y
+	if dot < 0 do return a
+	ab_len_sqr := ab_dir.x * ab_dir.x + ab_dir.y * ab_dir.y
+	if dot > ab_len_sqr do return b
+	return a + ab_dir * dot / ab_len_sqr
+}
+
+nearest_point_in_triangle :: proc(a, b, c, p: [2]f32) -> [2]f32 {
+	proj_ab := nearest_point_on_line(a, b, p)
+	proj_bc := nearest_point_on_line(b, c, p)
+	proj_ca := nearest_point_on_line(c, a, p)
+	dist2_ab := linalg.length2(p - proj_ab)
+	dist2_bc := linalg.length2(p - proj_bc)
+	dist2_ca := linalg.length2(p - proj_ca)
+	m := linalg.min(dist2_ab, linalg.min(dist2_bc, dist2_ca))
+	if m == dist2_ab do return proj_ab
+	if m == dist2_bc do return proj_bc
+	return proj_ca
+}
+
+triangle_contains_point :: proc(a, b, c, p: [2]f32) -> bool {
+	b1 := ((p.x - b.x) * (a.y - b.y) - (p.y - b.y) * (a.x - b.x)) < 0
+	b2 := ((p.x - c.x) * (b.y - c.y) - (p.y - c.y) * (b.x - c.x)) < 0
+	b3 := ((p.x - a.x) * (c.y - a.y) - (p.y - a.y) * (c.x - a.x)) < 0
+	return (b1 == b2) && (b2 == b3)
+}
+
+triangle_barycentric :: proc(a, b, c, p: [2]f32) -> (u, v, w: f32) {
+	v0 := b - a
+	v1 := c - a
+	v2 := p - a
+	denom := v0.x * v1.y - v1.x * v0.y
+	v = (v2.x * v1.y - v1.x * v2.y) / denom
+	w = (v0.x * v2.y - v2.x * v0.y) / denom
+	u = 1 - v - w
+	return
+}
+
+draw_checkerboard_pattern :: proc(box: Box, size: [2]f32, primary, secondary: kn.Color) {
+	kn.add_box(box, paint = primary)
+	for x in 0 ..< int(math.ceil(box_width(box) / size.x)) {
+		for y in 0 ..< int(math.ceil(box_height(box) / size.y)) {
+			if (x + y) % 2 == 0 {
+				pos := box.lo + [2]f32{f32(x), f32(y)} * size
+				kn.add_box({pos, linalg.min(pos + size, box.hi)}, paint = secondary)
+			}
+		}
+	}
+}
+
+TRIANGLE_STEP :: math.TAU / 3
+
+make_a_triangle :: proc(center: [2]f32, angle: f32, radius: f32) -> (a, b, c: [2]f32) {
+	a = center + {math.cos(angle), math.sin(angle)} * radius
+	b = center + {math.cos(angle - TRIANGLE_STEP), math.sin(angle - TRIANGLE_STEP)} * radius
+	c = center + {math.cos(angle + TRIANGLE_STEP), math.sin(angle + TRIANGLE_STEP)} * radius
+	return
+}
+
+add_color_picker :: proc(
+	desc: ^Color_Picker_Descriptor,
+	loc := #caller_location,
+) -> (
+	result: Color_Picker_Result,
+	ok: bool,
+) {
+	if desc.value == nil {
+		return
+	}
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	desc.sizing.fit = 1
+	desc.sizing.max = INFINITY
+	desc.gap = global_ctx.theme.min_spacing
+	desc.vertical = true
+	desc.on_destroy = proc(self: ^Node) {
+		if self.owned_data != nil {
+			free(self.owned_data)
+		}
+	}
+
+	result.node = begin_node(desc).? or_return
+	if result.node.owned_data == nil {
+		result.node.owned_data = new_clone(
+			Color_Picker_State{hsla = kn.hsva_from_rgba(kn.rgba_from_color(desc.value^))},
+		)
+	}
+	state := (^Color_Picker_State)(result.node.owned_data)
+	state.value = desc.value
+	{
+		color_wheel_node := add_node(
+			&{
+				interactive = true,
+				sizing = {exact = 200},
+				sticky = true,
+				on_draw = proc(self: ^Node) {
+					assert(self.parent != nil)
+					state := (^Color_Picker_State)(self.parent.owned_data)
+					assert(state != nil)
+					assert(state.value != nil)
+
+					size := min(box_width(self.box), box_height(self.box))
+					outer_radius := size / 2
+					inner_radius := outer_radius * 0.75
+					center := box_center(self.box)
+					angle := state.hsla.x * math.RAD_PER_DEG
+
+					if self.is_active {
+						delta_to_mouse := global_ctx.mouse_position - center
+						if linalg.length(global_ctx.mouse_click_position - center) > inner_radius {
+							state.hsla.x =
+								math.atan2(delta_to_mouse.y, delta_to_mouse.x) / math.RAD_PER_DEG
+							if state.hsla.x < 0 {
+								state.hsla.x += 360
+							}
+						} else {
+							point := global_ctx.mouse_position
+							point_a, point_b, point_c := make_a_triangle(
+								center,
+								angle,
+								inner_radius,
+							)
+							if !triangle_contains_point(point_a, point_b, point_c, point) {
+								point = nearest_point_in_triangle(point_a, point_b, point_c, point)
+							}
+							u, v, w := triangle_barycentric(point_a, point_b, point_c, point)
+							state.hsla.z = clamp(1 - v, 0, 1)
+							state.hsla.y = clamp(u / state.hsla.z, 0, 1)
+						}
+
+						rgba := kn.rgba_from_hsva(state.hsla)
+						state.value.rgb = kn.color_from_rgba(rgba).xyz
+					}
+
+					kn.add_circle_lines(
+						center,
+						outer_radius + 2,
+						width = (outer_radius - inner_radius) + 4,
+						paint = global_ctx.theme.color.border,
+					)
+					kn.add_circle_lines(
+						center,
+						outer_radius,
+						width = (outer_radius - inner_radius),
+						paint = kn.make_wheel_gradient(center),
+					)
+
+					point_a, point_b, point_c := make_a_triangle(
+						center,
+						state.hsla.x * math.RAD_PER_DEG,
+						inner_radius - 2,
+					)
+
+					kn.add_polygon(
+						{point_a, point_b, point_c},
+						paint = kn.make_tri_gradient(
+							{point_a, point_b, point_c},
+							{
+								kn.color_from_rgba(kn.rgba_from_hsva({state.hsla.x, 1, 1, 1})),
+								kn.BLACK,
+								kn.WHITE,
+							},
+						),
+					)
+					kn.add_polygon_lines(
+						{point_a, point_b, point_c},
+						2,
+						paint = global_ctx.theme.color.border,
+					)
+
+					point := linalg.lerp(
+						linalg.lerp(point_c, point_a, clamp(state.hsla.y, 0, 1)),
+						point_b,
+						clamp(1 - state.hsla.z, 0, 1),
+					)
+					r: f32 = 9 if (self.is_active) else 7
+					kn.add_circle(
+						point,
+						r,
+						paint = kn.color_from_rgba(
+							kn.rgba_from_hsva({state.hsla.x, state.hsla.y, state.hsla.z, 1}),
+						),
+					)
+					kn.add_circle_lines(
+						point,
+						r,
+						2,
+						paint = kn.BLACK if state.hsla.z > 0.5 else kn.WHITE,
+					)
+				},
+			},
+		).?
+
+		alpha_slider_node := add_node(
+			&{
+				stroke = global_ctx.theme.color.border,
+				stroke_width = global_ctx.theme.border_width,
+				interactive = true,
+				sticky = true,
+				sizing = {exact = {0, 30}, grow = {1, 0}, max = INFINITY},
+				data = desc.value,
+				on_draw = proc(self: ^Node) {
+					color := (^Color)(self.data)
+					assert(color != nil)
+
+					i := int(self.vertical)
+					j := 1 - i
+
+					if self.is_active {
+						color.a = u8(
+							clamp(
+								(global_ctx.mouse_position[i] - self.box.lo[i]) /
+								(self.box.hi[i] - self.box.lo[i]),
+								0,
+								1,
+							) *
+							255,
+						)
+					}
+
+					draw_checkerboard_pattern(
+						self.box,
+						(self.box.hi[j] - self.box.lo[j]) / 2,
+						tw.GRAY_400,
+						tw.GRAY_600,
+					)
+					time := clamp(f32(color.a) / 255, 0, 1)
+					pos := self.box.lo[i] + (self.box.hi[i] - self.box.lo[i] - 6) * time
+					if i == 0 {
+						kn.add_box(
+							self.box,
+							paint = kn.make_linear_gradient(
+								self.box.lo,
+								{self.box.hi.x, self.box.lo.y},
+								kn.fade(color^, 0.0),
+								color^,
+							),
+						)
+						kn.add_box_lines(
+							box_floored({{pos, self.box.lo.y}, {pos + 6, self.box.hi.y}}),
+							2,
+							paint = global_ctx.theme.color.base_foreground,
+						)
+					}
+					kn.add_box_lines(
+						self.box,
+						self.style.stroke_width,
+						self.style.radius,
+						self.style.stroke,
+					)
+				},
+			},
+		).?
+
+	}
+	end_node()
+
 	return
 }
 
