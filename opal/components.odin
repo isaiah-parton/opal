@@ -807,6 +807,83 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 	return
 }
 
+Color_Button_Descriptor :: struct {
+	using base: Node_Descriptor,
+	value:      ^Color,
+}
+
+Color_Button_Result :: struct {
+	node:    ^Node,
+	changed: bool,
+}
+
+add_color_button :: proc(
+	desc: ^Color_Button_Descriptor,
+	loc := #caller_location,
+) -> (
+	result: Color_Button_Result,
+) {
+	assert(desc != nil)
+
+	ctx := global_ctx
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	desc.sizing = {
+		fit = 1,
+		max = INFINITY,
+	}
+	desc.interactive = true
+	desc.radius = 4
+	desc.background = desc.value^
+	desc.stroke_width = 2
+	desc.stroke = ctx.theme.color.border
+	desc.gap = 4
+	desc.padding = {8, 4, 8, 4}
+	desc.radius = 4
+	desc.content_align = 0.5
+
+	result.node = begin_node(desc).?
+	{
+		add_node(
+			&{
+				foreground = ctx.theme.color.base_foreground,
+				sizing = {fit = 1, max = INFINITY},
+				font = &ctx.theme.font,
+				font_size = ctx.theme.label_text_size,
+				text = fmt.tprintf("#%6x", transmute(u32)desc.value^),
+			},
+		)
+
+		if result.node.is_focused {
+			add_color_picker(
+				&{
+					absolute = true,
+					layer = 2,
+					sizing = {fit = 1, max = INFINITY, exact = 200},
+					exact_offset = {0, global_ctx.theme.min_spacing},
+					relative_offset = {0, 1},
+					padding = global_ctx.theme.min_spacing,
+					stroke = ctx.theme.color.border,
+					stroke_width = 2,
+					background = ctx.theme.color.background,
+					shadow_color = Color{0, 0, 0, 128},
+					shadow_size = 10,
+					shadow_offset = {0, 2},
+					value = desc.value,
+				},
+			)
+		}
+	}
+	end_node()
+
+	node_update_transition(result.node, 0, result.node.is_hovered, 0.15)
+	node_update_transition(result.node, 1, result.node.is_active, 0.1)
+
+	return
+}
+
 Color_Picker_Descriptor :: struct {
 	using base: Node_Descriptor,
 	value:      ^Color,

@@ -142,7 +142,7 @@ main :: proc() {
 				)
 				add_progress_bar(&{value = 0.5})
 
-				add_color_picker(&{value = &global_ctx.theme.color.background})
+				add_color_button(&{value = &global_ctx.theme.color.background})
 			}
 			end_node()
 			end()

@@ -1457,7 +1457,7 @@ end_node :: proc() {
 	//
 	// Determine known size
 	//
-	self.content_size[i] += self.gap * f32(max(len(self.children) - 1, 0))
+	self.content_size[i] += self.gap * f32(max(len(self.layout_children) - 1, 0))
 
 	self.content_size += self.padding.xy + self.padding.zw
 
