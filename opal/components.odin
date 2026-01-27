@@ -6,6 +6,7 @@ import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:math/bits"
 import "core:math/ease"
 import "core:math/linalg"
 import "core:mem"
@@ -843,20 +844,27 @@ add_color_button :: proc(
 	desc.padding = {8, 4, 8, 4}
 	desc.radius = 4
 	desc.content_align = 0.5
+	desc.group = true
 
 	result.node = begin_node(desc).?
 	{
 		add_node(
 			&{
-				foreground = ctx.theme.color.base_foreground,
+				foreground = kn.BLACK if max(kn.luminance_of(desc.value^), 1 - f32(desc.value.a) / 255) > 0.45 else kn.WHITE,
 				sizing = {fit = 1, max = INFINITY},
-				font = &ctx.theme.font,
+				font = &ctx.theme.monospace_font,
 				font_size = ctx.theme.label_text_size,
-				text = fmt.tprintf("#%6x", transmute(u32)desc.value^),
+				text = fmt.tprintf(
+					"#%2x%2x%2x%2x",
+					desc.value.r,
+					desc.value.g,
+					desc.value.b,
+					desc.value.a,
+				),
 			},
 		)
 
-		if result.node.is_focused {
+		if result.node.is_focused || result.node.has_focused_child {
 			add_color_picker(
 				&{
 					absolute = true,

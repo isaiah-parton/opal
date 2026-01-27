@@ -142,7 +142,17 @@ main :: proc() {
 				)
 				add_progress_bar(&{value = 0.5})
 
-				add_color_button(&{value = &global_ctx.theme.color.background})
+				for field, i in reflect.struct_fields_zipped(Theme_Colors) {
+					push_id(i)
+					add_color_button(
+						&{
+							value = (^Color)(
+								rawptr(uintptr(&global_ctx.theme.color) + field.offset),
+							),
+						},
+					)
+					pop_id()
+				}
 			}
 			end_node()
 			end()

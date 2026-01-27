@@ -548,17 +548,16 @@ node_solve_box_recursive :: proc(
 
 	clip_box := clip_box
 
-	if self.parent != nil {
+	if self.parent != nil && self.parent.clip_content && !self.absolute {
 		clip := box_get_rounded_clip(self.box, clip_box, self.parent.radius.x)
 		self.parent.has_clipped_child |= clip != .None
 		self.is_clipped = clip == .Full
+		clip_box = box_clamped(clip_box, self.box)
 	}
 
 	when ODIN_DEBUG {
 		global_ctx.performance_info.drawn_nodes += int(!self.is_clipped)
 	}
-
-	clip_box = box_clamped(clip_box, self.box)
 
 	self.has_clipped_child = false
 	for node in self.children {
