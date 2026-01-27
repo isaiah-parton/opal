@@ -15,51 +15,63 @@ _BACKGROUND :: tw.NEUTRAL_900
 _FOREGROUND :: tw.NEUTRAL_800
 _TEXT :: tw.WHITE
 
+Average_Tracker :: struct(T: typeid) {
+	total:     T,
+	average:   T,
+	count:     int,
+	timestamp: time.Time,
+}
+
+average_tracker_update :: proc(
+	self: ^Average_Tracker($T),
+	current_value: T,
+	period: time.Duration,
+) {
+	self.total += current_value
+	self.count += 1
+	if time.since(self.timestamp) > period {
+		self.average = self.total / T(self.count)
+		self.count = 0
+		self.total = 0
+		self.timestamp = time.now()
+	}
+}
+
 Performance_Info :: struct {
 	// Additional frame delay
-	frame_interval:            time.Duration,
+	frame_interval:        time.Duration,
 
 	// Time of last drawn frame
-	last_draw_time:            time.Time,
-
-	// Time of last average
-	last_average_time:         time.Time,
-	frames_since_last_average: int,
+	last_draw_time:        time.Time,
 
 	// Profiling state
-	frame_start_time:          time.Time,
-	frame_duration:            time.Duration,
+	frame_start_time:      time.Time,
+	frame_duration:        time.Duration,
+	compute_start_time:    time.Time,
+	compute_duration:      time.Duration,
+	interval_start_time:   time.Time,
+	interval_duration:     time.Duration,
 
 	// Debug only.
-	frame_duration_sum:        time.Duration,
-	frame_duration_avg:        time.Duration,
-	interval_start_time:       time.Time,
-	interval_duration:         time.Duration,
-	compute_start_time:        time.Time,
-	compute_duration:          time.Duration,
-	compute_duration_sum:      time.Duration,
-	compute_duration_avg:      time.Duration,
-	drawn_nodes:               int,
-	sizing_passes:             int,
+	avg_frame_duration:    Average_Tracker(time.Duration),
+	avg_interval_duration: Average_Tracker(time.Duration),
+	avg_compute_duration:  Average_Tracker(time.Duration),
+	drawn_nodes:           int,
+	sizing_passes:         int,
 }
 
 performance_info_solve :: proc(self: ^Performance_Info) {
-	if time.since(self.last_average_time) >= time.Second {
-		self.last_average_time = time.now()
-		self.frames_since_last_average = max(self.frames_since_last_average, 1)
-		self.compute_duration_avg = time.Duration(
-			f64(self.compute_duration_sum) / f64(self.frames_since_last_average),
-		)
-		self.frame_duration_avg = time.Duration(
-			f64(self.frame_duration_sum) / f64(self.frames_since_last_average),
-		)
-		self.frames_since_last_average = 0
-		self.compute_duration_sum = 0
-		self.frame_duration_sum = 0
-	}
-	self.frames_since_last_average += 1
-	self.compute_duration_sum += self.compute_duration
-	self.frame_duration_sum += self.frame_duration
+	average_tracker_update(&self.avg_frame_duration, self.frame_duration, time.Millisecond * 500)
+	average_tracker_update(
+		&self.avg_interval_duration,
+		self.interval_duration,
+		time.Millisecond * 500,
+	)
+	average_tracker_update(
+		&self.avg_compute_duration,
+		self.compute_duration,
+		time.Millisecond * 500,
+	)
 }
 
 Inspector :: struct {
@@ -177,11 +189,20 @@ inspector_show :: proc(self: ^Inspector) {
 		}
 		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
 		add_node(&desc)
-		desc.text = fmt.tprintf("Interval time: %v", global_ctx.performance_info.interval_duration)
+		desc.text = fmt.tprintf(
+			"Interval time: %v",
+			global_ctx.performance_info.avg_interval_duration.average,
+		)
 		add_node(&desc)
-		desc.text = fmt.tprintf("Frame time: %v", global_ctx.performance_info.frame_duration)
+		desc.text = fmt.tprintf(
+			"Frame time: %v",
+			global_ctx.performance_info.avg_frame_duration.average,
+		)
 		add_node(&desc)
-		desc.text = fmt.tprintf("Compute time: %v", global_ctx.performance_info.compute_duration)
+		desc.text = fmt.tprintf(
+			"Compute time: %v",
+			global_ctx.performance_info.avg_compute_duration.average,
+		)
 		add_node(&desc)
 		desc.foreground = global_ctx.theme.color.base_foreground
 		desc.text = fmt.tprintf(
