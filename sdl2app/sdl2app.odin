@@ -239,9 +239,9 @@ app_iter :: proc "c" (appstate: rawptr) {
 
 	// TODO: Add a setter proc to opal
 	if app.vsync {
-		ctx.frame_interval = 0
+		app.min_frame_interval = 0
 	} else {
-		ctx.frame_interval = max(time.Duration(f32(time.Second) / 60), app.min_frame_interval)
+		app.min_frame_interval = max(time.Duration(i64(time.Second) / 60), app.min_frame_interval)
 	}
 }
 

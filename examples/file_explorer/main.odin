@@ -95,7 +95,7 @@ fmt_memory_size :: proc(size: i64) -> string {
 }
 
 explorer_change_folder :: proc(self: ^Explorer, folder: string) {
-	if err := os.change_directory(folder); err == nil {
+	if err := os.set_current_directory(folder); err == nil {
 		delete(self.last_cwd)
 		self.last_cwd = self.cwd
 		self.cwd = os.get_current_directory()
@@ -249,10 +249,10 @@ main :: proc() {
 		run = true,
 		on_start = proc(app: ^sdl3app.App) {
 			app := (^Explorer)(app)
-			opal.set_color(.Selection_Background, tw.SKY_500)
-			opal.set_color(.Selection_Foreground, tw.BLACK)
-			opal.set_color(.Scrollbar_Background, tw.SLATE_800)
-			opal.set_color(.Scrollbar_Foreground, tw.SLATE_500)
+			opal.global_ctx.theme.color.selection_background = tw.SKY_500
+			opal.global_ctx.theme.color.selection_foreground = tw.BLACK
+			// opal.global_ctx.theme.color.scrollbar_background = tw.SLATE_800
+			// opal.global_ctx.theme.color.scrollbar_foreground = tw.SLATE_500
 			opal.global_ctx.snap_to_pixels = true
 			app.cwd = os.get_current_directory()
 			if err := explorer_refresh(app); err != nil {
