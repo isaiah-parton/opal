@@ -79,7 +79,6 @@ main :: proc() {
 		},
 		on_frame = proc(app: ^sdl3app.App) {
 			app := (^App)(app)
-			using opal
 			window_radius :=
 				app.radius *
 				f32(
@@ -89,73 +88,83 @@ main :: proc() {
 					),
 				)
 
-			begin()
-			sdl3app.app_use_node_for_window_grabbing(app, global_ctx.window_interface.grab_node.?)
-			begin_node(
+			opal.begin()
+			sdl3app.app_use_node_for_window_grabbing(app, opal.global_ctx.window_interface.grab_node.?)
+			opal.begin_node(
 				&{
-					sizing = {grow = 1, max = INFINITY},
-					background = global_ctx.theme.color.background,
+					sizing = {grow = 1, max = opal.INFINITY},
+					background = opal.global_ctx.theme.color.background,
 					vertical = true,
-					padding = global_ctx.theme.min_spacing,
+					padding = opal.global_ctx.theme.min_spacing,
 					interactive = true,
-					gap = global_ctx.theme.min_spacing,
+					gap = opal.global_ctx.theme.min_spacing,
 				},
 			)
 			{
-				begin_node(
-					&{sizing = {fit = 1, max = INFINITY}, gap = global_ctx.theme.min_spacing},
+				opal.begin_node(
+					&{sizing = {fit = 1, max = opal.INFINITY}, gap = opal.global_ctx.theme.min_spacing},
 				)
 				{
-					for variant in Button_Variant {
-						push_id(int(variant))
-						add_button(&{label = fmt.tprint(variant), variant = variant})
-						pop_id()
+					for variant in opal.Button_Variant {
+						opal.push_id(int(variant))
+						opal.add_button(&{label = fmt.tprint(variant), variant = variant})
+						opal.pop_id()
 					}
 				}
-				end_node()
-				begin_node(
-					&{sizing = {fit = 1, max = INFINITY}, gap = global_ctx.theme.min_spacing},
+				opal.end_node()
+				opal.begin_node(
+					&{sizing = {fit = 1, max = opal.INFINITY}, gap = opal.global_ctx.theme.min_spacing},
 				)
 				{
-					for variant in Button_Variant {
-						push_id(int(variant))
-						add_button(
+					for variant in opal.Button_Variant {
+						opal.push_id(int(variant))
+						opal.add_button(
 							&{
 								icon = lucide.POINTER,
 								label = fmt.tprint(variant),
 								variant = variant,
 							},
 						)
-						pop_id()
+						opal.pop_id()
 					}
 				}
-				end_node()
+				opal.end_node()
 
-				add_checkbox(&{value = &app.boolean, label = "Checkbox"})
-				add_field(
+				opal.add_checkbox(&{value = &app.boolean, label = "Checkbox"})
+				opal.add_field(
 					&{
-						sizing = {exact = {300, 0}, fit = {1, 1}, max = {400, INFINITY}},
+						sizing = {exact = {300, 0}, fit = {1, 1}, max = {400, opal.INFINITY}},
 						value_data = &app.text,
 						placeholder = "Something",
 						value_type_info = type_info_of(type_of(app.text)),
 					},
 				)
-				add_progress_bar(&{value = 0.5})
+				opal.add_progress_bar(&{value = 0.5})
 
-				for field, i in reflect.struct_fields_zipped(Theme_Colors) {
-					push_id(i)
-					add_color_button(
-						&{
-							value = (^Color)(
-								rawptr(uintptr(&global_ctx.theme.color) + field.offset),
-							),
+				{
+					opal.begin_node(
+						&opal.Node_Descriptor {
+							sizing = {fit = {0, 1}, grow = {1, 0}, max = opal.INFINITY},
+							wrapped = true,
+							gap = opal.global_ctx.theme.min_spacing,
 						},
 					)
-					pop_id()
+					for field, i in reflect.struct_fields_zipped(opal.Theme_Colors) {
+						opal.push_id(i)
+						opal.add_color_button(
+							&{
+								value = (^opal.Color)(
+									rawptr(uintptr(&opal.global_ctx.theme.color) + field.offset),
+								),
+							},
+						)
+						opal.pop_id()
+					}
+					opal.end_node()
 				}
 			}
-			end_node()
-			end()
+			opal.end_node()
+			opal.end()
 		},
 	})
 
@@ -175,19 +184,18 @@ main :: proc() {
 }
 
 begin_section :: proc(name: string, loc := #caller_location) {
-	using opal
-	push_id(hash_loc(loc))
-	begin_node(
+	opal.push_id(opal.hash_loc(loc))
+	opal.begin_node(
 		&{
-			background = global_ctx.theme.color.background,
+			background = opal.global_ctx.theme.color.background,
 			radius = 10,
 			vertical = true,
-			sizing = {fit = 1, grow = {1, 0}, max = INFINITY},
+			sizing = {fit = 1, grow = {1, 0}, max = opal.INFINITY},
 		},
 	)
-	title_node := begin_node(
+	title_node := opal.begin_node(
 		&{
-			sizing = {fit = {0, 1}, grow = {1, 0}, max = INFINITY},
+			sizing = {fit = {0, 1}, grow = {1, 0}, max = opal.INFINITY},
 			justify_between = true,
 			interactive = true,
 			padding = 10,
@@ -196,42 +204,42 @@ begin_section :: proc(name: string, loc := #caller_location) {
 	if title_node.is_hovered && title_node.was_active && !title_node.is_active {
 		title_node.is_toggled = !title_node.is_toggled
 	}
-	node_update_transition(title_node, 0, title_node.is_toggled, 0.2)
-	node_update_transition(title_node, 1, title_node.is_hovered, 0.1)
-	text_color := mix(title_node.transitions[1], tw.NEUTRAL_500, tw.NEUTRAL_300)
-	add_node(
+	opal.node_update_transition(title_node, 0, title_node.is_toggled, 0.2)
+	opal.node_update_transition(title_node, 1, title_node.is_hovered, 0.1)
+	text_color := opal.mix(title_node.transitions[1], tw.NEUTRAL_500, tw.NEUTRAL_300)
+	opal.add_node(
 		&{
 			text = name,
 			foreground = text_color,
-			font = &global_ctx.theme.font,
+			font = &opal.global_ctx.theme.font,
 			font_size = 16,
 			sizing = {fit = 1},
 		},
 	)
-	add_node(
+	opal.add_node(
 		&{
 			font_size = 14,
-			sizing = {fit = 1, exact = {20, 0}, max = INFINITY, grow = {0, 1}},
+			sizing = {fit = 1, exact = {20, 0}, max = opal.INFINITY, grow = {0, 1}},
 			data = title_node,
 			foreground = text_color,
-			on_draw = proc(self: ^Node) {
+			on_draw = proc(self: ^opal.Node) {
 				kn.add_arrow(
-					box_center(self.box),
+					opal.box_center(self.box),
 					5,
 					2,
-					(2 - (^Node)(self.data).transitions[0]) * math.PI * 0.5,
+					(2 - (^opal.Node)(self.data).transitions[0]) * math.PI * 0.5,
 					paint = self.foreground,
 				)
 			},
 		},
 	)
-	end_node()
-	begin_node(
+	opal.end_node()
+	opal.begin_node(
 		&{
 			sizing = {
 				fit = {1, ease.circular_in_out(title_node.transitions[0])},
 				grow = {1, 0},
-				max = INFINITY,
+				max = opal.INFINITY,
 			},
 			clip_content = true,
 			gap = 10,
@@ -242,10 +250,9 @@ begin_section :: proc(name: string, loc := #caller_location) {
 }
 
 end_section :: proc(loc := #caller_location) {
-	using opal
-	end_node()
-	end_node()
-	pop_id()
+	opal.end_node()
+	opal.end_node()
+	opal.pop_id()
 }
 
 //
@@ -260,24 +267,23 @@ do_text :: proc(
 	interactive: bool = true,
 	loc := #caller_location,
 ) {
-	using opal
 	if font == nil {
 		return
 	}
 
-	push_id(hash(loc))
-	defer pop_id()
+	opal.push_id(opal.hash(loc))
+	defer opal.pop_id()
 
 	desc.clip_content = true
 	desc.vertical = true
 
-	begin_node(desc)
+	opal.begin_node(desc)
 	s := text
 
 	i := 1
 
 	for len(s) > 0 {
-		push_id(i)
+		opal.push_id(i)
 		i += 1
 
 		line_end := strings.index_byte(s, '\n')
@@ -288,11 +294,11 @@ do_text :: proc(
 		}
 		line := s[:line_end]
 
-		begin_node(&{wrapped = true, sizing = {fit = 1, max = INFINITY, grow = {1, 0}}})
-		pop_id()
+		opal.begin_node(&{wrapped = true, sizing = {fit = 1, max = opal.INFINITY, grow = {1, 0}}})
+		opal.pop_id()
 		{
 			for len(line) > 0 {
-				push_id(i)
+				opal.push_id(i)
 				i += 1
 
 				word_end := 0
@@ -310,7 +316,7 @@ do_text :: proc(
 
 				text := line[:word_end]
 
-				add_node(
+				opal.add_node(
 					&{
 						foreground = paint,
 						sizing = {fit = 1},
@@ -321,14 +327,13 @@ do_text :: proc(
 						enable_selection = interactive,
 					},
 				)
-				pop_id()
+				opal.pop_id()
 				line = line[word_end:]
 			}
 		}
-		end_node()
+		opal.end_node()
 
 		s = s[line_end:]
 	}
-	end_node()
+	opal.end_node()
 }
-

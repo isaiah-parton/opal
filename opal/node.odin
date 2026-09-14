@@ -20,7 +20,6 @@ import "core:unicode"
 
 //
 // The visual description of a node, used for the default drawing procedure
-// This is abstracted out by gut feeling ✊😔
 //
 Node_Style :: struct {
 	// Corner radius
@@ -1566,4 +1565,3 @@ add_node :: proc(descriptor: ^Node_Descriptor, loc := #caller_location) -> Node_
 	}
 	return self
 }
-

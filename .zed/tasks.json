@@ -6,9 +6,9 @@
 			"run",
 			"file_explorer",
 			"-debug",
-			"-collection:local='C:/dev/odin/projects'",
+			"-collection:local='/home/isaiah/dev/odin/projects'"
 		],
-		"cwd": "$ZED_WORKTREE_ROOT/examples",
+		"cwd": "$ZED_WORKTREE_ROOT/examples"
 	},
 	{
 		"label": "Run widget_gallery",
@@ -17,14 +17,14 @@
 			"run",
 			"widget_gallery",
 			"-debug",
-			"-collection:local='C:/dev/odin/projects'",
+			"-collection:local='/home/isaiah/dev/odin/projects'"
 		],
-		"cwd": "$ZED_WORKTREE_ROOT/examples",
+		"cwd": "$ZED_WORKTREE_ROOT/examples"
 	},
 	{
 		"label": "Run (Blazingly Fast)",
 		"command": "odin",
 		"args": ["run", "file_explorer", "-o:speed", "-no-bounds-check"],
-		"cwd": "$ZED_WORKTREE_ROOT/examples",
-	},
+		"cwd": "$ZED_WORKTREE_ROOT/examples"
+	}
 ]

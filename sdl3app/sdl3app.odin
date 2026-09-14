@@ -219,10 +219,9 @@ app_main :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 }
 
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
-	using opal
 	context = runtime.default_context()
 	app := (^App)(appstate)
-	ctx := global_ctx
+	ctx := opal.global_ctx
 
 	kn.new_frame()
 
@@ -230,7 +229,7 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	app.on_frame(app)
 
 	kn.set_clear_color({})
-	if is_frame_active() {
+	if opal.is_frame_active() {
 		kn.present()
 	}
 
@@ -257,7 +256,6 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 }
 
 app_event :: proc "c" (appstate: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
-	using opal
 	context = runtime.default_context()
 	app := (^App)(appstate)
 	#partial switch event.type {
@@ -266,31 +264,31 @@ app_event :: proc "c" (appstate: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 	case .KEY_DOWN:
 		key := translate_keycode(event.key.key)
 		if event.key.repeat {
-			handle_key_repeat(key)
+			opal.handle_key_repeat(key)
 		}
-		handle_key_down(key)
+		opal.handle_key_down(key)
 	case .KEY_UP:
-		handle_key_up(translate_keycode(event.key.key))
+		opal.handle_key_up(translate_keycode(event.key.key))
 	case .MOUSE_BUTTON_DOWN:
-		handle_mouse_down(Mouse_Button(int(event.button.button) - 1))
+		opal.handle_mouse_down(opal.Mouse_Button(int(event.button.button) - 1))
 	case .MOUSE_BUTTON_UP:
-		handle_mouse_up(Mouse_Button(int(event.button.button) - 1))
+		opal.handle_mouse_up(opal.Mouse_Button(int(event.button.button) - 1))
 	case .MOUSE_MOTION:
-		handle_mouse_motion(event.motion.x, event.motion.y)
+		opal.handle_mouse_motion(event.motion.x, event.motion.y)
 	case .MOUSE_WHEEL:
-		handle_mouse_scroll(event.wheel.x, event.wheel.y)
+		opal.handle_mouse_scroll(event.wheel.x, event.wheel.y)
 	case .WINDOW_RESIZED, .WINDOW_PIXEL_SIZE_CHANGED:
-		handle_window_resize(event.window.data1, event.window.data2)
+		opal.handle_window_resize(event.window.data1, event.window.data2)
 	case .WINDOW_RESTORED:
-		draw_frames(2)
+		opal.draw_frames(2)
 	case .TEXT_INPUT:
-		handle_text_input(event.text.text)
+		opal.handle_text_input(event.text.text)
 	case .WINDOW_MOVED:
-		handle_window_move()
+		opal.handle_window_move()
 	case .WINDOW_FOCUS_LOST:
-		handle_window_lost_focus()
+		opal.handle_window_lost_focus()
 	case .WINDOW_FOCUS_GAINED:
-		handle_window_gained_focus()
+		opal.handle_window_gained_focus()
 	}
 	return .CONTINUE
 }
@@ -320,7 +318,7 @@ app_use_node_for_window_grabbing :: proc(self: ^App, node: ^opal.Node) {
 
 detect_tiling_window_manager :: proc() -> bool {
 	if ODIN_OS == .Linux {
-		if value, ok := os.lookup_env("XDG_CURRENT_DESKTOP"); ok {
+		if value, ok := os.lookup_env_alloc("XDG_CURRENT_DESKTOP", context.allocator); ok {
 			if strings.contains(value, "i3") ||
 			   strings.contains(value, "bspwm") ||
 			   strings.contains(value, "sway") {
@@ -331,4 +329,3 @@ detect_tiling_window_manager :: proc() -> bool {
 	}
 	return false
 }
-

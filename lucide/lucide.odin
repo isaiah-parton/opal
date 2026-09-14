@@ -6,10 +6,10 @@ import "core:fmt"
 font: kn.Font
 
 load :: proc() {
-	ok: bool
-	font, ok = kn.load_font_from_slices(#load("./font.png"), #load("./font.json"))
-	if !ok {
-		fmt.eprintln("(lucide) Failed to load font!")
+	err: kn.Error
+	font, err = kn.load_font_from_slices(#load("./font.png"), #load("./font.json"))
+	if err != nil {
+		fmt.eprintfln("Failed to load Lucide icon font: %v", err)
 	}
 }
 
@@ -1598,4 +1598,3 @@ ZAP_OFF :: 57781
 ZAP :: 57780
 ZOOM_IN :: 57782
 ZOOM_OUT :: 57783
-
