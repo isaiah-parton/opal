@@ -12,7 +12,6 @@ package opal
 // 		- Maybe by separating nodes from their style (yes definitely, there's no reason to duplicate that data for 100s of nodes)
 //
 
-import kn "../katana"
 import "../lucide"
 import tw "../tailwind_colors"
 import "../tedit"
@@ -40,7 +39,10 @@ MAX_TREE_DEPTH :: 128
 // Generic unique identifiers
 Id :: u32
 
-Box :: kn.Box
+Box :: struct {
+	lo: Vector2,
+	hi: Vector2
+}
 
 Vector2 :: [2]f32
 
@@ -81,12 +83,6 @@ Node_Relative_Placement :: struct {
 	exact_size:      [2]f32,
 }
 
-Color :: kn.Color
-
-fade :: kn.fade
-
-mix :: kn.mix
-
 Image_Paint :: struct {
 	index:  int,
 	offset: [2]f32,
@@ -113,7 +109,7 @@ Paint_Variant :: union #no_nil {
 }
 
 User_Image :: struct {
-	resource: kn.Atlas_Resource,
+	index: int
 }
 
 Stroke_Type :: enum {
@@ -121,10 +117,6 @@ Stroke_Type :: enum {
 	Both,
 	Outer,
 }
-
-Paint_Option :: kn.Paint_Option
-
-Font :: kn.Font
 
 Node_Result :: Maybe(^Node)
 
@@ -346,6 +338,9 @@ Context :: struct {
 	// If the graphics backend should redraw the UI
 	active:                 bool,
 
+	// Painter implementation
+	painter_impl:           Painter_Impl,
+
 	// Node inspector
 	inspector:              Inspector,
 }
@@ -369,54 +364,46 @@ add_style :: proc(style: Node_Style) -> ^Node_Style {
 }
 
 // Load a user image to the next available slot
-load_image :: proc(file: string) -> (index: int, ok: bool) {
-	ctx := global_ctx
+// load_image :: proc(file: string) -> (index: int, ok: bool) {
+// 	ctx := global_ctx
 
-	image: User_Image
+// 	image: User_Image
 
-	width, height: i32
+// 	width, height: i32
 
-	pixel_data := stbi.load(
-		strings.clone_to_cstring(file, context.temp_allocator),
-		&width,
-		&height,
-		nil,
-		4,
-	)
-	if pixel_data == nil {
-		return
-	}
+// 	pixel_data := stbi.load(
+// 		strings.clone_to_cstring(file, context.temp_allocator),
+// 		&width,
+// 		&height,
+// 		nil,
+// 		4,
+// 	)
+// 	if pixel_data == nil {
+// 		return
+// 	}
 
-	image.resource.pixels = pixel_data
-	image.resource.width = int(width)
-	image.resource.height = int(height)
+// 	image.resource.pixels = pixel_data
+// 	image.resource.width = int(width)
+// 	image.resource.height = int(height)
 
-	ok = true
+// 	ok = true
 
-	for &slot, slot_index in ctx.images {
-		if slot == nil {
-			slot = image
-			index = slot_index
-			return
-		}
-	}
+// 	for &slot, slot_index in ctx.images {
+// 		if slot == nil {
+// 			slot = image
+// 			index = slot_index
+// 			return
+// 		}
+// 	}
 
-	index = len(ctx.images)
-	append(&ctx.images, image)
+// 	index = len(ctx.images)
+// 	append(&ctx.images, image)
 
-	return
-}
+// 	return
+// }
 
 // Use an already loaded user image, copying it to the atlas if it wasn't yet
-use_image :: proc(index: int) -> (resource: kn.Atlas_Resource, ok: bool) {
-	ctx := global_ctx
-	if index < 0 || index >= len(ctx.images) {
-		return {}, false
-	}
-	#no_bounds_check image := (&ctx.images[index].?) or_return
-	resource = image.resource
-	return
-}
+
 
 get_screen_box :: proc() -> Box {
 	return {0, global_ctx.screen_size}
@@ -849,7 +836,8 @@ handle_window_close :: proc() {
 }
 
 handle_window_resize :: proc(width, height: i32) {
-	kn.set_size(width, height)
+	// TODO: Implement
+	// set_size(width, height)
 	global_ctx.screen_size = {f32(width), f32(height)}
 	draw_frames(2)
 }
@@ -1177,7 +1165,7 @@ end :: proc() {
 
 	for &view in ctx.text_agent.array {
 		for box in view.selection_boxes {
-			kn.add_box_lines(box, 1, paint = kn.WHITE)
+			add_box_lines(box, 0, 1, paint = WHITE)
 		}
 	}
 
@@ -1265,14 +1253,14 @@ try_hover_node :: proc(node: ^Node) {
 }
 
 default_node_style :: proc() -> Node_Style {
-	return {background = kn.BLACK, foreground = kn.WHITE, stroke = kn.DIM_GRAY, stroke_width = 1}
+	return {background = BLACK, foreground = WHITE, stroke = DIM_GRAY, stroke_width = 1}
 }
 
 get_text_cursor_color :: proc() -> Color {
 	draw_frames(1)
 	return fade(
 		global_ctx.theme.color.selection_background,
-		math.lerp(f32(0.35), f32(1), abs(math.sin(kn.run_time() * 7))),
+		math.lerp(f32(0.35), f32(1), abs(math.sin(run_time() * 7))),
 	)
 }
 
@@ -1305,7 +1293,7 @@ scrollbar_on_draw :: proc(self: ^Node) {
 	thumb_box.hi[i] = thumb_box.lo[i] + length
 	thumb_box.hi[j] = inner_box.hi[j]
 
-	kn.add_box(
+	add_box(
 		box_clamped(thumb_box, self.box),
 		(thumb_box.hi[j] - thumb_box.lo[j]) / 2,
 		paint = self.style.foreground,
@@ -1347,4 +1335,3 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
 }
-

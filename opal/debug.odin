@@ -419,21 +419,21 @@ inspector_update_mouse_selection :: proc(self: ^Inspector) {
 	if self.hovered_node != nil {
 		self := self.hovered_node
 		box := self.box
-		padding_paint := kn.paint_index_from_option(Color{0, 120, 255, 100})
+		padding_paint := Color{0, 120, 255, 100}
 		if self.padding.x > 0 {
-			kn.add_box(box_cut_left(&box, self.padding.x), paint = padding_paint)
+			add_box(box_cut_left(&box, self.padding.x), 0, paint = padding_paint)
 		}
 		if self.padding.y > 0 {
-			kn.add_box(box_cut_top(&box, self.padding.y), paint = padding_paint)
+			add_box(box_cut_top(&box, self.padding.y), 0, paint = padding_paint)
 		}
 		if self.padding.z > 0 {
-			kn.add_box(box_cut_right(&box, self.padding.z), paint = padding_paint)
+			add_box(box_cut_right(&box, self.padding.z), 0, paint = padding_paint)
 		}
 		if self.padding.w > 0 {
-			kn.add_box(box_cut_bottom(&box, self.padding.w), paint = padding_paint)
+			add_box(box_cut_bottom(&box, self.padding.w), 0, paint = padding_paint)
 		}
-		kn.add_box(box, paint = Color{0, 255, 0, 80})
-		kn.add_box_lines(self.box, 1, outline = .Outer_Stroke, paint = Color{0, 255, 0, 255})
+		add_box(box, 0, paint = Color{0, 255, 0, 80})
+		add_box_lines(self.box, 0, 1, paint = Color{0, 255, 0, 255})
 	}
 
 	if time.since(self.selection_start_time) > time.Millisecond && mouse_pressed(.Left) {
@@ -532,4 +532,3 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 	pop_id()
 }
-

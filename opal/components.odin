@@ -1,6 +1,5 @@
 package opal
 
-import kn "../katana"
 import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"
@@ -26,9 +25,9 @@ Theme :: struct {
 	border_width:    f32,
 	animation_time:  f32,
 	font_size_small: f32,
-	font:            Font,
-	monospace_font:  Font,
-	icon_font:       Font,
+	font:            ^Font_Impl,
+	monospace_font:  ^Font_Impl,
+	icon_font:       ^Font_Impl,
 	color:           Theme_Colors,
 }
 
@@ -48,16 +47,6 @@ Theme_Colors :: struct {
 }
 
 theme_default :: proc() -> Theme {
-	default_font :=
-		kn.load_font_from_files(
-			"../fonts/Lexend-Regular.png",
-			"../fonts/Lexend-Regular.json",
-		) or_else panic("Could not load default font")
-	monospace_font :=
-		kn.load_font_from_files(
-			"../fonts/SpaceMono-Regular.png",
-			"../fonts/SpaceMono-Regular.json",
-		) or_else panic("Could not load monospace font")
 	return Theme {
 		text_gap = 4,
 		checkbox_size = 18,
@@ -71,9 +60,9 @@ theme_default :: proc() -> Theme {
 		font_size_small = 14,
 		color = {
 			background = tw.AMBER_100,
-			base_strong = kn.color_from_rgba(
-				kn.color_from_hsla_array(
-					kn.hsla_from_rgba(kn.rgba_from_color(tw.AMBER_200)) * [4]f32{1, 0.5, 1, 1},
+			base_strong = color_from_rgba(
+				color_from_hsla_array(
+					hsla_from_rgba(rgba_from_color(tw.AMBER_200)) * [4]f32{1, 0.5, 1, 1},
 				),
 			),
 			accent = tw.PURPLE_400,
@@ -87,9 +76,6 @@ theme_default :: proc() -> Theme {
 			selection_background = tw.INDIGO_500,
 			selection_foreground = tw.BLACK,
 		},
-		font = default_font,
-		monospace_font = monospace_font,
-		icon_font = lucide.font,
 	}
 }
 
@@ -126,7 +112,7 @@ add_checkbox :: proc(
 	node_update_transition(node, 0, desc.value^, 0.1)
 	node_update_transition(node, 1, node.is_hovered, 0.1)
 	node_update_transition(node, 2, node.is_active, 0.1)
-	node.background = kn.fade(ctx.theme.color.base_strong, node.transitions[1])
+	node.background = fade(ctx.theme.color.base_strong, node.transitions[1])
 	{
 		add_node(
 			&{
@@ -138,8 +124,8 @@ add_checkbox :: proc(
 				font = &ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
-				foreground = kn.fade(ctx.theme.color.base_strong, node.transitions[0]),
-				background = kn.mix(
+				foreground = fade(ctx.theme.color.base_strong, node.transitions[0]),
+				background = mix(
 					node.transitions[0],
 					ctx.theme.color.background,
 					ctx.theme.color.border,
@@ -501,7 +487,7 @@ add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Fie
 			&{
 				font = desc.font,
 				font_size = desc.font_size,
-				foreground = kn.fade(ctx.theme.color.base_foreground, 0.5),
+				foreground = fade(ctx.theme.color.base_foreground, 0.5),
 				text = desc.placeholder,
 				sizing = {fit = 1, max = INFINITY},
 			},
@@ -755,15 +741,15 @@ add_resizer :: proc(
 							global_ctx.mouse_position.x
 					}
 					center := box_center(self.box)
-					color := kn.mix(
+					color := mix(
 						self.transitions[0] * 0.5,
 						global_ctx.theme.color.border,
 						global_ctx.theme.color.accent,
 					)
 					box := Box{center - {4, 10}, center + {4, 10}}
 					radius := box_width(self.box) / 2
-					kn.add_box(box, radius, global_ctx.theme.color.background)
-					kn.add_box_lines(box, 2, radius, color)
+					add_box(box, radius, global_ctx.theme.color.background)
+					add_box_lines(box, 2, radius, color)
 				},
 			},
 		).?
@@ -790,9 +776,9 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 	desc.style.foreground = desc.color.? or_else global_ctx.theme.color.accent
 	desc.on_draw = proc(self: ^Node) {
 		self.radius = box_height(self.box) / 2
-		kn.add_box(self.box, self.radius, node_convert_paint_variant(self, self.style.background))
-		kn.push_scissor(kn.make_box(self.box, self.radius))
-		kn.add_box(
+		add_box(self.box, self.radius, self.style.background)
+		push_scissor(self.box, self.radius)
+		add_box(
 			{
 				self.box.lo,
 				{math.lerp(self.box.lo.x, self.box.hi.x, self.transitions[0]), self.box.hi.y},
@@ -800,8 +786,8 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 			0,
 			self.style.foreground,
 		)
-		kn.pop_scissor()
-		kn.add_box_lines(self.box, self.style.stroke_width, self.radius, self.style.stroke)
+		pop_scissor()
+		add_box_lines(self.box, self.radius, self.style.stroke_width, self.style.stroke)
 	}
 	result = add_node(desc)
 	result.?.transitions[0] = desc.value
@@ -850,7 +836,7 @@ add_color_button :: proc(
 	{
 		add_node(
 			&{
-				foreground = kn.BLACK if max(kn.luminance_of(desc.value^), 1 - f32(desc.value.a) / 255) > 0.45 else kn.WHITE,
+				foreground = BLACK if max(luminance_of(desc.value^), 1 - f32(desc.value.a) / 255) > 0.45 else WHITE,
 				sizing = {fit = 1, max = INFINITY},
 				font = &ctx.theme.monospace_font,
 				font_size = ctx.theme.label_text_size,
@@ -963,13 +949,13 @@ triangle_barycentric :: proc(a, b, c, p: [2]f32) -> (u, v, w: f32) {
 	return
 }
 
-draw_checkerboard_pattern :: proc(box: Box, size: [2]f32, primary, secondary: kn.Color) {
-	kn.add_box(box, paint = primary)
+draw_checkerboard_pattern :: proc(box: Box, size: [2]f32, primary, secondary: Color) {
+	add_box(box, paint = primary)
 	for x in 0 ..< int(math.ceil(box_width(box) / size.x)) {
 		for y in 0 ..< int(math.ceil(box_height(box) / size.y)) {
 			if (x + y) % 2 == 0 {
 				pos := box.lo + [2]f32{f32(x), f32(y)} * size
-				kn.add_box({pos, linalg.min(pos + size, box.hi)}, paint = secondary)
+				add_box({pos, linalg.min(pos + size, box.hi)}, paint = secondary)
 			}
 		}
 	}
@@ -1011,7 +997,7 @@ add_color_picker :: proc(
 	result.node = begin_node(desc).? or_return
 	if result.node.owned_data == nil {
 		result.node.owned_data = new_clone(
-			Color_Picker_State{hsla = kn.hsva_from_rgba(kn.rgba_from_color(desc.value^))},
+			Color_Picker_State{hsla = hsva_from_rgba(rgba_from_color(desc.value^))},
 		)
 	}
 	state := (^Color_Picker_State)(result.node.owned_data)
@@ -1057,21 +1043,21 @@ add_color_picker :: proc(
 							state.hsla.y = clamp(u / state.hsla.z, 0, 1)
 						}
 
-						rgba := kn.rgba_from_hsva(state.hsla)
-						state.value.rgb = kn.color_from_rgba(rgba).xyz
+						rgba := rgba_from_hsva(state.hsla)
+						state.value.rgb = color_from_rgba(rgba).xyz
 					}
 
-					kn.add_circle_lines(
+					add_circle_lines(
 						center,
 						outer_radius + 2,
-						width = (outer_radius - inner_radius) + 4,
+						thickness = (outer_radius - inner_radius) + 4,
 						paint = global_ctx.theme.color.border,
 					)
-					kn.add_circle_lines(
+					add_circle_lines(
 						center,
 						outer_radius,
-						width = (outer_radius - inner_radius),
-						paint = kn.make_wheel_gradient(center),
+						thickness = (outer_radius - inner_radius),
+						paint = Wheel_Gradient(center),
 					)
 
 					point_a, point_b, point_c := make_a_triangle(
@@ -1080,18 +1066,18 @@ add_color_picker :: proc(
 						inner_radius - 2,
 					)
 
-					kn.add_polygon(
+					add_polygon(
 						{point_a, point_b, point_c},
-						paint = kn.make_tri_gradient(
-							{point_a, point_b, point_c},
-							{
-								kn.color_from_rgba(kn.rgba_from_hsva({state.hsla.x, 1, 1, 1})),
-								kn.BLACK,
-								kn.WHITE,
+						paint = Tri_Gradient{
+							points = {point_a, point_b, point_c},
+							colors = {
+								color_from_rgba(rgba_from_hsva({state.hsla.x, 1, 1, 1})),
+								BLACK,
+								WHITE,
 							},
-						),
+						},
 					)
-					kn.add_polygon_lines(
+					add_polygon_lines(
 						{point_a, point_b, point_c},
 						2,
 						paint = global_ctx.theme.color.border,
@@ -1103,18 +1089,18 @@ add_color_picker :: proc(
 						clamp(1 - state.hsla.z, 0, 1),
 					)
 					r: f32 = 9 if (self.is_active) else 7
-					kn.add_circle(
+					add_circle(
 						point,
 						r,
-						paint = kn.color_from_rgba(
-							kn.rgba_from_hsva({state.hsla.x, state.hsla.y, state.hsla.z, 1}),
+						paint = color_from_rgba(
+							rgba_from_hsva({state.hsla.x, state.hsla.y, state.hsla.z, 1}),
 						),
 					)
-					kn.add_circle_lines(
+					add_circle_lines(
 						point,
 						r,
 						2,
-						paint = kn.BLACK if state.hsla.z > 0.5 else kn.WHITE,
+						paint = BLACK if state.hsla.z > 0.5 else WHITE,
 					)
 				},
 			},
@@ -1156,25 +1142,25 @@ add_color_picker :: proc(
 					time := clamp(f32(color.a) / 255, 0, 1)
 					pos := self.box.lo[i] + (self.box.hi[i] - self.box.lo[i] - 6) * time
 					if i == 0 {
-						kn.add_box(
+						add_box(
 							self.box,
-							paint = kn.make_linear_gradient(
+							paint = make_linear_gradient(
 								self.box.lo,
 								{self.box.hi.x, self.box.lo.y},
-								kn.fade(color^, 0.0),
+								fade(color^, 0.0),
 								color^,
 							),
 						)
-						kn.add_box_lines(
+						add_box_lines(
 							box_floored({{pos, self.box.lo.y}, {pos + 6, self.box.hi.y}}),
 							2,
 							paint = global_ctx.theme.color.base_foreground,
 						)
 					}
-					kn.add_box_lines(
+					add_box_lines(
 						self.box,
-						self.style.stroke_width,
 						self.style.radius,
+						self.style.stroke_width,
 						self.style.stroke,
 					)
 				},
@@ -1186,4 +1172,3 @@ add_color_picker :: proc(
 
 	return
 }
-

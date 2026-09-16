@@ -1,6 +1,5 @@
 package opal
 
-import kn "../katana"
 import tw "../tailwind_colors"
 import "base:intrinsics"
 import "base:runtime"
@@ -30,10 +29,10 @@ Node_Style :: struct {
 
 	// Transformation applied to self and children
 	stroke_type:      Stroke_Type,
-	stroke:           Paint_Option,
+	stroke:           Paint_Variant,
 	background:       Paint_Variant,
-	foreground:       Paint_Option,
-	font:             ^Font `fmt:"-"`,
+	foreground:       Paint_Variant,
+	font:             ^Font_Impl `fmt:"-"`,
 	shadow_color:     Color,
 	scale:            [2]f32,
 	translate:        [2]f32,
@@ -188,7 +187,7 @@ Node_Descriptor :: struct {
 }
 
 Glyph :: struct {
-	using glyph: kn.Font_Glyph,
+	using glyph: Font_Glyph,
 	offset:      [2]f32,
 	index:       int,
 	node:        ^Node,
@@ -374,7 +373,7 @@ node_get_text_selection_box :: proc(self: ^Node) -> Box {
 	}
 	return {
 		node_get_glyph_position(self, indices[0]),
-		node_get_glyph_position(self, indices[1]) + {0, self.font.line_height * self.font_size},
+		node_get_glyph_position(self, indices[1]) + {0, font_impl_get_line_height(self.font) * self.font_size},
 	}
 }
 
@@ -962,42 +961,42 @@ node_is_scrollable :: proc(self: ^Node) -> bool {
 	return self.overflow != {}
 }
 
-node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Paint_Index {
-	switch v in self.style.background {
-	case kn.Color:
-		return kn.paint_index_from_option(v)
-	case Image_Paint:
-		size := box_size(self.box)
-		if source, ok := use_image(v.index); ok {
-			return kn.add_paint(
-				kn.make_atlas_sample(
-					&source,
-					{self.box.lo + v.offset * size, self.box.lo + v.size * size},
-					kn.WHITE,
-				),
-			)
-		}
-	case Radial_Gradient:
-		return kn.add_paint(
-			kn.make_radial_gradient(
-				self.box.lo + v.center * self.size,
-				v.radius * max(self.size.x, self.size.y),
-				v.inner,
-				v.outer,
-			),
-		)
-	case Linear_Gradient:
-		return kn.add_paint(
-			kn.make_linear_gradient(
-				self.box.lo + v.points[0] * self.size,
-				self.box.lo + v.points[1] * self.size,
-				v.colors[0],
-				v.colors[1],
-			),
-		)
-	}
-	return 0
-}
+// node_convert_paint_variant :: proc(self: ^Node, variant: Paint_Variant) -> kn.Paint_Index {
+// 	switch v in self.style.background {
+// 	case kn.Color:
+// 		return kn.paint_index_from_option(v)
+// 	case Image_Paint:
+// 		size := box_size(self.box)
+// 		if source, ok := use_image(v.index); ok {
+// 			return kn.add_paint(
+// 				kn.make_atlas_sample(
+// 					&source,
+// 					{self.box.lo + v.offset * size, self.box.lo + v.size * size},
+// 					kn.WHITE,
+// 				),
+// 			)
+// 		}
+// 	case Radial_Gradient:
+// 		return kn.add_paint(
+// 			kn.make_radial_gradient(
+// 				self.box.lo + v.center * self.size,
+// 				v.radius * max(self.size.x, self.size.y),
+// 				v.inner,
+// 				v.outer,
+// 			),
+// 		)
+// 	case Linear_Gradient:
+// 		return kn.add_paint(
+// 			kn.make_linear_gradient(
+// 				self.box.lo + v.points[0] * self.size,
+// 				self.box.lo + v.points[1] * self.size,
+// 				v.colors[0],
+// 				v.colors[1],
+// 			),
+// 		)
+// 	}
+// 	return 0
+// }
 
 node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	assert(depth < MAX_TREE_DEPTH)
@@ -1017,21 +1016,21 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	is_transformed :=
 		self.style.scale != 1 || self.style.translate != 0 || self.style.rotation != 0
 
-	kn.set_draw_order(int(layer))
+	set_draw_order(int(layer))
 
 	// Perform transformations
 	if is_transformed {
 		transform_origin := self.box.lo + self.size * self.style.transform_origin
-		kn.push_matrix()
-		kn.translate(transform_origin)
-		kn.rotate(self.style.rotation)
-		kn.scale(self.style.scale)
-		kn.translate(-transform_origin + self.style.translate)
+		push_matrix()
+		translate(transform_origin)
+		rotate(self.style.rotation)
+		scale(self.style.scale)
+		translate(-transform_origin + self.style.translate)
 	}
 
 	// Shadow
 	if self.shadow_color != {} {
-		kn.add_box_shadow(
+		add_box_shadow(
 			{self.box.lo + self.shadow_offset, self.box.hi + self.shadow_offset},
 			self.radius[0],
 			self.shadow_size,
@@ -1043,20 +1042,16 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	if enable_scissor {
 		when ODIN_DEBUG {
 			if global_ctx.inspector.show_clipped_nodes {
-				kn.add_box_lines(self.box, 1, self.style.radius, kn.RED)
-				kn.add_box(self.box, self.style.radius, kn.fade(kn.RED, 0.3))
+				add_box_lines(self.box, self.style.radius, 1, kn.RED)
+				add_box(self.box, self.style.radius, kn.fade(kn.RED, 0.3))
 			}
 		}
-		kn.push_scissor(kn.make_box(self.box, self.style.radius))
+		push_scissor(self.box, self.style.radius)
 	}
 
 	// Draw self
 	if self.background != {} {
-		kn.add_box(
-			self.box,
-			self.style.radius,
-			paint = node_convert_paint_variant(self, self.background),
-		)
+		add_box(self.box, self.style.radius, self.background)
 	}
 
 	// Custom draw method
@@ -1065,7 +1060,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	}
 
 	// Text highlight
-	if self.style.foreground != nil && len(self.glyphs) > 0 {
+	if self.style.foreground != {} && len(self.glyphs) > 0 {
 		self.text_origin =
 			linalg.lerp(
 				self.box.lo + self.padding.xy,
@@ -1075,7 +1070,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 			self.text_size * self.content_align -
 			self.scroll
 
-		line_height := self.font.line_height * self.font_size
+		line_height := font_impl_get_line_height(self.font) * self.font_size
 
 		// Draw debug helpers
 		when ODIN_DEBUG {
@@ -1086,16 +1081,14 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 					0.45,
 					0.25,
 				)
-				kn.add_box(self.box, 0, kn.color_from_rgba(rgba))
+				add_box(self.box, 0, kn.color_from_rgba(rgba))
 			}
 		}
 
 		// Draw selection
 		if self.enable_selection && self.text_view.active {
 			// TODO: implement custom selection color
-			paint := kn.paint_index_from_option(
-				fade(global_ctx.theme.color.selection_background, 0.5),
-			)
+			paint := fade(global_ctx.theme.color.selection_background, 0.5)
 
 			selection := text_view_get_glyph_selection(self.text_view)
 
@@ -1109,33 +1102,32 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 				if ordered_selection[0] > ordered_selection[1] {
 					ordered_selection = ordered_selection.yx
 				}
-				kn.add_box(
+				add_box(
 					{
 						node_get_glyph_position(self, ordered_selection[0]),
 						node_get_glyph_position(self, ordered_selection[1]) + {0, line_height},
 					},
+					{},
 					paint = paint,
 				)
 			}
 		}
 
-		paint := kn.paint_index_from_option(self.foreground)
-
 		// Draw individual glyphs
 		for &glyph in self.glyphs {
-			kn.add_glyph(glyph, self.font_size, self.text_origin + glyph.offset, paint)
+			add_glyph(self.text_origin + glyph.offset, self.font_size, glyph, self.foreground)
 		}
 
 		// Draw underline
 		if self.style.underline {
-			y_offset := self.font.ascend * self.font_size + 2
-			kn.add_box(
+			y_offset := font_impl_get_ascend(self.font) * self.font_size + 2
+			add_box(
 				{
 					self.text_origin + {0, y_offset},
 					self.text_origin + {self.text_size.x, y_offset + 2},
 				},
 				0,
-				paint,
+				Color{0, 0, 0, 255},
 			)
 		}
 
@@ -1147,7 +1139,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		if self.enable_selection && self.text_view.active && self.text_view.show_cursor {
 			if cursor_index >= 0 && cursor_index <= len(self.glyphs) {
-				kn.add_box(box_floored(self.text_view.cursor_box), paint = get_text_cursor_color())
+				add_box(box_floored(self.text_view.cursor_box), 0, paint = get_text_cursor_color())
 			}
 		}
 	}
@@ -1158,24 +1150,21 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	}
 
 	if enable_scissor {
-		kn.pop_scissor()
+		pop_scissor()
 	}
 
 	// Outline
-	if self.style.stroke != nil && self.style.stroke_width > 0 {
-		kn.add_box_lines(
+	if self.style.stroke != {} && self.style.stroke_width > 0 {
+		add_box_lines(
 			self.box,
-			self.style.stroke_width,
 			self.style.radius,
+			self.style.stroke_width,
 			paint = self.style.stroke,
-			outline = kn.Shape_Outline(
-				int(self.style.stroke_type) + int(kn.Shape_Outline.Inner_Stroke),
-			),
 		)
 	}
 
 	if is_transformed {
-		kn.pop_matrix()
+		pop_matrix()
 	}
 }
 
@@ -1305,7 +1294,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 		// Assign a default font for safety
 		if self.style.font == nil {
-			self.style.font = &kn.DEFAULT_FONT
+			// self.style.font = &kn.DEFAULT_FONT
 			assert(self.style.font != nil)
 		}
 
@@ -1352,7 +1341,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 							offset = {self.text_size.x, 0},
 						},
 					)
-					self.text_size.x += self.font.space_advance * self.font_size * 2
+					self.text_size.x += font_impl_get_space_advance(self.font) * self.font_size * 2
 				case '\n':
 					append(
 						glyphs,
@@ -1360,13 +1349,13 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 							node = self,
 							index = self.text_view.byte_length,
 							offset = {self.text_size.x, 0},
-							glyph = {advance = self.font.space_advance},
+							glyph = {advance = font_impl_get_space_advance(self.font)},
 						},
 					)
-					self.text_size.x += self.font.space_advance * self.font_size
+					self.text_size.x += font_impl_get_space_advance(self.font) * self.font_size
 				case '\r':
 				case:
-					if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+					if glyph, ok := font_impl_get_glyph(self.font, char); ok {
 						append(
 							glyphs,
 							Glyph {
@@ -1379,7 +1368,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 						self.text_size.x += glyph.advance * self.font_size
 					} else {
 						for char in fmt.tprintf("<0x%x>", char) {
-							if glyph, ok := kn.get_font_glyph(self.font, char); ok {
+							if glyph, ok := font_impl_get_glyph(self.font, char); ok {
 								append(
 									glyphs,
 									Glyph {
@@ -1410,7 +1399,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 			// Add width for text gap
 			self.text_size.x += self.gap * f32(len(glyphs) - self.text_glyph_index)
-			self.text_size.y = self.font.line_height * self.font_size
+			self.text_size.y = font_impl_get_line_height(self.font) * self.font_size
 
 			// Include text as content size
 			self.content_size = linalg.max(self.content_size, self.text_size)
@@ -1430,7 +1419,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 			// Node requires a minimum size so the cursor appears correctly
 			self.content_size = linalg.max(
 				self.content_size,
-				[2]f32{0, self.font.line_height * self.font_size},
+				[2]f32{0, font_impl_get_line_height(self.font) * self.font_size},
 			)
 		}
 
