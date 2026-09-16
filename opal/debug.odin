@@ -1,6 +1,5 @@
 package opal
 
-import kn "../katana"
 import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"

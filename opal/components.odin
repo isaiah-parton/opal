@@ -121,7 +121,7 @@ add_checkbox :: proc(
 				stroke_width = 2,
 				stroke = ctx.theme.color.border,
 				text = string_from_rune(lucide.X),
-				font = &ctx.theme.icon_font,
+				font = ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
 				foreground = fade(ctx.theme.color.base_strong, node.transitions[0]),
@@ -139,7 +139,7 @@ add_checkbox :: proc(
 				sizing = {fit = 1, max = INFINITY},
 				padding = {0, 0, 4, 0},
 				text = desc.label,
-				font = &ctx.theme.font,
+				font = ctx.theme.font,
 				font_size = ctx.theme.label_text_size,
 				foreground = ctx.theme.color.base_foreground,
 			},
@@ -221,7 +221,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 					&{
 						foreground = ctx.theme.color.base_foreground,
 						sizing = {fit = 1, max = INFINITY},
-						font = &global_ctx.theme.icon_font,
+						font = global_ctx.theme.icon_font,
 						font_size = ctx.theme.label_icon_size,
 						text = string_from_rune(desc.icon),
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -233,7 +233,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 					&{
 						foreground = ctx.theme.color.base_foreground,
 						sizing = {fit = 1, max = INFINITY},
-						font = &ctx.theme.font,
+						font = ctx.theme.font,
 						font_size = ctx.theme.label_text_size,
 						text = desc.label,
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -264,7 +264,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 			text = string_from_rune(icon),
 			font_size = 20,
 			foreground = ctx.theme.color.base_foreground,
-			font = &ctx.theme.icon_font,
+			font = ctx.theme.icon_font,
 			interactive = true,
 		},
 		loc = loc,
@@ -609,7 +609,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			style = {
 				foreground = ctx.theme.color.base_foreground,
 				font_size = 18,
-				font = &ctx.theme.icon_font,
+				font = ctx.theme.icon_font,
 			},
 		},
 	)
@@ -734,7 +734,7 @@ add_resizer :: proc(
 					value := (^f32)(self.data)
 					if self.is_active {
 						value^ =
-							self.parent.parent.box.hi.x -
+							self.parent.parent.box.max.x -
 							self.parent.parent.padding.z -
 							self.parent.parent.gap -
 							box_width(self.box) / 2 -
@@ -780,8 +780,8 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 		push_scissor(self.box, self.radius)
 		add_box(
 			{
-				self.box.lo,
-				{math.lerp(self.box.lo.x, self.box.hi.x, self.transitions[0]), self.box.hi.y},
+				self.box.min,
+				{math.lerp(self.box.min.x, self.box.max.x, self.transitions[0]), self.box.max.y},
 			},
 			0,
 			self.style.foreground,
@@ -838,7 +838,7 @@ add_color_button :: proc(
 			&{
 				foreground = BLACK if max(luminance_of(desc.value^), 1 - f32(desc.value.a) / 255) > 0.45 else WHITE,
 				sizing = {fit = 1, max = INFINITY},
-				font = &ctx.theme.monospace_font,
+				font = ctx.theme.monospace_font,
 				font_size = ctx.theme.label_text_size,
 				text = fmt.tprintf(
 					"#%2x%2x%2x%2x",
@@ -950,12 +950,12 @@ triangle_barycentric :: proc(a, b, c, p: [2]f32) -> (u, v, w: f32) {
 }
 
 draw_checkerboard_pattern :: proc(box: Box, size: [2]f32, primary, secondary: Color) {
-	add_box(box, paint = primary)
+	add_box(box, 0, paint = primary)
 	for x in 0 ..< int(math.ceil(box_width(box) / size.x)) {
 		for y in 0 ..< int(math.ceil(box_height(box) / size.y)) {
 			if (x + y) % 2 == 0 {
-				pos := box.lo + [2]f32{f32(x), f32(y)} * size
-				add_box({pos, linalg.min(pos + size, box.hi)}, paint = secondary)
+				pos := box.min + [2]f32{f32(x), f32(y)} * size
+				add_box({pos, linalg.min(pos + size, box.max)}, 0, paint = secondary)
 			}
 		}
 	}
@@ -1068,7 +1068,7 @@ add_color_picker :: proc(
 
 					add_polygon(
 						{point_a, point_b, point_c},
-						paint = Tri_Gradient{
+						paint = Tri_Gradient {
 							points = {point_a, point_b, point_c},
 							colors = {
 								color_from_rgba(rgba_from_hsva({state.hsla.x, 1, 1, 1})),
@@ -1096,12 +1096,7 @@ add_color_picker :: proc(
 							rgba_from_hsva({state.hsla.x, state.hsla.y, state.hsla.z, 1}),
 						),
 					)
-					add_circle_lines(
-						point,
-						r,
-						2,
-						paint = BLACK if state.hsla.z > 0.5 else WHITE,
-					)
+					add_circle_lines(point, r, 2, paint = BLACK if state.hsla.z > 0.5 else WHITE)
 				},
 			},
 		).?
@@ -1124,8 +1119,8 @@ add_color_picker :: proc(
 					if self.is_active {
 						color.a = u8(
 							clamp(
-								(global_ctx.mouse_position[i] - self.box.lo[i]) /
-								(self.box.hi[i] - self.box.lo[i]),
+								(global_ctx.mouse_position[i] - self.box.min[i]) /
+								(self.box.max[i] - self.box.min[i]),
 								0,
 								1,
 							) *
@@ -1135,24 +1130,24 @@ add_color_picker :: proc(
 
 					draw_checkerboard_pattern(
 						self.box,
-						(self.box.hi[j] - self.box.lo[j]) / 2,
+						(self.box.max[j] - self.box.min[j]) / 2,
 						tw.GRAY_400,
 						tw.GRAY_600,
 					)
 					time := clamp(f32(color.a) / 255, 0, 1)
-					pos := self.box.lo[i] + (self.box.hi[i] - self.box.lo[i] - 6) * time
+					pos := self.box.min[i] + (self.box.max[i] - self.box.min[i] - 6) * time
 					if i == 0 {
 						add_box(
 							self.box,
-							paint = make_linear_gradient(
-								self.box.lo,
-								{self.box.hi.x, self.box.lo.y},
-								fade(color^, 0.0),
-								color^,
-							),
+							0,
+							paint = Linear_Gradient {
+								points = {self.box.min, {self.box.max.x, self.box.min.y}},
+								colors = {fade(color^, 0.0), color^},
+							},
 						)
 						add_box_lines(
-							box_floored({{pos, self.box.lo.y}, {pos + 6, self.box.hi.y}}),
+							box_floored({{pos, self.box.min.y}, {pos + 6, self.box.max.y}}),
+							0,
 							2,
 							paint = global_ctx.theme.color.base_foreground,
 						)

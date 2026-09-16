@@ -6,7 +6,6 @@
 			"run",
 			"file_explorer",
 			"-debug",
-			"-collection:local='/home/isaiah/dev/odin/projects'"
 		],
 		"cwd": "$ZED_WORKTREE_ROOT/examples"
 	},
@@ -17,7 +16,6 @@
 			"run",
 			"widget_gallery",
 			"-debug",
-			"-collection:local='/home/isaiah/dev/odin/projects'"
 		],
 		"cwd": "$ZED_WORKTREE_ROOT/examples"
 	},

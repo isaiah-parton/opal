@@ -473,8 +473,8 @@ node_receive_input :: proc(self: ^Node, layer: i32) -> (mouse_overlap: bool) {
 	//    ctx.mouse_position.y >= self.box.lo.y &&
 	//    ctx.mouse_position.y <= self.box.hi.y {
 	if aabb_intersects_segment_2d(
-		self.box.lo,
-		self.box.hi,
+		self.box.min,
+		self.box.max,
 		ctx.last_mouse_position,
 		ctx.mouse_position,
 	) {
@@ -515,11 +515,11 @@ node_solve_box :: proc(self: ^Node, offset: [2]f32) {
 		self.position = self.exact_offset + global_ctx.screen_size * self.relative_offset
 	}
 
-	self.box.lo = offset + self.position
+	self.box.min = offset + self.position
 	if bounds, ok := self.bounds.?; ok {
-		self.box.lo = linalg.clamp(self.box.lo, bounds.lo, bounds.hi - self.size)
+		self.box.min = linalg.clamp(self.box.min, bounds.min, bounds.max - self.size)
 	}
-	self.box.hi = self.box.lo + self.size
+	self.box.max = self.box.min + self.size
 
 	// Re-implement this
 	if global_ctx.snap_to_pixels {
@@ -562,7 +562,7 @@ node_solve_box_recursive :: proc(
 		node_solve_box_recursive(
 			node,
 			dirty,
-			self.box.lo - self.scroll * f32(i32(!node.absolute)),
+			self.box.min - self.scroll * f32(i32(!node.absolute)),
 			clip_box,
 		)
 	}
@@ -1020,7 +1020,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 	// Perform transformations
 	if is_transformed {
-		transform_origin := self.box.lo + self.size * self.style.transform_origin
+		transform_origin := self.box.min + self.size * self.style.transform_origin
 		push_matrix()
 		translate(transform_origin)
 		rotate(self.style.rotation)
@@ -1031,7 +1031,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	// Shadow
 	if self.shadow_color != {} {
 		add_box_shadow(
-			{self.box.lo + self.shadow_offset, self.box.hi + self.shadow_offset},
+			Box{self.box.min + self.shadow_offset, self.box.max + self.shadow_offset},
 			self.radius[0],
 			self.shadow_size,
 			self.shadow_color,
@@ -1042,8 +1042,8 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	if enable_scissor {
 		when ODIN_DEBUG {
 			if global_ctx.inspector.show_clipped_nodes {
-				add_box_lines(self.box, self.style.radius, 1, kn.RED)
-				add_box(self.box, self.style.radius, kn.fade(kn.RED, 0.3))
+				add_box_lines(self.box, self.style.radius, 1, RED)
+				add_box(self.box, self.style.radius, fade(RED, 0.3))
 			}
 		}
 		push_scissor(self.box, self.style.radius)
@@ -1063,8 +1063,8 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 	if self.style.foreground != {} && len(self.glyphs) > 0 {
 		self.text_origin =
 			linalg.lerp(
-				self.box.lo + self.padding.xy,
-				self.box.hi - self.padding.zw,
+				self.box.min + self.padding.xy,
+				self.box.max - self.padding.zw,
 				self.content_align,
 			) -
 			self.text_size * self.content_align -
@@ -1081,7 +1081,7 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 					0.45,
 					0.25,
 				)
-				add_box(self.box, 0, kn.color_from_rgba(rgba))
+				add_box(self.box, 0, color_from_rgba(rgba))
 			}
 		}
 
@@ -1180,7 +1180,7 @@ node_get_glyph_position :: proc(self: ^Node, index: int, loc := #caller_location
 }
 
 node_get_padded_box :: proc(self: ^Node) -> Box {
-	return Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
+	return Box{self.box.min + self.padding.xy, self.box.max - self.padding.zw}
 }
 
 node_fit_to_content :: proc(self: ^Node) {

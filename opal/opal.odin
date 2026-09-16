@@ -40,8 +40,8 @@ MAX_TREE_DEPTH :: 128
 Id :: u32
 
 Box :: struct {
-	lo: Vector2,
-	hi: Vector2
+	min: Vector2,
+	max: Vector2
 }
 
 Vector2 :: [2]f32
@@ -339,7 +339,7 @@ Context :: struct {
 	active:                 bool,
 
 	// Painter implementation
-	painter_impl:           Painter_Impl,
+	graphics_adapter:           Graphics_Adapter,
 
 	// Node inspector
 	inspector:              Inspector,
@@ -426,20 +426,20 @@ get_current_text :: proc() -> (text: ^Text_View, ok: bool) {
 //
 
 box_width :: proc(box: Box) -> f32 {
-	return box.hi.x - box.lo.x
+	return box.max.x - box.min.x
 }
 box_height :: proc(box: Box) -> f32 {
-	return box.hi.y - box.lo.y
+	return box.max.y - box.min.y
 }
 box_center_x :: proc(box: Box) -> f32 {
-	return (box.lo.x + box.hi.x) * 0.5
+	return (box.min.x + box.max.x) * 0.5
 }
 box_center_y :: proc(box: Box) -> f32 {
-	return (box.lo.y + box.hi.y) * 0.5
+	return (box.min.y + box.max.y) * 0.5
 }
 
 box_size :: proc(box: Box) -> [2]f32 {
-	return box.hi - box.lo
+	return box.max - box.min
 }
 
 size_ratio :: proc(size: [2]f32, ratio: [2]f32) -> [2]f32 {
@@ -450,55 +450,55 @@ size_ratio :: proc(size: [2]f32, ratio: [2]f32) -> [2]f32 {
 }
 
 box_shrink :: proc(self: Box, amount: f32) -> Box {
-	return {self.lo + amount, self.hi - amount}
+	return {self.min + amount, self.max - amount}
 }
 
 box_is_real :: proc(box: Box) -> bool {
-	return box.lo.x < box.hi.x && box.lo.y < box.hi.y
+	return box.min.x < box.max.x && box.min.y < box.max.y
 }
 
 // If `a` is inside of `b`
 point_in_box :: proc(point: [2]f32, box: Box) -> bool {
 	return(
-		(point.x >= box.lo.x) &&
-		(point.x <= box.hi.x) &&
-		(point.y >= box.lo.y) &&
-		(point.y <= box.hi.y) \
+		(point.x >= box.min.x) &&
+		(point.x <= box.max.x) &&
+		(point.y >= box.min.y) &&
+		(point.y <= box.max.y) \
 	)
 }
 
 // If `a` is touching `b`
 box_overlaps_other :: proc(self, other: Box) -> bool {
 	return(
-		(self.hi.x >= other.lo.x) &&
-		(self.lo.x <= other.hi.x) &&
-		(self.hi.y >= other.lo.y) &&
-		(self.lo.y <= other.hi.y) \
+		(self.max.x >= other.min.x) &&
+		(self.min.x <= other.max.x) &&
+		(self.max.y >= other.min.y) &&
+		(self.min.y <= other.max.y) \
 	)
 }
 
 // If `a` is contained entirely in `b`
 box_contains_other :: proc(self, other: Box) -> bool {
 	return(
-		(self.lo.x >= other.lo.x) &&
-		(self.hi.x <= other.hi.x) &&
-		(self.lo.y >= other.lo.y) &&
-		(self.hi.y <= other.hi.y) \
+		(self.min.x >= other.min.x) &&
+		(self.max.x <= other.max.x) &&
+		(self.min.y >= other.min.y) &&
+		(self.max.y <= other.max.y) \
 	)
 }
 
 // Get the clip status of a box inside another
 box_get_clip :: proc(self, other: Box) -> Clip {
-	if self.lo.x >= other.lo.x &&
-	   self.hi.x <= other.hi.x &&
-	   self.lo.y >= other.lo.y &&
-	   self.hi.y <= other.hi.y {
+	if self.min.x >= other.min.x &&
+	   self.max.x <= other.max.x &&
+	   self.min.y >= other.min.y &&
+	   self.max.y <= other.max.y {
 		return .None
 	}
-	if self.lo.x > other.hi.x ||
-	   self.hi.x < other.lo.x ||
-	   self.lo.y > other.hi.y ||
-	   self.hi.y < other.lo.y {
+	if self.min.x > other.max.x ||
+	   self.max.x < other.min.x ||
+	   self.min.y > other.max.y ||
+	   self.max.y < other.min.y {
 		return .Full
 	}
 	return .Partial
@@ -506,16 +506,16 @@ box_get_clip :: proc(self, other: Box) -> Clip {
 
 // Get the clip status of a box inside a rounded box
 box_get_rounded_clip :: proc(self, other: Box, radius: f32) -> Clip {
-	if self.lo.x >= other.lo.x + radius &&
-	   self.hi.x <= other.hi.x - radius &&
-	   self.lo.y >= other.lo.y + radius &&
-	   self.hi.y <= other.hi.y - radius {
+	if self.min.x >= other.min.x + radius &&
+	   self.max.x <= other.max.x - radius &&
+	   self.min.y >= other.min.y + radius &&
+	   self.max.y <= other.max.y - radius {
 		return .None
 	}
-	if self.lo.x > other.hi.x ||
-	   self.hi.x < other.lo.x ||
-	   self.lo.y > other.hi.y ||
-	   self.hi.y < other.lo.y {
+	if self.min.x > other.max.x ||
+	   self.max.x < other.min.x ||
+	   self.min.y > other.max.y ||
+	   self.max.y < other.min.y {
 		return .Full
 	}
 	return .Partial
@@ -523,55 +523,55 @@ box_get_rounded_clip :: proc(self, other: Box, radius: f32) -> Clip {
 
 // Grow a box to fit another box inside it
 box_grow_to_fit :: proc(self: ^Box, other: Box) {
-	self.lo = linalg.min(self.lo, other.lo)
-	self.hi = linalg.max(self.hi, other.hi)
+	self.min = linalg.min(self.min, other.min)
+	self.max = linalg.max(self.max, other.max)
 }
 
 // Returns the box clamped inside another
 box_clamped :: proc(self, other: Box) -> Box {
-	return {linalg.max(self.lo, other.lo), linalg.min(self.hi, other.hi)}
+	return {linalg.max(self.min, other.min), linalg.min(self.max, other.max)}
 }
 
 // Snap a box to a whole number position
 box_snap :: proc(self: ^Box) {
-	size := self.hi - self.lo
-	self.lo = linalg.floor(self.lo)
-	self.hi = self.lo + linalg.floor(size)
+	size := self.max - self.min
+	self.min = linalg.floor(self.min)
+	self.max = self.min + linalg.floor(size)
 }
 
 box_floored :: proc(self: Box) -> Box {
-	return Box{linalg.floor(self.lo), linalg.floor(self.hi)}
+	return Box{linalg.floor(self.min), linalg.floor(self.max)}
 }
 
 box_center :: proc(self: Box) -> [2]f32 {
-	return {(self.lo.x + self.hi.x) * 0.5, (self.lo.y + self.hi.y) * 0.5}
+	return {(self.min.x + self.max.x) * 0.5, (self.min.y + self.max.y) * 0.5}
 }
 
 box_cut_left :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	left := min(self.lo.x + amount, self.hi.x)
-	res = {self.lo, {left, self.hi.y}}
-	self.lo.x = left
+	left := min(self.min.x + amount, self.max.x)
+	res = {self.min, {left, self.max.y}}
+	self.min.x = left
 	return
 }
 
 box_cut_top :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	top := min(self.lo.y + amount, self.hi.y)
-	res = {self.lo, {self.hi.x, top}}
-	self.lo.y = top
+	top := min(self.min.y + amount, self.max.y)
+	res = {self.min, {self.max.x, top}}
+	self.min.y = top
 	return
 }
 
 box_cut_right :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	right := max(self.lo.x, self.hi.x - amount)
-	res = {{right, self.lo.y}, self.hi}
-	self.hi.x = right
+	right := max(self.min.x, self.max.x - amount)
+	res = {{right, self.min.y}, self.max}
+	self.max.x = right
 	return
 }
 
 box_cut_bottom :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	bottom := max(self.lo.y, self.hi.y - amount)
-	res = {{self.lo.x, bottom}, self.hi}
-	self.hi.y = bottom
+	bottom := max(self.min.y, self.max.y - amount)
+	res = {{self.min.x, bottom}, self.max}
+	self.max.y = bottom
 	return
 }
 
@@ -1006,7 +1006,7 @@ begin :: proc() {
 					ctx.hovered_node.click_count = 0
 				}
 				ctx.hovered_node.click_count += 1
-				ctx.node_click_offset = ctx.mouse_position - ctx.hovered_node.box.lo
+				ctx.node_click_offset = ctx.mouse_position - ctx.hovered_node.box.min
 				ctx.hovered_node.last_click_time = time.now()
 				ctx.focused_id = ctx.hovered_node.id
 			} else {
@@ -1280,29 +1280,29 @@ scrollbar_on_draw :: proc(self: ^Node) {
 	i := int(self.vertical)
 	j := 1 - i
 
-	inner_box := Box{self.box.lo + self.padding.xy, self.box.hi - self.padding.zw}
-	length := max((inner_box.hi[i] - inner_box.lo[i]) * owner.size[i] / owner.content_size[i], 30)
+	inner_box := Box{self.box.min + self.padding.xy, self.box.max - self.padding.zw}
+	length := max((inner_box.max[i] - inner_box.min[i]) * owner.size[i] / owner.content_size[i], 30)
 
 	scroll_travel := max(owner.content_size[i] - owner.size[i], 0)
 	scroll_time := owner.scroll[i] / scroll_travel
 
-	thumb_travel := (inner_box.hi[i] - inner_box.lo[i]) - length
+	thumb_travel := (inner_box.max[i] - inner_box.min[i]) - length
 
-	thumb_box := Box{inner_box.lo, {}}
-	thumb_box.lo[i] += thumb_travel * scroll_time
-	thumb_box.hi[i] = thumb_box.lo[i] + length
-	thumb_box.hi[j] = inner_box.hi[j]
+	thumb_box := Box{inner_box.min, {}}
+	thumb_box.min[i] += thumb_travel * scroll_time
+	thumb_box.max[i] = thumb_box.min[i] + length
+	thumb_box.max[j] = inner_box.max[j]
 
 	add_box(
 		box_clamped(thumb_box, self.box),
-		(thumb_box.hi[j] - thumb_box.lo[j]) / 2,
+		(thumb_box.max[j] - thumb_box.min[j]) / 2,
 		paint = self.style.foreground,
 	)
 
 	if self.is_active {
 		if !self.was_active {
 			if point_in_box(global_ctx.mouse_position, thumb_box) {
-				global_ctx.node_click_offset = global_ctx.mouse_position - thumb_box.lo
+				global_ctx.node_click_offset = global_ctx.mouse_position - thumb_box.min
 			} else {
 				global_ctx.node_click_offset = box_size(thumb_box) / 2
 			}
@@ -1311,7 +1311,7 @@ scrollbar_on_draw :: proc(self: ^Node) {
 		owner.scroll[i] =
 			clamp(
 				(global_ctx.mouse_position[i] -
-					(inner_box.lo[i] + global_ctx.node_click_offset[i])) /
+					(inner_box.min[i] + global_ctx.node_click_offset[i])) /
 				thumb_travel,
 				0,
 				1,

@@ -564,10 +564,10 @@ text_view_update_viewport :: proc(self: ^Text_View) {
 
 	// Make sure to clip the cursor
 	padded_box := node_get_padded_box(node)
-	left := max(0, padded_box.lo.x - self.cursor_box.lo.x)
-	top := max(0, padded_box.lo.y - self.cursor_box.lo.y)
-	right := max(0, self.cursor_box.hi.x - padded_box.hi.x)
-	bottom := max(0, self.cursor_box.hi.y - padded_box.hi.y)
+	left := max(0, padded_box.min.x - self.cursor_box.min.x)
+	top := max(0, padded_box.min.y - self.cursor_box.min.y)
+	right := max(0, self.cursor_box.max.x - padded_box.max.x)
+	bottom := max(0, self.cursor_box.max.y - padded_box.max.y)
 	node.has_clipped_child |= max(left, right) > 0
 	node.has_clipped_child |= max(top, bottom) > 0
 
@@ -584,7 +584,7 @@ text_view_update_hightlight_shape :: proc(self: ^Text_View) {
 	for node in self.nodes {
 		box := node_get_text_selection_box(node)
 		if box_is_real(box) {
-			append(&self.selection_boxes, Box{box.lo - 1, box.hi + 1})
+			append(&self.selection_boxes, Box{box.min - 1, box.max + 1})
 		}
 	}
 
@@ -595,11 +595,11 @@ text_view_update_hightlight_shape :: proc(self: ^Text_View) {
 				if i == excluded_index {
 					continue
 				}
-				left := max(-0.5, other.lo.x - box.hi.x)
-				right := max(-0.5, other.hi.x - box.lo.x)
-				if box.lo.y == other.lo.y && box.hi.y == other.hi.y && max(left, right) >= 0 {
-					box.lo.x = min(other.lo.x, box.lo.x)
-					box.hi.x = max(other.hi.x, box.hi.x)
+				left := max(-0.5, other.min.x - box.max.x)
+				right := max(-0.5, other.max.x - box.min.x)
+				if box.min.y == other.min.y && box.max.y == other.max.y && max(left, right) >= 0 {
+					box.min.x = min(other.min.x, box.min.x)
+					box.max.x = max(other.max.x, box.max.x)
 					ordered_remove(array, i)
 					found = true
 				}

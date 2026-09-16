@@ -31,15 +31,15 @@ panel_update :: proc(self: ^Panel, base_node, grab_node: ^Node) {
 		if base_node != nil {
 			if base_node.is_hovered || base_node.has_hovered_child {
 				size :: 8
-				left_box := Box{base_node.box.lo, {base_node.box.lo.x + size, base_node.box.hi.y}}
-				top_box := Box{base_node.box.lo, {base_node.box.hi.x, base_node.box.lo.y + size}}
+				left_box := Box{base_node.box.min, {base_node.box.min.x + size, base_node.box.max.y}}
+				top_box := Box{base_node.box.min, {base_node.box.max.x, base_node.box.min.y + size}}
 				right_box := Box {
-					{base_node.box.hi.x - size, base_node.box.lo.y},
-					{base_node.box.hi.x, base_node.box.hi.y},
+					{base_node.box.max.x - size, base_node.box.min.y},
+					{base_node.box.max.x, base_node.box.max.y},
 				}
 				bottom_box := Box {
-					{base_node.box.lo.x, base_node.box.hi.y - size},
-					{base_node.box.hi.x, base_node.box.hi.y},
+					{base_node.box.min.x, base_node.box.max.y - size},
+					{base_node.box.max.x, base_node.box.max.y},
 				}
 				over_left := point_in_box(ctx.mouse_position, left_box)
 				over_right := point_in_box(ctx.mouse_position, right_box)
@@ -69,7 +69,7 @@ panel_update :: proc(self: ^Panel, base_node, grab_node: ^Node) {
 							Resize(i32(over_left_or_right) + i32(over_right)),
 							Resize(i32(over_top_or_bottom) + i32(over_bottom)),
 						}
-						self.anchor = base_node.box.hi
+						self.anchor = base_node.box.max
 					}
 				}
 			}
@@ -103,4 +103,3 @@ panel_update :: proc(self: ^Panel, base_node, grab_node: ^Node) {
 		self.state = .None
 	}
 }
-
