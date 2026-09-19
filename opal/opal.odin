@@ -12,7 +12,6 @@ package opal
 // 		- Maybe by separating nodes from their style (yes definitely, there's no reason to duplicate that data for 100s of nodes)
 //
 
-import "../lucide"
 import tw "../tailwind_colors"
 import "../tedit"
 import "base:intrinsics"
@@ -38,11 +37,6 @@ MAX_TREE_DEPTH :: 128
 
 // Generic unique identifiers
 Id :: u32
-
-Box :: struct {
-	min: Vector2,
-	max: Vector2
-}
 
 Vector2 :: [2]f32
 
@@ -101,12 +95,21 @@ Linear_Gradient :: struct {
 	colors: [2]Color,
 }
 
+Tri_Gradient :: struct {
+	points: [3][2]f32,
+	colors: [3]Color,
+}
+
 Paint_Variant :: union #no_nil {
 	Color,
 	Image_Paint,
+	Tri_Gradient,
 	Radial_Gradient,
 	Linear_Gradient,
+	Wheel_Gradient,
 }
+
+Wheel_Gradient :: Vector2
 
 User_Image :: struct {
 	index: int
@@ -200,9 +203,14 @@ Context_Descriptor :: struct {
 
 	// User-defined data for callbacks
 	callback_data:      rawptr,
+
+	graphics_adapter: Graphics_Adapter,
+
+	// If UI is redrawn continuously
+	continuous: bool
 }
 
-Window_Interface :: struct {
+Window_Adapter :: struct {
 	callback_data:     rawptr,
 	maximize_callback: proc(_: rawptr),
 	iconify_callback:  proc(_: rawptr),
@@ -224,7 +232,7 @@ Context :: struct {
 	window_is_focused:      bool,
 
 	// window procedures
-	window_interface:       Window_Interface,
+	window_interface:       Window_Adapter,
 
 	// Performance tracking
 	performance_info:       Performance_Info,
@@ -309,23 +317,16 @@ Context :: struct {
 	// The hash stack
 	id_stack:               [dynamic]Id,
 
-	//
-	view_stack:             [dynamic]^View,
-	current_view:           ^View,
-	view_map:               map[Id]View,
-
 	// Non-interactive glyphs
 	glyphs:                 [dynamic]Glyph,
 
 	//
 	text_agent:             Text_Agent,
 
-	// default font
-	theme:                  Theme,
-
 	//
 	// Styles
 	//
+	theme: Theme,
 	style_stack:            [dynamic]^Node_Style,
 	style_array:            [dynamic]Node_Style,
 
@@ -338,11 +339,11 @@ Context :: struct {
 	// If the graphics backend should redraw the UI
 	active:                 bool,
 
-	// Painter implementation
-	graphics_adapter:           Graphics_Adapter,
-
 	// Node inspector
 	inspector:              Inspector,
+
+	// Init time
+	init_at: time.Tick,
 }
 
 // @(private)
@@ -425,155 +426,7 @@ get_current_text :: proc() -> (text: ^Text_View, ok: bool) {
 // Box helpers
 //
 
-box_width :: proc(box: Box) -> f32 {
-	return box.max.x - box.min.x
-}
-box_height :: proc(box: Box) -> f32 {
-	return box.max.y - box.min.y
-}
-box_center_x :: proc(box: Box) -> f32 {
-	return (box.min.x + box.max.x) * 0.5
-}
-box_center_y :: proc(box: Box) -> f32 {
-	return (box.min.y + box.max.y) * 0.5
-}
 
-box_size :: proc(box: Box) -> [2]f32 {
-	return box.max - box.min
-}
-
-size_ratio :: proc(size: [2]f32, ratio: [2]f32) -> [2]f32 {
-	return [2]f32 {
-		max(size.x, size.y * (ratio.x / ratio.y)),
-		max(size.y, size.x * (ratio.y / ratio.x)),
-	}
-}
-
-box_shrink :: proc(self: Box, amount: f32) -> Box {
-	return {self.min + amount, self.max - amount}
-}
-
-box_is_real :: proc(box: Box) -> bool {
-	return box.min.x < box.max.x && box.min.y < box.max.y
-}
-
-// If `a` is inside of `b`
-point_in_box :: proc(point: [2]f32, box: Box) -> bool {
-	return(
-		(point.x >= box.min.x) &&
-		(point.x <= box.max.x) &&
-		(point.y >= box.min.y) &&
-		(point.y <= box.max.y) \
-	)
-}
-
-// If `a` is touching `b`
-box_overlaps_other :: proc(self, other: Box) -> bool {
-	return(
-		(self.max.x >= other.min.x) &&
-		(self.min.x <= other.max.x) &&
-		(self.max.y >= other.min.y) &&
-		(self.min.y <= other.max.y) \
-	)
-}
-
-// If `a` is contained entirely in `b`
-box_contains_other :: proc(self, other: Box) -> bool {
-	return(
-		(self.min.x >= other.min.x) &&
-		(self.max.x <= other.max.x) &&
-		(self.min.y >= other.min.y) &&
-		(self.max.y <= other.max.y) \
-	)
-}
-
-// Get the clip status of a box inside another
-box_get_clip :: proc(self, other: Box) -> Clip {
-	if self.min.x >= other.min.x &&
-	   self.max.x <= other.max.x &&
-	   self.min.y >= other.min.y &&
-	   self.max.y <= other.max.y {
-		return .None
-	}
-	if self.min.x > other.max.x ||
-	   self.max.x < other.min.x ||
-	   self.min.y > other.max.y ||
-	   self.max.y < other.min.y {
-		return .Full
-	}
-	return .Partial
-}
-
-// Get the clip status of a box inside a rounded box
-box_get_rounded_clip :: proc(self, other: Box, radius: f32) -> Clip {
-	if self.min.x >= other.min.x + radius &&
-	   self.max.x <= other.max.x - radius &&
-	   self.min.y >= other.min.y + radius &&
-	   self.max.y <= other.max.y - radius {
-		return .None
-	}
-	if self.min.x > other.max.x ||
-	   self.max.x < other.min.x ||
-	   self.min.y > other.max.y ||
-	   self.max.y < other.min.y {
-		return .Full
-	}
-	return .Partial
-}
-
-// Grow a box to fit another box inside it
-box_grow_to_fit :: proc(self: ^Box, other: Box) {
-	self.min = linalg.min(self.min, other.min)
-	self.max = linalg.max(self.max, other.max)
-}
-
-// Returns the box clamped inside another
-box_clamped :: proc(self, other: Box) -> Box {
-	return {linalg.max(self.min, other.min), linalg.min(self.max, other.max)}
-}
-
-// Snap a box to a whole number position
-box_snap :: proc(self: ^Box) {
-	size := self.max - self.min
-	self.min = linalg.floor(self.min)
-	self.max = self.min + linalg.floor(size)
-}
-
-box_floored :: proc(self: Box) -> Box {
-	return Box{linalg.floor(self.min), linalg.floor(self.max)}
-}
-
-box_center :: proc(self: Box) -> [2]f32 {
-	return {(self.min.x + self.max.x) * 0.5, (self.min.y + self.max.y) * 0.5}
-}
-
-box_cut_left :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	left := min(self.min.x + amount, self.max.x)
-	res = {self.min, {left, self.max.y}}
-	self.min.x = left
-	return
-}
-
-box_cut_top :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	top := min(self.min.y + amount, self.max.y)
-	res = {self.min, {self.max.x, top}}
-	self.min.y = top
-	return
-}
-
-box_cut_right :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	right := max(self.min.x, self.max.x - amount)
-	res = {{right, self.min.y}, self.max}
-	self.max.x = right
-	return
-}
-
-box_cut_bottom :: proc(self: ^Box, amount: f32) -> (res: Box) {
-	bottom := max(self.min.y, self.max.y - amount)
-	res = {{self.min.x, bottom}, self.max}
-	self.max.y = bottom
-	return
-}
 
 //
 // Hashing algorithm
@@ -667,7 +520,6 @@ pop_id :: proc() {
 context_init :: proc(ctx: ^Context) {
 	assert(ctx != nil)
 
-	lucide.load()
 	ctx.theme = theme_default()
 
 	reserve(&ctx.roots, 64)
@@ -675,6 +527,7 @@ context_init :: proc(ctx: ^Context) {
 	reserve(&ctx.id_stack, 64)
 
 	ctx.queued_frames = 2
+	ctx.init_at = time.tick_now()
 
 	assert(ctx.on_get_screen_size != nil)
 	ctx.screen_size = ctx.on_get_screen_size(ctx.callback_data)
@@ -920,9 +773,9 @@ begin :: proc() {
 	ctx.performance_info.interval_start_time = time.now()
 
 	// Sleep to limit framerate
-	if ctx.performance_info.interval_duration < frame_interval {
-		time.sleep(frame_interval - ctx.performance_info.interval_duration)
-	}
+	// if ctx.performance_info.interval_duration < frame_interval {
+	// 	time.sleep(frame_interval - ctx.performance_info.interval_duration)
+	// }
 
 	ctx.performance_info.frame_start_time = time.now()
 
@@ -952,6 +805,7 @@ begin :: proc() {
 	if do_mouse_input_pass {
 		ctx_on_input_received(ctx)
 
+		// TODO: why
 		if !key_down(.Left) {
 			ctx.text_agent.hovered_view = nil
 		}
@@ -970,6 +824,8 @@ begin :: proc() {
 					// }
 				}
 			}
+		} else {
+			ctx.hovered_id = 0
 		}
 
 		// Update text agent mouse selection
@@ -1071,61 +927,48 @@ begin :: proc() {
 		&{
 			sizing = {exact = ctx.screen_size},
 			vertical = true,
-			stroke = tw.NEUTRAL_700,
-			stroke_width = 1,
 		},
 	)
 
 	// Show window controls
-	begin_node(
-		&{
-			sizing = {fit = {0, 1}, exact = {0, 20}, grow = {1, 0}, max = INFINITY},
-			content_align = {0, 0.5},
-			style = {background = ctx.theme.color.background},
-		},
-	)
-	{
-		global_ctx.window_interface.grab_node =
-		add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?
+	// begin_node(
+	// 	&{
+	// 		sizing = {fit = {0, 1}, exact = {0, 20}, grow = {1, 0}, max = INFINITY},
+	// 		content_align = {0, 0.5},
+	// 		style = {background = ctx.theme.color.background},
+	// 	},
+	// )
+	// {
+	// 	global_ctx.window_interface.grab_node =
+	// 	add_node(&{sizing = {grow = 1, max = INFINITY}, interactive = true}).?
 
-		when ODIN_DEBUG {
-			if add_window_button(lucide.BUG, tw.ORANGE_500) {
-				global_ctx.inspector.shown = !global_ctx.inspector.shown
-			}
-		}
+	// 	when ODIN_DEBUG {
+	// 		if add_window_button(lucide.BUG, tw.ORANGE_500) {
+	// 			global_ctx.inspector.shown = !global_ctx.inspector.shown
+	// 		}
+	// 	}
 
-		if add_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
-			handle_window_iconify()
-		}
-		if add_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
-			handle_window_maximize()
-		}
-		if add_window_button(lucide.X, tw.ROSE_500) {
-			handle_window_close()
-		}
-	}
-	end_node()
-
-	begin_node(&{sizing = {grow = 1, max = INFINITY}})
-
-	// Begin container node for user UI
-	begin_node(&{sizing = {grow = 1, max = INFINITY}})
+	// 	if add_window_button(lucide.CHEVRON_DOWN, tw.NEUTRAL_500) {
+	// 		handle_window_iconify()
+	// 	}
+	// 	if add_window_button(lucide.CHEVRON_UP, tw.NEUTRAL_500) {
+	// 		handle_window_maximize()
+	// 	}
+	// 	if add_window_button(lucide.X, tw.ROSE_500) {
+	// 		handle_window_close()
+	// 	}
+	// }
+	// end_node()
 }
 
 end :: proc() {
 	ctx := global_ctx
 
-	// End container node
-	end_node()
-
 	// Built-in UI
 	if ctx.inspector.shown {
-		add_resizer(&{orientation = .Vertical, value = &ctx.inspector.width})
+		// add_resizer(&{orientation = .Vertical, value = &ctx.inspector.width})
 		inspector_show(&ctx.inspector)
 	}
-
-	// End window node
-	end_node()
 
 	// End root node
 	end_node()
@@ -1159,7 +1002,7 @@ end :: proc() {
 
 	ctx_solve_sizes(ctx)
 
-	if ctx.active {
+	if ctx.active || ctx.continuous {
 		ctx_solve_positions_and_draw(ctx)
 	}
 
@@ -1260,7 +1103,7 @@ get_text_cursor_color :: proc() -> Color {
 	draw_frames(1)
 	return fade(
 		global_ctx.theme.color.selection_background,
-		math.lerp(f32(0.35), f32(1), abs(math.sin(run_time() * 7))),
+		math.lerp(f32(0.35), f32(1), abs(math.sin(f32(get_run_time()) * 7))),
 	)
 }
 
@@ -1334,4 +1177,8 @@ string_from_rune :: proc(char: rune, allocator := context.temp_allocator) -> str
 	b := strings.builder_make(allocator = allocator)
 	strings.write_rune(&b, char)
 	return strings.to_string(b)
+}
+
+get_run_time :: proc() -> f64 {
+	return time.duration_seconds(time.tick_since(global_ctx.init_at))
 }

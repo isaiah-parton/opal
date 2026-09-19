@@ -472,7 +472,7 @@ main :: proc() {
 									{
 										if path_input, ok := &app.path_input.?; ok {
 											// Show the path input
-											field_result := add_field(
+											field_result := add_input(
 												&{
 													sizing = {grow = 1, max = INFINITY},
 													value_data = &path_input.path,
@@ -805,4 +805,3 @@ do_text :: proc(
 	}
 	end_node()
 }
-

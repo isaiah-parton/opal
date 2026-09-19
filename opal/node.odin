@@ -207,9 +207,6 @@ Node :: struct {
 	layout_parent:     ^Node,
 	layout_children:   [dynamic]^Node `fmt:"-"`,
 
-	// Each node holds a reference to its immediate view
-	view:              ^View,
-
 	// A simple kill switch that causes the node to be discarded
 	dead:              bool,
 
@@ -373,7 +370,8 @@ node_get_text_selection_box :: proc(self: ^Node) -> Box {
 	}
 	return {
 		node_get_glyph_position(self, indices[0]),
-		node_get_glyph_position(self, indices[1]) + {0, font_impl_get_line_height(self.font) * self.font_size},
+		node_get_glyph_position(self, indices[1]) +
+		{0, font_impl_get_line_height(self.font) * self.font_size},
 	}
 }
 
@@ -639,6 +637,7 @@ node_solve_child_placement_in_range :: proc(self: ^Node, from, to: int, span, li
 	// Starting position for children along layout axis
 	offset: f32 = self.padding[i] + length_left * self.content_align[i]
 
+
 	// Apply aspect ratios
 	for node in children {
 		if node.sizing.aspect_ratio != 0 {
@@ -658,7 +657,8 @@ node_solve_child_placement_in_range :: proc(self: ^Node, from, to: int, span, li
 		node.position[i] = offset
 
 		// Place child across axis
-		node.position[j] = self.padding[j] + line_offset
+		node.position[j] =
+			self.padding[j] + line_offset + self.content_align[j] * (span - node.size[j])
 
 		offset += node.size[i] + spacing
 	}
@@ -1115,7 +1115,13 @@ node_draw_recursive :: proc(self: ^Node, layer: i32 = 0, depth := 0) {
 
 		// Draw individual glyphs
 		for &glyph in self.glyphs {
-			add_glyph(self.text_origin + glyph.offset, self.font_size, glyph, self.foreground)
+			add_glyph(
+				self.text_origin + glyph.offset,
+				self.font_size,
+				self.font,
+				glyph.codepoint,
+				self.foreground,
+			)
 		}
 
 		// Draw underline
@@ -1294,7 +1300,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 		// Assign a default font for safety
 		if self.style.font == nil {
-			// self.style.font = &kn.DEFAULT_FONT
+			self.style.font = &ctx.theme.font
 			assert(self.style.font != nil)
 		}
 
@@ -1329,6 +1335,10 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 					continue
 				}
 
+				if hash != FNV1A32_OFFSET_BASIS {
+					self.text_size.x += self.font_size
+				}
+
 				hash = hash ~ (u32(char) * FNV1A32_PRIME)
 
 				switch char {
@@ -1339,6 +1349,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 							node = self,
 							index = self.text_view.byte_length,
 							offset = {self.text_size.x, 0},
+							codepoint = char,
 						},
 					)
 					self.text_size.x += font_impl_get_space_advance(self.font) * self.font_size * 2
@@ -1350,6 +1361,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 							index = self.text_view.byte_length,
 							offset = {self.text_size.x, 0},
 							glyph = {advance = font_impl_get_space_advance(self.font)},
+							codepoint = char,
 						},
 					)
 					self.text_size.x += font_impl_get_space_advance(self.font) * self.font_size
@@ -1363,9 +1375,12 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 								index = self.text_view.byte_length,
 								glyph = glyph,
 								offset = {self.text_size.x, 0},
+								codepoint = char,
 							},
 						)
 						self.text_size.x += glyph.advance * self.font_size
+					} else if char == ' ' {
+						self.text_size.x += font_impl_get_space_advance(self.font) * self.font_size
 					} else {
 						for char in fmt.tprintf("<0x%x>", char) {
 							if glyph, ok := font_impl_get_glyph(self.font, char); ok {
@@ -1376,6 +1391,7 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 										index = self.text_view.byte_length,
 										glyph = glyph,
 										offset = {self.text_size.x, 0},
+										codepoint = char,
 									},
 								)
 								self.text_size.x += glyph.advance * self.font_size

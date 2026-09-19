@@ -3,6 +3,7 @@ package opal
 Font_Glyph :: struct {
 	box: Box,
 	advance: f32,
+	codepoint: rune,
 }
 
 Font_Get_Glyph_Proc :: #type proc(impl: ^Font_Impl, codepoint: rune) -> (glyph: Font_Glyph, ok: bool)
@@ -11,6 +12,7 @@ Font_Get_Ascend_Proc :: #type proc(impl: ^Font_Impl) -> (ascend: f32)
 Font_Get_Space_Advance_Proc :: #type proc(impl: ^Font_Impl) -> (advance: f32)
 
 Font_Impl :: struct {
+	data: rawptr,
 	get_glyph_proc: Font_Get_Glyph_Proc,
 	get_line_height_proc: Font_Get_Line_Height_Proc,
 	get_ascend_proc: Font_Get_Ascend_Proc,

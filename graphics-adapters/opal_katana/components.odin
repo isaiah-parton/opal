@@ -10,6 +10,72 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode"
 
+Theme :: struct {
+	text_gap:        f32,
+	checkbox_size:   f32,
+	label_text_size: f32,
+	label_icon_size: f32,
+	min_spacing:     f32,
+	radius_small:    f32,
+	radius_big:      f32,
+	base_size:       [2]f32,
+	border_width:    f32,
+	animation_time:  f32,
+	font_size_small: f32,
+	font:            ^Font_Impl,
+	monospace_font:  ^Font_Impl,
+	icon_font:       ^Font_Impl,
+	color:           Theme_Colors,
+}
+
+Theme_Colors :: struct {
+	border:               Color,
+	primary:              Color,
+	primary_foreground:   Color,
+	secondary:            Color,
+	secondary_foreground: Color,
+	secondary_strong:     Color,
+	accent:               Color,
+	background:           Color,
+	base_strong:          Color,
+	base_foreground:      Color,
+	selection_background: Color,
+	selection_foreground: Color,
+}
+
+theme_default :: proc() -> Theme {
+	return Theme {
+		text_gap = 4,
+		checkbox_size = 18,
+		border_width = 2,
+		label_text_size = 14,
+		label_icon_size = 16,
+		base_size = 12,
+		min_spacing = 12,
+		radius_small = 8,
+		radius_big = 16,
+		font_size_small = 14,
+		color = {
+			background = tw.AMBER_100,
+			base_strong = color_from_rgba(
+				color_from_hsla_array(
+					hsla_from_rgba(rgba_from_color(tw.AMBER_200)) * [4]f32{1, 0.5, 1, 1},
+				),
+			),
+			accent = tw.PURPLE_400,
+			primary = tw.EMERALD_500,
+			primary_foreground = tw.WHITE,
+			secondary = tw.NEUTRAL_700,
+			secondary_foreground = tw.NEUTRAL_950,
+			secondary_strong = tw.NEUTRAL_600,
+			border = tw.GRAY_900,
+			base_foreground = tw.BLACK,
+			selection_background = tw.INDIGO_500,
+			selection_foreground = tw.BLACK,
+		},
+	}
+}
+
 Checkbox_Descriptor :: struct {
 	using base: Node_Descriptor,
 	label:      string,
@@ -52,7 +118,7 @@ add_checkbox :: proc(
 				stroke_width = 2,
 				stroke = ctx.theme.color.border,
 				text = "X",
-				font = &ctx.theme.icon_font,
+				font = ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
 				foreground = fade(ctx.theme.color.base_strong, node.transitions[0]),
@@ -70,7 +136,7 @@ add_checkbox :: proc(
 				sizing = {fit = 1, max = INFINITY},
 				padding = {0, 0, 4, 0},
 				text = desc.label,
-				font = &ctx.theme.font,
+				font = ctx.theme.font,
 				font_size = ctx.theme.label_text_size,
 				foreground = ctx.theme.color.base_foreground,
 			},
@@ -152,7 +218,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 					&{
 						foreground = ctx.theme.color.base_foreground,
 						sizing = {fit = 1, max = INFINITY},
-						font = &global_ctx.theme.icon_font,
+						font = global_ctx.theme.icon_font,
 						font_size = ctx.theme.label_icon_size,
 						text = string_from_rune(desc.icon),
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -164,7 +230,7 @@ add_button :: proc(desc: ^Button_Descriptor, loc := #caller_location) -> (result
 					&{
 						foreground = ctx.theme.color.base_foreground,
 						sizing = {fit = 1, max = INFINITY},
-						font = &ctx.theme.font,
+						font = ctx.theme.font,
 						font_size = ctx.theme.label_text_size,
 						text = desc.label,
 						underline = desc.variant == .Link && result.node.?.is_hovered,
@@ -195,7 +261,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 			text = string_from_rune(icon),
 			font_size = 20,
 			foreground = ctx.theme.color.base_foreground,
-			font = &ctx.theme.icon_font,
+			font = ctx.theme.icon_font,
 			interactive = true,
 		},
 		loc = loc,
@@ -208,7 +274,7 @@ add_window_button :: proc(icon: rune, color: Color, loc := #caller_location) -> 
 	return self.was_active && !self.is_active && self.is_hovered
 }
 
-Input_Descriptor :: struct {
+Field_Descriptor :: struct {
 	using base:      Node_Descriptor,
 	placeholder:     string,
 	format:          string,
@@ -217,13 +283,13 @@ Input_Descriptor :: struct {
 	value_type_info: ^runtime.Type_Info,
 }
 
-Input_Response :: struct {
+Field_Response :: struct {
 	node:          Maybe(^Node),
 	was_changed:   bool,
 	was_confirmed: bool,
 }
 
-add_input :: proc(desc: ^Input_Descriptor, loc := #caller_location) -> (res: Input_Response) {
+add_field :: proc(desc: ^Field_Descriptor, loc := #caller_location) -> (res: Field_Response) {
 	assert(desc != nil)
 
 	ctx := global_ctx
@@ -540,7 +606,7 @@ do_menu_item :: proc(label: string, icon: rune, loc := #caller_location) {
 			style = {
 				foreground = ctx.theme.color.base_foreground,
 				font_size = 18,
-				font = &ctx.theme.icon_font,
+				font = ctx.theme.icon_font,
 			},
 		},
 	)
@@ -722,5 +788,379 @@ add_progress_bar :: proc(desc: ^Progress_Bar_Descriptor) -> (result: Maybe(^Node
 	}
 	result = add_node(desc)
 	result.?.transitions[0] = desc.value
+	return
+}
+
+Color_Button_Descriptor :: struct {
+	using base: Node_Descriptor,
+	value:      ^Color,
+}
+
+Color_Button_Result :: struct {
+	node:    ^Node,
+	changed: bool,
+}
+
+add_color_button :: proc(
+	desc: ^Color_Button_Descriptor,
+	loc := #caller_location,
+) -> (
+	result: Color_Button_Result,
+) {
+	assert(desc != nil)
+
+	ctx := global_ctx
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	desc.sizing = {
+		fit = 1,
+		max = INFINITY,
+	}
+	desc.interactive = true
+	desc.radius = 4
+	desc.background = desc.value^
+	desc.stroke_width = 2
+	desc.stroke = ctx.theme.color.border
+	desc.gap = 4
+	desc.padding = {8, 4, 8, 4}
+	desc.radius = 4
+	desc.content_align = 0.5
+	desc.group = true
+
+	result.node = begin_node(desc).?
+	{
+		add_node(
+			&{
+				foreground = BLACK if max(luminance_of(desc.value^), 1 - f32(desc.value.a) / 255) > 0.45 else WHITE,
+				sizing = {fit = 1, max = INFINITY},
+				font = ctx.theme.monospace_font,
+				font_size = ctx.theme.label_text_size,
+				text = fmt.tprintf(
+					"#%2x%2x%2x%2x",
+					desc.value.r,
+					desc.value.g,
+					desc.value.b,
+					desc.value.a,
+				),
+			},
+		)
+
+		if result.node.is_focused || result.node.has_focused_child {
+			add_color_picker(
+				&{
+					absolute = true,
+					layer = 2,
+					sizing = {fit = 1, max = INFINITY, exact = 200},
+					exact_offset = {0, global_ctx.theme.min_spacing},
+					relative_offset = {0, 1},
+					padding = global_ctx.theme.min_spacing,
+					stroke = ctx.theme.color.border,
+					stroke_width = 2,
+					background = ctx.theme.color.background,
+					shadow_color = Color{0, 0, 0, 128},
+					shadow_size = 10,
+					shadow_offset = {0, 2},
+					value = desc.value,
+				},
+			)
+		}
+	}
+	end_node()
+
+	node_update_transition(result.node, 0, result.node.is_hovered, 0.15)
+	node_update_transition(result.node, 1, result.node.is_active, 0.1)
+
+	return
+}
+
+Color_Picker_Descriptor :: struct {
+	using base: Node_Descriptor,
+	value:      ^Color,
+}
+
+Color_Picker_Result :: struct {
+	node:    ^Node,
+	changed: bool,
+}
+
+Color_Picker_State :: struct {
+	hsla:  [4]f32,
+	value: ^Color,
+}
+
+barycentric :: proc(point, a, b, c: [2]f32) -> (u, v: f32) {
+	d := c - a
+	e := b - a
+	f := point - a
+	dd := linalg.dot(d, d)
+	ed := linalg.dot(e, d)
+	fd := linalg.dot(f, d)
+	ee := linalg.dot(e, e)
+	fe := linalg.dot(f, e)
+	denom := dd * ee - ed * ed
+	u = (ee * fd - ed * fe) / denom
+	v = (dd * fe - ed * fd) / denom
+	return
+}
+
+nearest_point_on_line :: proc(a, b, p: [2]f32) -> [2]f32 {
+	ap := p - a
+	ab_dir := b - a
+	dot := ap.x * ab_dir.x + ap.y * ab_dir.y
+	if dot < 0 do return a
+	ab_len_sqr := ab_dir.x * ab_dir.x + ab_dir.y * ab_dir.y
+	if dot > ab_len_sqr do return b
+	return a + ab_dir * dot / ab_len_sqr
+}
+
+nearest_point_in_triangle :: proc(a, b, c, p: [2]f32) -> [2]f32 {
+	proj_ab := nearest_point_on_line(a, b, p)
+	proj_bc := nearest_point_on_line(b, c, p)
+	proj_ca := nearest_point_on_line(c, a, p)
+	dist2_ab := linalg.length2(p - proj_ab)
+	dist2_bc := linalg.length2(p - proj_bc)
+	dist2_ca := linalg.length2(p - proj_ca)
+	m := linalg.min(dist2_ab, linalg.min(dist2_bc, dist2_ca))
+	if m == dist2_ab do return proj_ab
+	if m == dist2_bc do return proj_bc
+	return proj_ca
+}
+
+triangle_contains_point :: proc(a, b, c, p: [2]f32) -> bool {
+	b1 := ((p.x - b.x) * (a.y - b.y) - (p.y - b.y) * (a.x - b.x)) < 0
+	b2 := ((p.x - c.x) * (b.y - c.y) - (p.y - c.y) * (b.x - c.x)) < 0
+	b3 := ((p.x - a.x) * (c.y - a.y) - (p.y - a.y) * (c.x - a.x)) < 0
+	return (b1 == b2) && (b2 == b3)
+}
+
+triangle_barycentric :: proc(a, b, c, p: [2]f32) -> (u, v, w: f32) {
+	v0 := b - a
+	v1 := c - a
+	v2 := p - a
+	denom := v0.x * v1.y - v1.x * v0.y
+	v = (v2.x * v1.y - v1.x * v2.y) / denom
+	w = (v0.x * v2.y - v2.x * v0.y) / denom
+	u = 1 - v - w
+	return
+}
+
+draw_checkerboard_pattern :: proc(box: Box, size: [2]f32, primary, secondary: Color) {
+	add_box(box, 0, paint = primary)
+	for x in 0 ..< int(math.ceil(box_width(box) / size.x)) {
+		for y in 0 ..< int(math.ceil(box_height(box) / size.y)) {
+			if (x + y) % 2 == 0 {
+				pos := box.min + [2]f32{f32(x), f32(y)} * size
+				add_box({pos, linalg.min(pos + size, box.max)}, 0, paint = secondary)
+			}
+		}
+	}
+}
+
+TRIANGLE_STEP :: math.TAU / 3
+
+make_a_triangle :: proc(center: [2]f32, angle: f32, radius: f32) -> (a, b, c: [2]f32) {
+	a = center + {math.cos(angle), math.sin(angle)} * radius
+	b = center + {math.cos(angle - TRIANGLE_STEP), math.sin(angle - TRIANGLE_STEP)} * radius
+	c = center + {math.cos(angle + TRIANGLE_STEP), math.sin(angle + TRIANGLE_STEP)} * radius
+	return
+}
+
+add_color_picker :: proc(
+	desc: ^Color_Picker_Descriptor,
+	loc := #caller_location,
+) -> (
+	result: Color_Picker_Result,
+	ok: bool,
+) {
+	if desc.value == nil {
+		return
+	}
+
+	push_id(hash_loc(loc))
+	defer pop_id()
+
+	desc.sizing.fit = 1
+	desc.sizing.max = INFINITY
+	desc.gap = global_ctx.theme.min_spacing
+	desc.vertical = true
+	desc.on_destroy = proc(self: ^Node) {
+		if self.owned_data != nil {
+			free(self.owned_data)
+		}
+	}
+
+	result.node = begin_node(desc).? or_return
+	if result.node.owned_data == nil {
+		result.node.owned_data = new_clone(
+			Color_Picker_State{hsla = hsva_from_rgba(rgba_from_color(desc.value^))},
+		)
+	}
+	state := (^Color_Picker_State)(result.node.owned_data)
+	state.value = desc.value
+	{
+		color_wheel_node := add_node(
+			&{
+				interactive = true,
+				sizing = {exact = 200},
+				sticky = true,
+				on_draw = proc(self: ^Node) {
+					assert(self.parent != nil)
+					state := (^Color_Picker_State)(self.parent.owned_data)
+					assert(state != nil)
+					assert(state.value != nil)
+
+					size := min(box_width(self.box), box_height(self.box))
+					outer_radius := size / 2
+					inner_radius := outer_radius * 0.75
+					center := box_center(self.box)
+					angle := state.hsla.x * math.RAD_PER_DEG
+
+					if self.is_active {
+						delta_to_mouse := global_ctx.mouse_position - center
+						if linalg.length(global_ctx.mouse_click_position - center) > inner_radius {
+							state.hsla.x =
+								math.atan2(delta_to_mouse.y, delta_to_mouse.x) / math.RAD_PER_DEG
+							if state.hsla.x < 0 {
+								state.hsla.x += 360
+							}
+						} else {
+							point := global_ctx.mouse_position
+							point_a, point_b, point_c := make_a_triangle(
+								center,
+								angle,
+								inner_radius,
+							)
+							if !triangle_contains_point(point_a, point_b, point_c, point) {
+								point = nearest_point_in_triangle(point_a, point_b, point_c, point)
+							}
+							u, v, w := triangle_barycentric(point_a, point_b, point_c, point)
+							state.hsla.z = clamp(1 - v, 0, 1)
+							state.hsla.y = clamp(u / state.hsla.z, 0, 1)
+						}
+
+						rgba := rgba_from_hsva(state.hsla)
+						state.value.rgb = color_from_rgba(rgba).xyz
+					}
+
+					add_circle_lines(
+						center,
+						outer_radius + 2,
+						thickness = (outer_radius - inner_radius) + 4,
+						paint = global_ctx.theme.color.border,
+					)
+					add_circle_lines(
+						center,
+						outer_radius,
+						thickness = (outer_radius - inner_radius),
+						paint = Wheel_Gradient(center),
+					)
+
+					point_a, point_b, point_c := make_a_triangle(
+						center,
+						state.hsla.x * math.RAD_PER_DEG,
+						inner_radius - 2,
+					)
+
+					add_polygon(
+						{point_a, point_b, point_c},
+						paint = Tri_Gradient {
+							points = {point_a, point_b, point_c},
+							colors = {
+								color_from_rgba(rgba_from_hsva({state.hsla.x, 1, 1, 1})),
+								BLACK,
+								WHITE,
+							},
+						},
+					)
+					add_polygon_lines(
+						{point_a, point_b, point_c},
+						2,
+						paint = global_ctx.theme.color.border,
+					)
+
+					point := linalg.lerp(
+						linalg.lerp(point_c, point_a, clamp(state.hsla.y, 0, 1)),
+						point_b,
+						clamp(1 - state.hsla.z, 0, 1),
+					)
+					r: f32 = 9 if (self.is_active) else 7
+					add_circle(
+						point,
+						r,
+						paint = color_from_rgba(
+							rgba_from_hsva({state.hsla.x, state.hsla.y, state.hsla.z, 1}),
+						),
+					)
+					add_circle_lines(point, r, 2, paint = BLACK if state.hsla.z > 0.5 else WHITE)
+				},
+			},
+		).?
+
+		alpha_slider_node := add_node(
+			&{
+				stroke = global_ctx.theme.color.border,
+				stroke_width = global_ctx.theme.border_width,
+				interactive = true,
+				sticky = true,
+				sizing = {exact = {0, 30}, grow = {1, 0}, max = INFINITY},
+				data = desc.value,
+				on_draw = proc(self: ^Node) {
+					color := (^Color)(self.data)
+					assert(color != nil)
+
+					i := int(self.vertical)
+					j := 1 - i
+
+					if self.is_active {
+						color.a = u8(
+							clamp(
+								(global_ctx.mouse_position[i] - self.box.min[i]) /
+								(self.box.max[i] - self.box.min[i]),
+								0,
+								1,
+							) *
+							255,
+						)
+					}
+
+					draw_checkerboard_pattern(
+						self.box,
+						(self.box.max[j] - self.box.min[j]) / 2,
+						tw.GRAY_400,
+						tw.GRAY_600,
+					)
+					time := clamp(f32(color.a) / 255, 0, 1)
+					pos := self.box.min[i] + (self.box.max[i] - self.box.min[i] - 6) * time
+					if i == 0 {
+						add_box(
+							self.box,
+							0,
+							paint = Linear_Gradient {
+								points = {self.box.min, {self.box.max.x, self.box.min.y}},
+								colors = {fade(color^, 0.0), color^},
+							},
+						)
+						add_box_lines(
+							box_floored({{pos, self.box.min.y}, {pos + 6, self.box.max.y}}),
+							0,
+							2,
+							paint = global_ctx.theme.color.base_foreground,
+						)
+					}
+					add_box_lines(
+						self.box,
+						self.style.radius,
+						self.style.stroke_width,
+						self.style.stroke,
+					)
+				},
+			},
+		).?
+
+	}
+	end_node()
+
 	return
 }

@@ -131,7 +131,7 @@ main :: proc() {
 				opal.end_node()
 
 				opal.add_checkbox(&{value = &app.boolean, label = "Checkbox"})
-				opal.add_field(
+				opal.add_input(
 					&{
 						sizing = {exact = {300, 0}, fit = {1, 1}, max = {400, opal.INFINITY}},
 						value_data = &app.text,

@@ -1,6 +1,5 @@
 package opal
 
-import "../lucide"
 import tw "../tailwind_colors"
 import "base:runtime"
 import "core:fmt"
@@ -172,10 +171,10 @@ inspector_show :: proc(self: ^Inspector) {
 				// radius := box_height(self.box) * 0.35
 				// ctx := (^Context)(self.data)
 
-				// kn.add_circle(center, radius, tw.AMBER_500)
+				// add_circle(center, radius, tw.AMBER_500)
 				// angle: f32 = 0
 				// radians := (f32(ctx.compute_duration) / f32(ctx.frame_duration)) * math.PI * 2
-				// kn.add_pie(center, angle, angle + radians, radius, tw.FUCHSIA_500)
+				// add_pie(center, angle, angle + radians, radius, tw.FUCHSIA_500)
 				// angle += radians
 			},
 		},
@@ -186,8 +185,6 @@ inspector_show :: proc(self: ^Inspector) {
 			font_size = 12,
 			foreground = global_ctx.theme.color.base_foreground,
 		}
-		desc.text = fmt.tprintf("FPS: %.0f", kn.get_fps())
-		add_node(&desc)
 		desc.text = fmt.tprintf(
 			"Interval time: %v",
 			global_ctx.performance_info.avg_interval_duration.average,
@@ -217,7 +214,7 @@ inspector_show :: proc(self: ^Inspector) {
 
 	// Options
 	{
-		if add_button(&{icon = lucide.SQUARE_DASHED_MOUSE_POINTER, label = "Select"}).clicked {
+		if add_button(&{icon = '?', label = "Select"}).clicked {
 			inspector_activate_mouse_selection(self)
 		}
 		add_checkbox(&{label = "Text debug", value = &self.show_text_widgets})
@@ -466,7 +463,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	add_node(
 		&{sizing = {exact = 14}, on_draw = nil if len(node.children) == 0 else proc(self: ^Node) {
 				assert(self.parent != nil)
-				kn.add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), global_ctx.theme.color.base_foreground)
+				add_arrow(box_center(self.box), 5, 2, math.PI * 0.5 * ease.cubic_in_out(self.parent.transitions[0]), global_ctx.theme.color.base_foreground)
 			}},
 	)
 	add_node(
@@ -475,7 +472,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			sizing = {fit = 1, max = INFINITY},
 			style = {
 				font_size = 14,
-				foreground = ctx.theme.color.base_foreground if self.inspected_id == node.id else (tw.EMERALD_700 if self.selected_id == node.id else kn.fade(ctx.theme.color.base_foreground, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
+				foreground = ctx.theme.color.base_foreground if self.inspected_id == node.id else (tw.EMERALD_700 if self.selected_id == node.id else fade(ctx.theme.color.base_foreground, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
 			},
 		},
 	)
@@ -498,7 +495,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 	}
 
 	button_node.background =
-		tw.BLUE_500 if self.inspected_id == node.id else kn.fade(tw.STONE_600, f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)))
+		tw.BLUE_500 if self.inspected_id == node.id else fade(tw.STONE_600, f32(i32(button_node.is_hovered)) * 0.5 + 0.2 * f32(i32(len(node.children) > 0)))
 	node_update_transition(button_node, 0, button_node.is_toggled, 0.1)
 
 	if time.since(self.inspected_time) < time.Millisecond * 200 {
