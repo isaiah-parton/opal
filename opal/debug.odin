@@ -144,11 +144,16 @@ inspector_show :: proc(self: ^Inspector) {
 	self.width = max(self.width, 300)
 	base_node := begin_node(
 		&{
-			sizing = {fit = {1, 0}, grow = {0, 1}, max = INFINITY, exact = {self.width, 0}},
+			absolute = true,
+			exact_offset = self.position,
+			sizing = {fit = 1, max = INFINITY, exact = {self.width, 500}},
 			vertical = true,
 			gap = global_ctx.theme.min_spacing,
 			padding = global_ctx.theme.min_spacing,
 			background = global_ctx.theme.color.background,
+			interactive = true,
+			stroke = global_ctx.theme.color.border,
+			stroke_width = 2,
 		},
 	).?
 	total_nodes := len(global_ctx.node_by_id)
@@ -164,6 +169,7 @@ inspector_show :: proc(self: ^Inspector) {
 			background = global_ctx.theme.color.accent,
 			gap = 5,
 			interactive = true,
+			sticky =  true,
 			vertical = true,
 			data = global_ctx,
 			on_draw = proc(self: ^Node) {
@@ -179,10 +185,15 @@ inspector_show :: proc(self: ^Inspector) {
 			},
 		},
 	).?
+
+	if handle_node.is_active {
+		self.position = global_ctx.mouse_position - global_ctx.node_click_offset
+	}
+
 	{
 		desc := Node_Descriptor {
 			sizing = {fit = 1, max = INFINITY},
-			font_size = 12,
+			font_size = global_ctx.theme.label_text_size,
 			foreground = global_ctx.theme.color.base_foreground,
 		}
 		desc.text = fmt.tprintf(
@@ -244,18 +255,25 @@ inspector_show :: proc(self: ^Inspector) {
 	add_value_node :: proc(name: string, data: rawptr, type_info: ^runtime.Type_Info) {
 		expandable: bool
 		text: string
+		label_text: string = name
 		base_type_info := runtime.type_info_base(type_info)
 		#partial switch v in base_type_info.variant {
 		case (runtime.Type_Info_Struct),
-		     (runtime.Type_Info_Dynamic_Array),
-		     (runtime.Type_Info_Slice),
 		     (runtime.Type_Info_Multi_Pointer):
 			expandable = true
+		case (runtime.Type_Info_Dynamic_Array):
+			expandable = true
+			raw := (^runtime.Raw_Dynamic_Array)(data)
+			label_text = fmt.tprintf("%s (%i)", name, raw.len)
+		case (runtime.Type_Info_Slice):
+			expandable = true
+			raw := (^runtime.Raw_Slice)(data)
+			label_text = fmt.tprintf("%s (%i)", name, raw.len)
 		case (runtime.Type_Info_Array):
-			if v.count > 4 {
-				expandable = true
-			} else {
+			if v.count <= 4 {
 				text = fmt.tprint(any{data = data, id = type_info.id})
+			} else {
+				expandable = true
 			}
 		case (runtime.Type_Info_Pointer):
 			text = fmt.tprint(any{data = data, id = typeid_of(rawptr)})
@@ -278,8 +296,8 @@ inspector_show :: proc(self: ^Inspector) {
 			add_node(
 				&{
 					foreground = tw.ORANGE_500,
-					font_size = 12,
-					text = fmt.tprintf("%c%s", '-' if node.is_toggled else '+', name),
+					font_size = global_ctx.theme.label_text_size,
+					text = fmt.tprintf("%c%s", '-' if node.is_toggled else '+', label_text),
 					sizing = {fit = 1, max = INFINITY},
 				},
 			)
@@ -287,8 +305,8 @@ inspector_show :: proc(self: ^Inspector) {
 			add_node(
 				&{
 					foreground = global_ctx.theme.color.base_foreground,
-					font_size = 12,
-					text = name,
+					font_size = global_ctx.theme.label_text_size,
+					text = label_text,
 					sizing = {fit = 1, max = INFINITY},
 				},
 			)
@@ -297,7 +315,7 @@ inspector_show :: proc(self: ^Inspector) {
 					&{
 						text = text,
 						foreground = tw.INDIGO_600,
-						font_size = 12,
+						font_size = global_ctx.theme.label_text_size,
 						sizing = {fit = 1, max = INFINITY},
 					},
 				)
@@ -382,7 +400,7 @@ inspector_register_node_under_mouse :: proc(self: ^Inspector, node: ^Node) {
 inspector_build_tree :: proc(self: ^Inspector) {
 	begin_node(
 		&{
-			sizing = {max = INFINITY, grow = 1},
+			sizing = {max = INFINITY, grow = 1, exact = {0, 200}},
 			vertical = true,
 			clip_content = true,
 			show_scrollbars = true,
@@ -471,7 +489,7 @@ inspector_build_node_widget :: proc(self: ^Inspector, node: ^Node, depth := 0) {
 			text = node.text if len(node.text) > 0 else fmt.tprintf("%x", node.id),
 			sizing = {fit = 1, max = INFINITY},
 			style = {
-				font_size = 14,
+				font_size = ctx.theme.label_text_size,
 				foreground = ctx.theme.color.base_foreground if self.inspected_id == node.id else (tw.EMERALD_700 if self.selected_id == node.id else fade(ctx.theme.color.base_foreground, 0.5 + 0.5 * f32(i32(len(node.children) > 0)))),
 			},
 		},

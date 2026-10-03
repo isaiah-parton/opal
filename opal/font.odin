@@ -20,21 +20,29 @@ Font_Impl :: struct {
 }
 
 font_impl_get_glyph :: proc(self: ^Font_Impl, codepoint: rune) -> (glyph: Font_Glyph, ok: bool) {
-	assert(self.get_glyph_proc != nil)
+	if self.get_glyph_proc == nil {
+		return
+	}
 	return self.get_glyph_proc(self, codepoint)
 }
 
 font_impl_get_line_height :: proc(self: ^Font_Impl) -> (line_height: f32) {
-	assert(self.get_line_height_proc != nil)
+	if self.get_line_height_proc == nil {
+		return 0
+	}
 	return self.get_line_height_proc(self)
 }
 
 font_impl_get_ascend :: proc(self: ^Font_Impl) -> (ascend: f32) {
-	assert(self.get_ascend_proc != nil)
+	if self.get_ascend_proc == nil {
+		return 0
+	}
 	return self.get_ascend_proc(self)
 }
 
 font_impl_get_space_advance :: proc(self: ^Font_Impl) -> (advance: f32) {
-	assert(self.get_space_advance_proc != nil)
+	if self.get_space_advance_proc == nil {
+		return 0
+	}
 	return self.get_space_advance_proc(self)
 }

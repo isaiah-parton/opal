@@ -35,7 +35,7 @@ add_checkbox :: proc(
 	defer pop_id()
 
 	node := begin_node(
-		&{sizing = {fit = 1, max = INFINITY}, gap = 4, radius = 4, interactive = true},
+		&{sizing = {fit = 1, max = INFINITY}, gap = 4, radius = 4, interactive = true, content_align = {0, 0.5}},
 	).?
 	if node.is_active && !node.was_active {
 		desc.value^ = !desc.value^
@@ -52,7 +52,6 @@ add_checkbox :: proc(
 				stroke_width = 2,
 				stroke = ctx.theme.color.border,
 				text = "X",
-				font = &ctx.theme.icon_font,
 				content_align = 0.5,
 				font_size = ctx.theme.label_icon_size,
 				foreground = fade(ctx.theme.color.base_strong, node.transitions[0]),
@@ -62,7 +61,6 @@ add_checkbox :: proc(
 					ctx.theme.color.border,
 				),
 				transform_origin = 0.5,
-				scale = math.lerp(f32(1), f32(0.9), node.transitions[2]),
 			},
 		)
 		add_node(

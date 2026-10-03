@@ -44,6 +44,16 @@ Node_Style :: struct {
 	underline:        bool,
 }
 
+radii_set_left :: proc(radii: ^[4]f32, radius: f32) {
+	radii[0] = radius
+	radii[3] = radius
+}
+
+radii_set_right :: proc(radii: ^[4]f32, radius: f32) {
+	radii[1] = radius
+	radii[2] = radius
+}
+
 /*
 Node_Empty :: struct {
 	size: [2]f32,
@@ -179,10 +189,13 @@ Node_Descriptor :: struct {
 	// Called after the default drawing behavior
 	on_draw:          proc(self: ^Node),
 
-	// Data for use in callbacks, this data should live from the invocation of this node until the UI is ended.
+	// User data not owned by the node, this data should live from the invocation of this node until the UI is ended.
 	data:             rawptr,
 
-	// Owned state
+	//
+	on_create:        proc(_: ^Node),
+
+	//
 	on_destroy:       proc(_: ^Node),
 }
 
@@ -1209,10 +1222,10 @@ node_fit_to_content :: proc(self: ^Node) {
 //
 // Get an existing node by its id or create a new one
 //
-acquire_node :: proc(id: Id) -> Maybe(^Node) {
+acquire_node :: proc(id: Id) -> (node: Maybe(^Node), created: bool) {
 	ctx := global_ctx
 	if node, ok := ctx.node_by_id[id]; ok {
-		return node
+		return node, false
 	} else {
 		for &slot, slot_index in ctx.nodes {
 			if slot == nil {
@@ -1223,16 +1236,17 @@ acquire_node :: proc(id: Id) -> Maybe(^Node) {
 				node = &ctx.nodes[slot_index].?
 				ctx.node_by_id[id] = node
 				draw_frames(1)
-				return node
+				return node, true
 			}
 		}
 	}
-	return nil
+	return nil, false
 }
 
 begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: Node_Result) {
 	ctx := global_ctx
-	self = acquire_node(hash_loc(loc))
+	created: bool
+	self, created = acquire_node(hash_loc(loc))
 
 	if self, ok := self.?; ok {
 		if desc != nil {
@@ -1306,6 +1320,8 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 		self.text_view = get_current_text() or_else panic("No text context initialized!")
 		glyphs := &self.text_view.glyphs if self.enable_selection else &ctx.glyphs
+
+		self.text_byte_length = 0
 
 		// Create text layout
 		if reader, ok := reader.?; ok {
@@ -1419,29 +1435,33 @@ begin_node :: proc(desc: ^Node_Descriptor, loc := #caller_location) -> (self: No
 
 			// Include text as content size
 			self.content_size = linalg.max(self.content_size, self.text_size)
+
+			if self.enable_selection {
+				// Append tail glyph
+				append(
+					glyphs,
+					Glyph {
+						node = self,
+						index = self.text_view.byte_length,
+						offset = {self.text_size.x, 0},
+					},
+				)
+
+				// Node requires a minimum size so the cursor appears correctly
+				self.content_size = linalg.max(
+					self.content_size,
+					[2]f32{0, font_impl_get_line_height(self.font) * self.font_size},
+				)
+			}
+
+			self.glyphs = glyphs[self.text_glyph_index:]
 		}
-
-		if self.enable_selection {
-			// Append tail glyph
-			append(
-				glyphs,
-				Glyph {
-					node = self,
-					index = self.text_view.byte_length,
-					offset = {self.text_size.x, 0},
-				},
-			)
-
-			// Node requires a minimum size so the cursor appears correctly
-			self.content_size = linalg.max(
-				self.content_size,
-				[2]f32{0, font_impl_get_line_height(self.font) * self.font_size},
-			)
-		}
-
-		self.glyphs = glyphs[self.text_glyph_index:]
 
 		push_node(self)
+
+		if created && self.on_create != nil {
+			self.on_create(self)
+		}
 	}
 
 	return
